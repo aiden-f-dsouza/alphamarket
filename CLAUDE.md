@@ -15,19 +15,28 @@ deliberately out of scope).
 - Tests: `uv run pytest`
 - Lint/format: `uv run ruff check --fix . && uv run ruff format .`
 - Kalshi smoke test: `uv run python scripts/kalshi_smoke.py` (needs .env + demo key)
+- Ingestion worker: `uv run python -m alphamarket.worker` (polls connected accounts)
 
 ## Layout
 
 - `src/alphamarket/` — app package. `main.py` (app factory), `auth.py`,
-  `config.py` (pydantic-settings), `db.py`, `models.py`
+  `config.py` (pydantic-settings), `db.py`, `models.py`, `money.py` (fixed-point),
+  `vault.py` (Fernet credential encryption; needs VAULT_KEY), `venues.py`
+  (key connect/disconnect/sync API), `ingest.py` (idempotent ledger ingestion),
+  `worker.py` (APScheduler polling loop)
 - `src/alphamarket/connectors/` — `base.py` defines the venue-agnostic contract
-  (VenueConnector + Normalized* models); one module per venue (`kalshi.py`)
+  (VenueConnector + Normalized* models); one module per venue (`kalshi.py`);
+  `registry.py` is the only import path core code may use
 - `alembic/` — migrations, hand-written for ledger tables
 - `tests/` — pytest; unit tests use in-memory SQLite via the `client` fixture
 
 ## Invariants (do not violate, do not "improve away")
 
-1. All money is INTEGER CENTS. Floats never touch stored monetary values.
+1. All money is INTEGER MICRO-DOLLARS (1e-6 USD), via `money.to_micros`.
+   Floats never touch stored monetary values. Cents are NOT enough: Kalshi
+   reports sub-cent decimals (`fee_cost: "0.139800"` = 13.98c), and rounding
+   them corrupts the equity curve that M2 reconciliation must verify.
+   Contract quantities share the 1e6 scale (`count_fp` is fractional).
 2. All timestamps are timezone-aware UTC.
 3. `fills` and `settlements` are APPEND-ONLY. No UPDATE, no DELETE, ever.
    Corrections are new rows. Idempotency comes from unique venue ids.

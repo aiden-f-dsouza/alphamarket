@@ -13,6 +13,11 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://alphamarket:alphamarket@localhost:5432/alphamarket"
     secret_key: str = "dev-only-change-me"
+    # Fernet master key for the credential vault (see vault.py). Empty means
+    # the vault refuses to operate; there is no insecure fallback.
+    vault_key: str = ""
+    # Ingestion worker cadence (see worker.py).
+    ingest_interval_seconds: int = 300
 
     kalshi_env: str = "demo"
     kalshi_key_id: str = ""

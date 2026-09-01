@@ -70,21 +70,31 @@ users            id, email, password_hash, display_name, created_at
 venue_accounts   id, user_id, venue, key_id, encrypted_secret, scope_checked_at, status
 strategies       id, user_id, venue_account_id, name, description, style_tags,
                  status (incubating | live | quarantined | delisted), listed_at
-fills            id, strategy_id, venue_fill_id (unique), ticker, side, count,
-                 price_cents, fee_cents, filled_at, ingested_at    [append-only]
+fills            id, strategy_id, venue_fill_id (unique), ticker, side, count_micros,
+                 price_micros, fee_micros, filled_at, ingested_at  [append-only]
 settlements      id, strategy_id, venue_settlement_id (unique), ticker,
-                 revenue_cents, fee_cents, settled_at, ingested_at [append-only]
-equity_snapshots id, strategy_id, as_of, venue_balance_cents, computed_equity_cents,
-                 divergence_cents, reconciled (bool)
+                 revenue_micros, fee_micros, settled_at, ingested_at [append-only]
+equity_snapshots id, strategy_id, as_of, venue_balance_micros, computed_equity_micros,
+                 divergence_micros, reconciled (bool)
 strategy_stats   strategy_id, as_of, total_return, max_drawdown, sharpe, sortino,
                  win_rate, risk_score, n_fills, track_days, json_extras
 ```
 
 Notes that matter:
 
-- Money is integer cents everywhere. No floats in the ledger. Kalshi already reports cents.
+- Money is integer MICRO-DOLLARS (1e-6 USD) everywhere. No floats in the ledger.
+  REVISED 2026-08-27: the original plan said cents "because Kalshi already reports
+  cents". It no longer does. Live demo payloads return dollar decimal strings with
+  sub-cent precision (`fee_cost: "0.139800"`, `balance_dollars: "1101.8980"`), and
+  quantities are fractional (`count_fp: "101.89"`). Whole cents cannot represent a
+  fill exactly, so rounding would manufacture exactly the divergence M2 exists to
+  detect. Scale 1e6 holds every observed field exactly. See `src/alphamarket/money.py`.
 - `venue_fill_id` unique constraint makes ingestion idempotent; re-polling can never double-count.
-- One Kalshi account maps to one strategy at MVP (Kalshi has no sub-accounts for retail). Per-strategy tracking within one account is a hard attribution problem; do not promise it.
+- One Kalshi account maps to one strategy at MVP. Per-strategy tracking within one
+  account is a hard attribution problem; do not promise it.
+  OPEN 2026-08-27: fills now carry `subaccount_number`, so the "Kalshi has no
+  sub-accounts for retail" premise behind this decision may no longer hold.
+  Worth re-checking before M4 listings are designed around one-account-one-strategy.
 - Timestamps in UTC, timezone-aware, always.
 
 ### 2.3 Honest limits of MVP verification (put these on the methodology page)
@@ -110,6 +120,23 @@ Sized for one person working part-time alongside classes. Each milestone is demo
 3. Ingestion worker on a schedule; idempotent upserts guarded by `venue_fill_id`.
 4. Tests against recorded fixtures (respx/vcr-style), not live calls.
    Demo: connect a demo account, watch fills appear in the DB.
+
+   STATUS 2026-08-31: M1 complete. Connector, vault (Fernet, VAULT_KEY env),
+   connect/disconnect/sync API (`venues.py`), idempotent ingestion (`ingest.py`),
+   APScheduler worker (`worker.py`), tables + migration 0002. End-to-end
+   verified against the live demo account: sync ingests fills, re-sync adds 0.
+   Scope validation is authoritative, not a heuristic: `GET /api_keys` returns
+   each key's `scopes` list (verified live). NOTE: the current demo key has
+   ["read", "write"] and is correctly rejected by the connect flow — generate a
+   read-only demo key for connect-flow testing.
+
+   2026-09-01: ALL connector mappings now verified against real demo payloads,
+   including settlements and positions (a live demo trade settled; fixtures
+   captured). Facts M2 must respect: demo/prod balances are split across
+   `exchange_index` sub-balances (`balance_dollars` is the authoritative
+   total); settlement `revenue` is integer CENTS with no dollars variant;
+   settlements have no venue id (idempotency keys on ticker+settled_time);
+   fills/positions/settlements all carry `exchange_index`.
 
 ### M2. Ledger math + reconciliation (weeks 3-4)
 1. Equity-curve construction from fills + settlements + fees. This is the hardest correctness work in the MVP; unit test it against hand-computed scenarios including partial fills, fees, and open positions marked at last price.

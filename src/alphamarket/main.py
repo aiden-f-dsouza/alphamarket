@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
-from alphamarket import auth
+from alphamarket import auth, venues
 from alphamarket.config import get_settings
 
 
@@ -15,6 +15,7 @@ def create_app() -> FastAPI:
         same_site="lax",
     )
     app.include_router(auth.router)
+    app.include_router(venues.router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

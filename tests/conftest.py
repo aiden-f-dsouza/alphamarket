@@ -5,6 +5,7 @@ SQLite is fine here because the models stick to portable column types.
 """
 
 import pytest
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -14,18 +15,35 @@ from alphamarket.db import Base, get_db
 from alphamarket.main import create_app
 
 
+@pytest.fixture(autouse=True)
+def test_vault_key():
+    """Give the cached settings a throwaway Fernet key so vault code works in
+    tests without depending on the developer's .env."""
+    from alphamarket.config import get_settings
+
+    settings = get_settings()
+    original = settings.vault_key
+    settings.vault_key = Fernet.generate_key().decode()
+    yield
+    settings.vault_key = original
+
+
 @pytest.fixture()
-def client():
+def session_factory():
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
-    TestSession = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    yield sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    engine.dispose()
 
+
+@pytest.fixture()
+def client(session_factory):
     def override_get_db():
-        db = TestSession()
+        db = session_factory()
         try:
             yield db
         finally:
@@ -35,4 +53,3 @@ def client():
     app.dependency_overrides[get_db] = override_get_db
     with TestClient(app) as c:
         yield c
-    engine.dispose()
