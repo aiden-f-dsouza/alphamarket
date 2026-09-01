@@ -14,7 +14,7 @@ import logging
 from apscheduler.schedulers.blocking import BlockingScheduler
 from sqlalchemy import select
 
-from alphamarket.analytics import compute_strategy_stats
+from alphamarket.analytics import compute_strategy_stats, promote_incubating
 from alphamarket.config import get_settings
 from alphamarket.db import SessionLocal
 from alphamarket.ingest import sync_account
@@ -67,6 +67,7 @@ def compute_all_stats() -> None:
                 compute_strategy_stats(db, strategy)
             except Exception:
                 logger.exception("stats failed for strategy %s", strategy.id)
+        logger.info("promoted %d strategies to live", promote_incubating(db))
 
 
 def nightly() -> None:

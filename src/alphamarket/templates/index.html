@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="panel">
+  <h1>Stop posting screenshots. Post a link that proves it.</h1>
+  <p class="muted">Connect a <strong>read-only</strong> Kalshi API key. AlphaMarket ingests your fills and settlements straight from the venue, reconciles them against your balance nightly, and publishes a verified track record page. No money moves. Self-reported numbers never appear. <a href="/methodology">How verification works.</a></p>
+</div>
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+<div class="grid2">
+  <div class="panel">
+    <h2>Create account</h2>
+    <form method="post" action="/signup-form">
+      <label>Display name (shown publicly)</label><input name="display_name" required minlength="2" maxlength="80">
+      <label>Email (never shown)</label><input name="email" type="email" required>
+      <label>Password (10+ characters)</label><input name="password" type="password" required minlength="10">
+      <p><button type="submit">Sign up</button></p>
+    </form>
+  </div>
+  <div class="panel">
+    <h2>Log in</h2>
+    <form method="post" action="/login-form">
+      <label>Email</label><input name="email" type="email" required>
+      <label>Password</label><input name="password" type="password" required>
+      <p><button type="submit">Log in</button></p>
+    </form>
+  </div>
+</div>
+{% endblock %}

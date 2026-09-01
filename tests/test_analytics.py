@@ -33,7 +33,7 @@ def strategy(db):
     )
     db.add(acct)
     db.flush()
-    strat = Strategy(user_id=user.id, venue_account_id=acct.id, name="S")
+    strat = Strategy(user_id=user.id, venue_account_id=acct.id, name="S", slug="s")
     db.add(strat)
     db.flush()
     db.add(

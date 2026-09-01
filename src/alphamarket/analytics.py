@@ -60,6 +60,22 @@ def compute_strategy_stats(
     return row
 
 
+INCUBATION_DAYS = 90
+
+
+def promote_incubating(db: Session) -> int:
+    """Nightly: incubating -> live once 90 observed days have passed
+    (BUILD_PLAN 2.3: a display badge, not an investability gate)."""
+    promoted = 0
+    for strategy in db.scalars(select(Strategy).where(Strategy.status == "incubating")).all():
+        stats = latest_stats(db, strategy.id)
+        if stats is not None and stats.track_days >= INCUBATION_DAYS:
+            strategy.status = "live"
+            promoted += 1
+    db.commit()
+    return promoted
+
+
 def latest_stats(db: Session, strategy_id: int) -> StrategyStats | None:
     return db.scalar(
         select(StrategyStats)

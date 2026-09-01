@@ -11,7 +11,7 @@ class Base(DeclarativeBase):
 
 
 def _make_engine():
-    return create_engine(get_settings().database_url, pool_pre_ping=True)
+    return create_engine(get_settings().sqlalchemy_url, pool_pre_ping=True)
 
 
 engine = _make_engine()

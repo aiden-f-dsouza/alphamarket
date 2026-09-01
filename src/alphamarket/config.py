@@ -18,6 +18,18 @@ class Settings(BaseSettings):
     vault_key: str = ""
     # Ingestion worker cadence (see worker.py).
     ingest_interval_seconds: int = 300
+    # Session cookie flags; true behind HTTPS at deploy (M4.4).
+    secure_cookies: bool = False
+    public_base_url: str = "http://localhost:8000"
+
+    @property
+    def sqlalchemy_url(self) -> str:
+        """Hosted Postgres hands out postgres:// URLs; SQLAlchemy needs the driver."""
+        url = self.database_url
+        for prefix in ("postgres://", "postgresql://"):
+            if url.startswith(prefix):
+                return "postgresql+psycopg://" + url[len(prefix) :]
+        return url
 
     kalshi_env: str = "demo"
     kalshi_key_id: str = ""

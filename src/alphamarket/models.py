@@ -100,8 +100,11 @@ class Strategy(Base):
         unique=True,  # one-account-one-strategy
     )
     name: Mapped[str] = mapped_column(String(120))
+    slug: Mapped[str] = mapped_column(String(140), unique=True, index=True)
     description: Mapped[str] = mapped_column(Text, default="")  # unverified, labeled as such
     style_tags: Mapped[str] = mapped_column(String(255), default="")  # comma-separated
+    # Public page on/off (privacy default: page shows display name only, never email).
+    public: Mapped[bool] = mapped_column(Boolean, default=True)
     status: Mapped[str] = mapped_column(String(20), default=StrategyStatus.INCUBATING)
     listed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

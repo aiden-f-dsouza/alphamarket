@@ -76,7 +76,7 @@ def account(db):
     )
     db.add(acct)
     db.flush()
-    db.add(Strategy(user_id=user.id, venue_account_id=acct.id, name="S"))
+    db.add(Strategy(user_id=user.id, venue_account_id=acct.id, name="S", slug="s"))
     db.commit()
     return acct
 

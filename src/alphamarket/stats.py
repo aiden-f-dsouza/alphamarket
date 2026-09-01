@@ -379,6 +379,33 @@ def compute_stats(
     )
 
 
+def drawdown_series(series: list[tuple[date, int]]) -> list[tuple[date, float]]:
+    """Per-day drawdown from the running peak, as a fraction (0 = at peak)."""
+    out = []
+    peak = 0
+    for day, equity in series:
+        peak = max(peak, equity)
+        out.append((day, (peak - equity) / peak if peak > 0 else 0.0))
+    return out
+
+
+def monthly_returns(series: list[tuple[date, int]]) -> list[tuple[int, int, float]]:
+    """(year, month, return) using month-end equity over prior month-end
+    equity; the first month is measured from the series' first point."""
+    if not series:
+        return []
+    month_end: dict[tuple[int, int], int] = {}
+    for day, equity in series:
+        month_end[(day.year, day.month)] = equity  # last write wins = month end
+    out = []
+    prev = series[0][1]
+    for key in sorted(month_end):
+        cur = month_end[key]
+        out.append((key[0], key[1], cur / prev - 1.0 if prev > 0 else 0.0))
+        prev = cur
+    return out
+
+
 def micros_to_float(micros: int) -> float:
     """Display only. Never feed the result back into storage."""
     return micros / MICROS_PER_UNIT

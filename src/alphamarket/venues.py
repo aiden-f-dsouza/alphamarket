@@ -10,6 +10,7 @@ appears in any response, log line, or error detail.
 """
 
 import logging
+import re
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -70,8 +71,14 @@ def _to_out(account: VenueAccount, strategy: Strategy | None) -> dict:
     }
 
 
-@router.post("", response_model=ConnectOut, status_code=status.HTTP_201_CREATED)
-def connect(payload: ConnectIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
+def slugify(name: str) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return base[:100] or "strategy"
+
+
+def connect_account(db: Session, user: User, payload: ConnectIn) -> dict:
+    """Validate, scope-check, encrypt, anchor, create the strategy, first
+    import. Raises HTTPException with user-safe detail on any failure."""
     if payload.venue not in SUPPORTED_VENUES:
         raise HTTPException(status_code=422, detail=f"Unsupported venue: {payload.venue}")
 
@@ -120,8 +127,12 @@ def connect(payload: ConnectIn, db: Session = Depends(get_db), user: User = Depe
     )
     db.add(account)
     db.flush()
-    strategy = Strategy(user_id=user.id, venue_account_id=account.id, name=payload.strategy_name)
+    strategy = Strategy(
+        user_id=user.id, venue_account_id=account.id, name=payload.strategy_name, slug="pending"
+    )
     db.add(strategy)
+    db.flush()
+    strategy.slug = f"{slugify(payload.strategy_name)}-{strategy.id}"
     db.commit()
 
     result = sync_account(db, account)
@@ -130,6 +141,11 @@ def connect(payload: ConnectIn, db: Session = Depends(get_db), user: User = Depe
         "imported_fills": result.new_fills,
         "imported_settlements": result.new_settlements,
     }
+
+
+@router.post("", response_model=ConnectOut, status_code=status.HTTP_201_CREATED)
+def connect(payload: ConnectIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    return connect_account(db, user, payload)
 
 
 @router.get("", response_model=list[VenueAccountOut])

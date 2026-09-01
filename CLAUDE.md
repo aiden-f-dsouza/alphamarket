@@ -26,13 +26,17 @@ deliberately out of scope).
   ingestion), `ledger.py` (cash-curve math), `reconcile.py` (venue balance vs
   ledger; quarantine), `stats.py` (returns/drawdown/Sharpe/risk score/flags,
   pure functions), `analytics.py` (persists strategy_stats), `worker.py`
-  (APScheduler: polling + nightly reconcile + stats)
+  (APScheduler: polling + nightly reconcile + stats + incubation promotion),
+  `strategies.py` (listing editor), `public.py` (public page data + JSON API),
+  `pages.py` + `templates/` (Jinja HTML: landing, dashboard, /s/{slug},
+  /methodology)
 - `src/alphamarket/connectors/` — `base.py` defines the venue-agnostic contract
   (VenueConnector + Normalized* models); one module per venue (`kalshi.py`);
   `registry.py` is the only import path core code may use
 - `alembic/` — migrations, hand-written for ledger tables
 - `docs/methodology.md` — public methodology page source; every ledger/stats
-  formula lands here alongside its unit test
+  formula lands here alongside its unit test. `docs/deploy.md` + `Dockerfile`
+  + `fly.toml` — deployment (web + worker processes)
 - `tests/` — pytest; unit tests use in-memory SQLite via the `client` fixture
 
 ## Invariants (do not violate, do not "improve away")

@@ -2,7 +2,7 @@
 
 import math
 import statistics
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -171,3 +171,23 @@ def test_concentration_flag_uses_series_not_ticker():
 def test_risk_score_bounds():
     assert stats.risk_score(0.0, 0.0, 0.0, 0.0) == 1
     assert stats.risk_score(1.0, 5.0, 1.0, 1.0) == 10
+
+
+def test_drawdown_series_tracks_running_peak():
+    series = [(None, to_micros(v)) for v in DAILY]
+    dd = [d for _, d in stats.drawdown_series(series)]
+    assert dd == pytest.approx([0.0, 0.07 / 1000, 0.0, 0.10 / 1005.93, 10.10 / 1005.93])
+
+
+def test_monthly_returns_use_month_end_equity():
+    series = [
+        (date(2026, 7, 30), to_micros("1000")),
+        (date(2026, 7, 31), to_micros("1010")),  # July ends at 1010: +1.0% from first point
+        (date(2026, 8, 15), to_micros("990")),
+        (date(2026, 8, 31), to_micros("1111")),  # August: 1111/1010 - 1 = +10.0%
+    ]
+    assert stats.monthly_returns(series) == [
+        (2026, 7, pytest.approx(0.01)),
+        (2026, 8, pytest.approx(0.1)),
+    ]
+    assert stats.monthly_returns([]) == []

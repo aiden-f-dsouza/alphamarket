@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · AlphaMarket{% endblock %}
+{% block content %}
+<h1>Welcome, {{ user.display_name }}</h1>
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+{% for row in rows %}
+{% set a = row.account %}{% set s = row.strategy %}{% set st = row.stats %}
+<div class="panel">
+  <h2>{{ s.name if s else "Strategy" }} <span class="muted">· {{ a.venue }} ({{ a.venue_env }})</span></h2>
+  <p>
+    {% if a.status == "active" %}<span class="badge good">connected</span>
+    {% elif a.status == "error" %}<span class="badge bad">sync error</span>
+    {% else %}<span class="badge">disconnected</span>{% endif %}
+    {% if s %}<span class="badge {{ 'warn' if s.status == 'quarantined' else '' }}">{{ s.status }}</span>{% endif %}
+    {% if a.scope_checked_at %}<span class="badge good">read-only verified</span>{% else %}<span class="badge warn">scope unverified</span>{% endif %}
+    {% if row.visible and s %}<a class="small" href="/s/{{ s.slug }}">Public page ↗</a>{% else %}<span class="small muted">public page hidden</span>{% endif %}
+  </p>
+  <p class="small muted">
+    Last sync: {{ a.last_synced_at or "never" }}{% if a.last_sync_error %} — <span class="bad">{{ a.last_sync_error }}</span>{% endif %}
+    · Verified since: {{ a.anchor_at or "not anchored" }}
+  </p>
+
+  {% if st %}
+  <div class="tiles">
+    <div class="tile"><div class="k">Equity</div><div class="v">${{ "%.2f"|format(st.equity_micros / 1000000) }}</div></div>
+    <div class="tile"><div class="k">Total return</div><div class="v {{ 'good' if (st.total_return or 0) >= 0 else 'bad' }}">{{ "%.2f"|format((st.total_return or 0) * 100) }}%</div></div>
+    <div class="tile"><div class="k">Max drawdown</div><div class="v bad">{{ "%.2f"|format(st.max_drawdown * 100) }}%</div></div>
+    <div class="tile"><div class="k">Risk score</div><div class="v">{{ st.risk_score }}/10</div></div>
+    <div class="tile"><div class="k">Win rate</div><div class="v">{{ "%.0f"|format((st.win_rate or 0) * 100) }}%</div></div>
+    <div class="tile"><div class="k">Track</div><div class="v">{{ st.track_days }}d</div></div>
+  </div>
+  {% if st.flags %}<p class="warn small">Flags: {{ st.flags|join(", ") }}</p>{% endif %}
+  <p class="small muted">Stats as of {{ st.as_of }} · {{ st.n_fills }} fills, {{ st.n_settlements }} settlements</p>
+  {% else %}
+  <p class="muted small">Stats appear after the first nightly run (or press Reconcile, then wait for stats).</p>
+  {% endif %}
+
+  {% if row.snapshots %}
+  <table>
+    <tr><th>Reconciliation</th><th class="num">Venue balance</th><th class="num">Computed</th><th class="num">Divergence</th><th>Result</th></tr>
+    {% for snap in row.snapshots %}
+    <tr><td>{{ snap.as_of }}</td><td class="num">${{ "%.4f"|format(snap.venue_balance_micros / 1000000) }}</td><td class="num">${{ "%.4f"|format(snap.computed_cash_micros / 1000000) }}</td><td class="num">${{ "%.4f"|format(snap.divergence_micros / 1000000) }}</td><td class="{{ 'good' if snap.reconciled else 'bad' }}">{{ "match" if snap.reconciled else "DIVERGED" }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  <p style="margin-top:12px">
+    {% if a.status != "disconnected" %}
+    <form class="inline" method="post" action="/dashboard/accounts/{{ a.id }}/sync"><button class="secondary">Sync now</button></form>
+    <form class="inline" method="post" action="/dashboard/accounts/{{ a.id }}/reconcile"><button class="secondary">Reconcile now</button></form>
+    <form class="inline" method="post" action="/dashboard/accounts/{{ a.id }}/disconnect" onsubmit="return confirm('Disconnect and erase the stored key?')"><button class="danger">Disconnect</button></form>
+    {% endif %}
+  </p>
+
+  {% if s %}
+  <details>
+    <summary class="muted small">Edit listing (name, thesis, tags, visibility)</summary>
+    <form method="post" action="/dashboard/strategy/{{ s.id }}">
+      <label>Name</label><input name="name" value="{{ s.name }}" required minlength="2" maxlength="120">
+      <label>Thesis / description <span class="warn">(shown publicly, labeled unverified)</span></label>
+      <textarea name="description" maxlength="4000">{{ s.description }}</textarea>
+      <label>Style tags (comma-separated)</label><input name="style_tags" value="{{ s.style_tags }}" maxlength="255">
+      <label><input type="checkbox" name="public" {% if s.public %}checked{% endif %} style="width:auto"> Public page enabled</label>
+      <p><button type="submit">Save</button></p>
+    </form>
+  </details>
+  {% endif %}
+</div>
+{% endfor %}
+
+<div class="panel">
+  <h2>Connect a Kalshi account</h2>
+  <p class="small muted">Create an API key at Kalshi with <strong>read-only</strong> scope. Keys with trading permission are rejected. The private key is encrypted at rest and erased when you disconnect. Environment: <strong>{{ settings.kalshi_env }}</strong>.</p>
+  <form method="post" action="/dashboard/connect">
+    <label>Strategy name</label><input name="strategy_name" required minlength="2" maxlength="120">
+    <label>API key id</label><input name="key_id" required autocomplete="off">
+    <label>Private key (PEM)</label><textarea name="private_key_pem" required placeholder="Paste the PEM file contents"></textarea>
+    <p><button type="submit">Connect and import</button></p>
+  </form>
+</div>
+{% endblock %}

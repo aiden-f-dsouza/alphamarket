@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}{{ page.name }} · AlphaMarket{% endblock %}
+{% block content %}
+{% set st = page.stats %}
+<div class="panel">
+  <h1>{{ page.name }}</h1>
+  <p class="muted">by {{ page.display_name }} · {{ page.venue }}{% if page.venue_env != "prod" %} <span class="badge warn">{{ page.venue_env }} environment</span>{% endif %}</p>
+  <p>
+    {% if page.verified_since %}<span class="badge good">platform-verified since {{ page.verified_since[:10] }}</span>{% endif %}
+    {% if st and page.incubating %}<span class="badge warn">incubating ({{ st.track_days }}/90 days)</span>{% elif st %}<span class="badge good">{{ st.track_days }} days verified</span>{% endif %}
+    {% if page.reconciled is not none %}<span class="badge {{ 'good' if page.reconciled else 'bad' }}">last reconciliation: {{ "matched venue balance" if page.reconciled else "diverged" }}</span>{% endif %}
+    {% for t in page.style_tags %}<span class="badge">{{ t }}</span>{% endfor %}
+  </p>
+  <p class="small muted">Every number on this page is computed by AlphaMarket from venue data pulled with a read-only key. Nothing here was entered by the trader. <a href="/methodology">What this proves and what it doesn't.</a></p>
+</div>
+
+{% if not st %}
+<div class="panel"><p class="muted">Statistics are computed nightly; this strategy's first run is pending.</p></div>
+{% else %}
+<div class="panel">
+  <div class="tiles">
+    <div class="tile"><div class="k">Total return</div><div class="v {{ 'good' if (st.total_return or 0) >= 0 else 'bad' }}">{{ "%.2f"|format((st.total_return or 0) * 100) }}%</div></div>
+    <div class="tile"><div class="k">Max drawdown</div><div class="v bad">{{ "%.2f"|format(st.max_drawdown * 100) }}%</div></div>
+    <div class="tile"><div class="k">Risk score</div><div class="v">{{ st.risk_score }}<span class="muted small">/10</span></div></div>
+    <div class="tile"><div class="k">Sharpe</div><div class="v">{{ "%.2f"|format(st.sharpe) if st.sharpe is not none else "—" }}</div></div>
+    <div class="tile"><div class="k">Sortino</div><div class="v">{{ "%.2f"|format(st.sortino) if st.sortino is not none else "—" }}</div></div>
+    <div class="tile"><div class="k">Win rate</div><div class="v">{{ "%.0f"|format(st.win_rate * 100) ~ "%" if st.win_rate is not none else "—" }}</div></div>
+    <div class="tile"><div class="k">Realized P&L</div><div class="v {{ 'good' if st.realized_pnl >= 0 else 'bad' }}">${{ "%.2f"|format(st.realized_pnl) }}</div></div>
+    <div class="tile"><div class="k">Settled trades</div><div class="v">{{ st.n_settlements }}</div></div>
+  </div>
+  {% if st.flags %}<p class="warn small" style="margin-top:12px">Behavioural flags: {{ st.flags|join(", ") }} — <a href="/methodology">what these mean</a></p>{% endif %}
+</div>
+
+<div class="grid2">
+  <div class="panel"><h2>Equity (net of venue fees, open positions at cost)</h2><canvas id="equity"></canvas></div>
+  <div class="panel"><h2>Drawdown</h2><canvas id="drawdown"></canvas></div>
+</div>
+
+<div class="panel">
+  <h2>Monthly returns</h2>
+  {% set months = st.monthly_returns %}
+  {% if months %}
+  <table class="months">
+    <tr><th>Year</th>{% for m in ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"] %}<th class="num">{{ m }}</th>{% endfor %}</tr>
+    {% set years = months|map(attribute=0)|unique|list %}
+    {% for y in years %}
+    <tr><td>{{ y }}</td>
+      {% for mi in range(1, 13) %}
+        {% set cell = months|selectattr(0, "equalto", y)|selectattr(1, "equalto", mi)|list %}
+        <td class="{{ ('good' if cell[0][2] >= 0 else 'bad') if cell else 'muted' }}">{{ "%.2f"|format(cell[0][2] * 100) ~ "%" if cell else "·" }}</td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">No complete month yet.</p>{% endif %}
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>Trader's description <span class="warn">— unverified</span></h2>
+  <div class="unverified">
+    {% if page.description_unverified %}{{ page.description_unverified }}{% else %}<span class="muted">The trader has not written a description.</span>{% endif %}
+    <p class="small muted" style="margin:8px 0 0">Written by the trader. AlphaMarket does not verify anything in this box.</p>
+  </div>
+</div>
+
+{% if st %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+  const equity = {{ st.equity_curve|tojson }};
+  const dd = {{ st.drawdown_curve|tojson }};
+  const common = { responsive: true, plugins: { legend: { display: false } },
+    scales: { x: { ticks: { color: "#8b93a7", maxTicksLimit: 8 }, grid: { color: "#262a36" } },
+              y: { ticks: { color: "#8b93a7" }, grid: { color: "#262a36" } } } };
+  new Chart(document.getElementById("equity"), { type: "line",
+    data: { labels: equity.map(p => p[0]), datasets: [{ data: equity.map(p => p[1]), borderColor: "#4f8cff", pointRadius: 0, tension: 0.1 }] },
+    options: common });
+  new Chart(document.getElementById("drawdown"), { type: "line",
+    data: { labels: dd.map(p => p[0]), datasets: [{ data: dd.map(p => -p[1] * 100), borderColor: "#e5484d", backgroundColor: "rgba(229,72,77,.25)", fill: true, pointRadius: 0, tension: 0.1 }] },
+    options: { ...common, scales: { ...common.scales, y: { ...common.scales.y, ticks: { color: "#8b93a7", callback: v => v + "%" } } } } });
+</script>
+{% endif %}
+{% endblock %}

@@ -183,6 +183,21 @@ Sized for one person working part-time alongside classes. Each milestone is demo
 3. Listing editor (name, thesis, tags), privacy default to display-name only.
 4. Deploy: single VPS or Fly.io/Railway, Postgres managed or on the box, HTTPS, backups. Supabase is also fine as hosted Postgres + auth if you would rather not run auth yourself.
 
+   STATUS 2026-09-01: M4.1-M4.3 built, M4.4 prepared. Jinja + Chart.js
+   (`pages.py`, `templates/`): landing/login, creator dashboard (connection
+   status, freshness, stats, flags, reconciliation history, sync/reconcile/
+   disconnect, connect form), listing editor (`strategies.py`: name, thesis,
+   tags, public toggle; numbers have no write path), public page
+   `/s/{slug}` + JSON `/api/strategies/{slug}` (`public.py`: equity and
+   drawdown curves, monthly grid, risk score, verified-since and incubation
+   badges, last-reconciliation badge, unverified description label,
+   methodology link; display name only). Quarantined/delisted/unlisted
+   pages 404. `/methodology` renders docs/methodology.md. Nightly job
+   promotes incubating -> live at 90 days.
+   Deploy: Dockerfile, fly.toml (web + worker), docs/deploy.md,
+   SECURE_COOKIES + postgres:// URL rewrite. Actual `fly launch` is Aiden's
+   (needs an account and a domain).
+
 ### M5. Real users (weeks 10-12)
 1. Switch the connector to Kalshi production, re-run everything against your own real account first.
 2. Write the two-page "what we can see and what we can never do" security/privacy explainer: read-only scope enforced, encrypted at rest, disconnect deletes the key.
