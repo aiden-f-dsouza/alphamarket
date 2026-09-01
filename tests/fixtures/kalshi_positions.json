@@ -1,0 +1,25 @@
+{
+  "cursor": "",
+  "event_positions": [
+    {
+      "event_exposure_dollars": "0.478800",
+      "event_ticker": "KXETH15M-26AUG312315",
+      "fees_paid_dollars": "0.014500",
+      "realized_pnl_dollars": "0.000000",
+      "total_cost_dollars": "0.478800",
+      "total_cost_shares_fp": "0.84"
+    }
+  ],
+  "market_positions": [
+    {
+      "exchange_index": 2,
+      "fees_paid_dollars": "0.014500",
+      "last_updated_ts": "2026-09-01T03:09:03.797256Z",
+      "market_exposure_dollars": "0.478800",
+      "position_fp": "-0.84",
+      "realized_pnl_dollars": "0.000000",
+      "ticker": "KXETH15M-26AUG312315-15",
+      "total_traded_dollars": "0.478800"
+    }
+  ]
+}

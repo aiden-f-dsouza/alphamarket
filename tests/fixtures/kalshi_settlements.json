@@ -1,0 +1,19 @@
+{
+  "cursor": "",
+  "settlements": [
+    {
+      "event_ticker": "KXETH15M-26AUG312315",
+      "exchange_index": 2,
+      "fee_cost": "0.014500",
+      "market_result": "yes",
+      "no_count_fp": "0.84",
+      "no_total_cost_dollars": "0.478800",
+      "revenue": 0,
+      "settled_time": "2026-09-01T03:15:11.341971Z",
+      "ticker": "KXETH15M-26AUG312315-15",
+      "value": 100,
+      "yes_count_fp": "0.00",
+      "yes_total_cost_dollars": "0.000000"
+    }
+  ]
+}

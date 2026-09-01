@@ -1,0 +1,9 @@
+{
+  "api_keys": [
+    {
+      "api_key_id": "test-key-id",
+      "name": "read-only key",
+      "scopes": ["read"]
+    }
+  ]
+}

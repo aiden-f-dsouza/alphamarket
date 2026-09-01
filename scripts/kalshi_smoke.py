@@ -16,6 +16,7 @@ import sys
 
 from alphamarket.config import get_settings
 from alphamarket.connectors.kalshi import KalshiConnector, load_private_key
+from alphamarket.money import format_micros
 
 
 def main() -> int:
@@ -32,20 +33,21 @@ def main() -> int:
     )
 
     balance = connector.fetch_balance()
-    print(f"Balance: {balance.balance_cents} cents (as of {balance.as_of})")
+    print(f"Balance: ${format_micros(balance.balance_micros)} (as of {balance.as_of})")
 
     fills = connector.fetch_fills()
     print(f"Fills fetched: {len(fills)}")
     for fill in fills[-5:]:
         print(
-            f"  {fill.filled_at}  {fill.ticker}  {fill.action} {fill.count} "
-            f"{fill.side} @ {fill.price_cents}c (fee {fill.fee_cents}c)"
+            f"  {fill.filled_at}  {fill.ticker}  {fill.action} "
+            f"{format_micros(fill.count_micros, 2)} {fill.side} "
+            f"@ ${format_micros(fill.price_micros)} (fee ${format_micros(fill.fee_micros, 6)})"
         )
 
     settlements = connector.fetch_settlements()
     print(f"Settlements fetched: {len(settlements)}")
-    print("\nSigning works. Compare the raw payloads against the _to_* mappings")
-    print("in connectors/kalshi.py before relying on them (field names drift).")
+    print("\nSigning works. All payload mappings are verified against real")
+    print("demo captures; see tests/fixtures/README.md for provenance.")
     return 0
 
 

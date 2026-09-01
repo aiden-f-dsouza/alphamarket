@@ -7,15 +7,26 @@ Auth: RSA-PSS(SHA-256) request signing with three headers:
 Signed message: f"{timestamp}{METHOD}{path}" where path EXCLUDES query params
 and INCLUDES the /trade-api/v2 prefix.
 
-NOTE: field mappings below follow Kalshi's v2 docs as of Aug 2026. Verify each
-against a live demo-account response in the M0 smoke script before trusting
-them (scripts/kalshi_smoke.py), and adjust the _to_* functions if the payload
-shape differs.
+Payload shapes below were verified against a live demo account on 2026-08-27
+via scripts/kalshi_smoke.py. What the docs said and what the API returns had
+diverged substantially:
+
+  count      -> count_fp           "101.89"    fractional, decimal string
+  yes_price  -> yes_price_dollars  "0.9800"    dollars, not integer cents
+  fee        -> fee_cost           "0.139800"  dollars, six decimal places
+  balance    -> balance_dollars    "1101.8980" (the int `balance` is truncated)
+
+Hence micro-dollars throughout; see alphamarket.money.
+
+All mappings are VERIFIED against real demo payloads: fetch_balance,
+fetch_fills (2026-08-27), check_write_scope, fetch_positions, fetch_settlements
+(2026-09-01). See tests/fixtures/README.md for provenance.
 """
 
 import base64
 import time
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -33,11 +44,17 @@ from alphamarket.connectors.base import (
     Side,
     VenueConnector,
 )
+from alphamarket.money import to_micros
 
 
 def load_private_key(pem_path: str | Path) -> rsa.RSAPrivateKey:
-    data = Path(pem_path).read_bytes()
-    key = serialization.load_pem_private_key(data, password=None)
+    return load_private_key_pem(Path(pem_path).read_bytes())
+
+
+def load_private_key_pem(pem: str | bytes) -> rsa.RSAPrivateKey:
+    if isinstance(pem, str):
+        pem = pem.encode()
+    key = serialization.load_pem_private_key(pem, password=None)
     if not isinstance(key, rsa.RSAPrivateKey):
         raise TypeError("Kalshi API keys must be RSA private keys")
     return key
@@ -100,6 +117,7 @@ class KalshiConnector(VenueConnector):
         guaranteed by the API; callers sort."""
         items: list[dict[str, Any]] = []
         cursor: str | None = None
+        seen_cursors: set[str] = set()
         base_params = dict(params or {})
         while True:
             page_params = dict(base_params)
@@ -110,15 +128,46 @@ class KalshiConnector(VenueConnector):
             cursor = data.get("cursor")
             if not cursor:
                 return items
+            # A cursor we have already followed means the API is looping us.
+            # Stop rather than page forever.
+            if cursor in seen_cursors:
+                return items
+            seen_cursors.add(cursor)
 
     # ---- VenueConnector --------------------------------------------------
 
     def check_connection(self) -> NormalizedBalance:
         return self.fetch_balance()
 
+    def check_write_scope(self) -> bool | None:
+        """Authoritative scope introspection via GET /api_keys, which lists the
+        caller's keys with their scopes (VERIFIED against the live demo API on
+        2026-08-31: `{"api_keys": [{"api_key_id": ..., "name": ...,
+        "scopes": ["read", "write"]}]}`).
+
+        Returns None (undetermined) if our key id is not in the response or the
+        shape is unexpected; the caller decides what to do with that."""
+        try:
+            data = self._get("/api_keys")
+            for key in data.get("api_keys", []):
+                if key.get("api_key_id") == self.key_id:
+                    scopes = key.get("scopes")
+                    if not isinstance(scopes, list):
+                        return None
+                    return any(s != "read" for s in scopes)
+        except httpx.HTTPError:
+            return None
+        return None
+
     def fetch_balance(self) -> NormalizedBalance:
         data = self._get("/portfolio/balance")
-        return NormalizedBalance(balance_cents=int(data["balance"]), as_of=datetime.now(UTC))
+        # `balance_dollars` is authoritative: the integer `balance` field is
+        # truncated to whole cents and silently drops sub-cent value.
+        updated_ts = data.get("updated_ts")
+        return NormalizedBalance(
+            balance_micros=to_micros(data["balance_dollars"]),
+            as_of=datetime.fromtimestamp(int(updated_ts), UTC) if updated_ts else datetime.now(UTC),
+        )
 
     def fetch_fills(self, since: datetime | None = None) -> list[NormalizedFill]:
         params: dict[str, Any] = {"limit": 200}
@@ -139,12 +188,16 @@ class KalshiConnector(VenueConnector):
         return out
 
     def fetch_positions(self) -> list[NormalizedPosition]:
+        """VERIFIED against a live demo payload on 2026-09-01
+        (tests/fixtures/kalshi_positions.json): `position_fp` is a signed
+        fractional decimal string (negative = net NO), and
+        `market_exposure_dollars` carries the dollar exposure."""
         raw = self._paginate("/portfolio/positions", "market_positions")
         return [
             NormalizedPosition(
-                ticker=p["ticker"],
-                position=int(p.get("position", 0)),
-                market_exposure_cents=int(p.get("market_exposure", 0)),
+                ticker=p.get("market_ticker") or p["ticker"],
+                position_micros=to_micros(p.get("position_fp") or "0"),
+                market_exposure_micros=to_micros(p.get("market_exposure_dollars") or "0"),
             )
             for p in raw
         ]
@@ -154,27 +207,48 @@ class KalshiConnector(VenueConnector):
     @staticmethod
     def _to_fill(f: dict[str, Any]) -> NormalizedFill:
         side = Side(f["side"])  # "yes" | "no"
-        price_key = "yes_price" if side is Side.YES else "no_price"
+        price_key = "yes_price_dollars" if side is Side.YES else "no_price_dollars"
         return NormalizedFill(
-            venue_fill_id=str(f["trade_id"]),
-            ticker=f["ticker"],
+            # fill_id and trade_id were equal in observed payloads; fill_id is
+            # the row identity, so idempotency keys on it.
+            venue_fill_id=str(f["fill_id"]),
+            ticker=f.get("market_ticker") or f["ticker"],
             side=side,
             action=Action(f["action"]),  # "buy" | "sell"
-            count=int(f["count"]),
-            price_cents=int(f[price_key]),
-            fee_cents=int(f.get("fee", 0) or 0),
+            count_micros=to_micros(f["count_fp"]),
+            price_micros=to_micros(f[price_key]),
+            fee_micros=to_micros(f.get("fee_cost") or "0"),
             filled_at=_ts(f["created_time"]),
         )
 
     @staticmethod
     def _to_settlement(s: dict[str, Any]) -> NormalizedSettlement:
+        """VERIFIED against a live demo payload on 2026-09-01
+        (tests/fixtures/kalshi_settlements.json). Differences from the old
+        doc-guess:
+        - The fee field is `fee_cost` (dollars string), same as fills, NOT
+          `fee_paid_dollars`.
+        - `revenue` is an INTEGER in CENTS (there is no `revenue_dollars`).
+          Exact for binary markets: count_fp has 2dp and per-contract value is
+          whole cents (`value: 100`), so count*value is always integer cents.
+          If a `revenue_dollars` field ever appears it is preferred, mirroring
+          balance_dollars.
+        - There is no venue settlement id, so identity stays synthesized as
+          "ticker:settled_time": stable per account because a market settles
+          once.
+        """
+        revenue_dollars = s.get("revenue_dollars")
+        if revenue_dollars is not None:
+            revenue_micros = to_micros(revenue_dollars)
+        else:
+            revenue_micros = to_micros(Decimal(s.get("revenue", 0)) / 100)
         return NormalizedSettlement(
             venue_settlement_id=f"{s['ticker']}:{s['settled_time']}",
-            ticker=s["ticker"],
+            ticker=s.get("market_ticker") or s["ticker"],
             market_result=str(s.get("market_result", "")),
-            yes_count=int(s.get("yes_count", 0) or 0),
-            no_count=int(s.get("no_count", 0) or 0),
-            revenue_cents=int(s.get("revenue", 0) or 0),
-            fee_cents=int(s.get("fee_paid", 0) or 0),
+            yes_count_micros=to_micros(s.get("yes_count_fp") or "0"),
+            no_count_micros=to_micros(s.get("no_count_fp") or "0"),
+            revenue_micros=revenue_micros,
+            fee_micros=to_micros(s.get("fee_cost") or "0"),
             settled_at=_ts(s["settled_time"]),
         )

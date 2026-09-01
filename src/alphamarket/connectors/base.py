@@ -2,7 +2,10 @@
 
 Every venue adapter maps its native API into these normalized models.
 Rules:
-- Money is integer cents.
+- Money is integer MICRO-DOLLARS (1e-6 USD). See alphamarket.money for why
+  the scale is 1e6 and not cents. Floats never touch a value.
+- Contract quantities carry the same 1e6 scale, because venue quantities are
+  not necessarily whole contracts (Kalshi's `count_fp` is fractional).
 - Timestamps are timezone-aware UTC.
 - `venue_fill_id` / `venue_settlement_id` must be stable and unique per venue
   account; ingestion idempotency depends on them.
@@ -32,9 +35,9 @@ class NormalizedFill(BaseModel):
     ticker: str
     side: Side
     action: Action
-    count: int
-    price_cents: int  # price paid per contract, in cents
-    fee_cents: int = 0
+    count_micros: int  # micro-contracts (1e6 = one contract)
+    price_micros: int  # price per contract, micro-dollars
+    fee_micros: int = 0
     filled_at: datetime
 
 
@@ -42,21 +45,21 @@ class NormalizedSettlement(BaseModel):
     venue_settlement_id: str
     ticker: str
     market_result: str
-    yes_count: int = 0
-    no_count: int = 0
-    revenue_cents: int  # gross payout credited at settlement
-    fee_cents: int = 0
+    yes_count_micros: int = 0
+    no_count_micros: int = 0
+    revenue_micros: int  # gross payout credited at settlement
+    fee_micros: int = 0
     settled_at: datetime
 
 
 class NormalizedPosition(BaseModel):
     ticker: str
-    position: int  # signed contract count (positive = yes/long)
-    market_exposure_cents: int = 0
+    position_micros: int  # signed micro-contracts (positive = yes/long)
+    market_exposure_micros: int = 0
 
 
 class NormalizedBalance(BaseModel):
-    balance_cents: int
+    balance_micros: int
     as_of: datetime
 
 
@@ -68,6 +71,12 @@ class VenueConnector(ABC):
     @abstractmethod
     def check_connection(self) -> NormalizedBalance:
         """Cheapest authenticated call. Raises on bad credentials."""
+
+    @abstractmethod
+    def check_write_scope(self) -> bool | None:
+        """True if the key can write (must be rejected at connect time),
+        False if confirmed read-only, None if undeterminable. Implementations
+        must only ever probe with calls that cannot mutate account state."""
 
     @abstractmethod
     def fetch_fills(self, since: datetime | None = None) -> list[NormalizedFill]:

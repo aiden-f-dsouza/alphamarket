@@ -7,10 +7,14 @@ __pycache__/
 .ruff_cache/
 
 # Secrets and keys. Never commit these.
-.env
+.env*
+!.env.example
 keys/
 *.pem
 
 # OS / editor
 .DS_Store
 .vscode/
+.claude/settings.local.json
+# Misplaced Claude Code settings file; the real one lives in .claude/
+/settings.json
