@@ -35,6 +35,14 @@ def main() -> int:
     balance = connector.fetch_balance()
     print(f"Balance: ${format_micros(balance.balance_micros)} (as of {balance.as_of})")
 
+    writable = connector.check_write_scope()
+    scope = {
+        False: "READ-ONLY (connect flow will accept it)",
+        True: "READ+WRITE (connect flow will REJECT it; create a read-only key)",
+        None: "undetermined",
+    }[writable]
+    print(f"Key scope: {scope}")
+
     fills = connector.fetch_fills()
     print(f"Fills fetched: {len(fills)}")
     for fill in fills[-5:]:
