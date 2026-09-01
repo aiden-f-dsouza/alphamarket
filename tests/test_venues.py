@@ -11,6 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from sqlalchemy import select
 
 from alphamarket.models import Fill, Strategy, VenueAccount
+from alphamarket.money import to_micros
 
 BASE = "https://demo-api.kalshi.co/trade-api/v2"
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -166,3 +167,22 @@ def test_accounts_are_scoped_to_their_owner(client, user, session_factory):
     with session_factory() as db:
         strategy = db.scalars(select(Strategy)).one()
         assert strategy.venue_account_id == account_id
+
+
+@respx.mock
+def test_connect_records_reconciliation_anchor_and_reconciles(client, user, session_factory):
+    _mock_venue()
+    account_id = _connect(client).json()["id"]
+
+    with session_factory() as db:
+        account = db.get(VenueAccount, account_id)
+        assert account.anchor_balance_micros == to_micros("1101.8980")  # fixture balance
+        assert account.anchor_at is not None
+
+    # The fixture fill predates the anchor, so the ledger explains the balance exactly.
+    resp = client.post(f"/venues/{account_id}/reconcile")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["reconciled"] is True
+    assert body["divergence_micros"] == 0
+    assert body["venue_balance_micros"] == to_micros("1101.8980")

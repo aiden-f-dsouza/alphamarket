@@ -74,8 +74,9 @@ fills            id, strategy_id, venue_fill_id (unique), ticker, side, count_mi
                  price_micros, fee_micros, filled_at, ingested_at  [append-only]
 settlements      id, strategy_id, venue_settlement_id (unique), ticker,
                  revenue_micros, fee_micros, settled_at, ingested_at [append-only]
-equity_snapshots id, strategy_id, as_of, venue_balance_micros, computed_equity_micros,
-                 divergence_micros, reconciled (bool)
+equity_snapshots id, strategy_id, as_of, venue_balance_micros, computed_cash_micros,
+                 divergence_micros, tolerance_micros, reconciled (bool)
+venue_accounts   + anchor_balance_micros, anchor_at  (reconciliation anchor, M2)
 strategy_stats   strategy_id, as_of, total_return, max_drawdown, sharpe, sortino,
                  win_rate, risk_score, n_fills, track_days, json_extras
 ```
@@ -143,6 +144,22 @@ Sized for one person working part-time alongside classes. Each milestone is demo
 2. Nightly reconciliation against venue balance; divergence > 0.1% flags the strategy (TR-2 at MVP scale).
 3. `equity_snapshots` and the append-only discipline enforced (no ORM updates on fills/settlements; revoke UPDATE/DELETE at the DB-role level so it is structural, not conventional).
    Demo: a reconciliation report that says "computed equity matches Kalshi within N cents."
+
+   STATUS 2026-09-01: M2.1-M2.3 built. `ledger.py` (cash curve from an
+   anchor balance + fill/settlement flows; formulas in docs/methodology.md,
+   pinned by hand-computed tests), `reconcile.py` (0.1% tolerance floored at
+   1c; divergence quarantines; every run stored as an equity_snapshot),
+   nightly worker job + POST /venues/{id}/reconcile. Append-only is
+   structural: ORM before_flush guard plus Postgres triggers (chosen over
+   role-level REVOKE because triggers bind to the table, not the connecting
+   role). Live demo: anchored at the 2026-08-27 balance, one real fill and
+   its settlement later, computed cash == venue balance with 0 divergence.
+   Key design choice: reconciliation is anchored at connect-time balance, so
+   venue history depth can never break the verified claim.
+   OPEN: deposits/withdrawals move balance without ledger rows and will read
+   as divergence; needs a transfers feed or manual classification before M5.
+   NOT YET: open-position mark-to-market for the equity curve (M3 needs last
+   prices; cash curve is exact and is what reconciliation checks).
 
 ### M3. Risk engine + stats (weeks 5-6)
 1. Returns, drawdowns, Sharpe/Sortino, win rate, concentration, risk score 1-10. Document every formula (this becomes the TR-5 methodology page).

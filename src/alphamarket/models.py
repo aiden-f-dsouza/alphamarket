@@ -14,8 +14,8 @@ Project invariants (see CLAUDE.md):
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, LargeBinary, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, LargeBinary, String, Text, event
+from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from alphamarket.db import Base
 
@@ -54,6 +54,13 @@ class VenueAccount(Base):
     scope_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_sync_error: Mapped[str | None] = mapped_column(Text, default=None)
+    # Reconciliation anchor (M2): the venue cash balance observed at connect
+    # time. Cash at any later moment = anchor + ledger cash flows after
+    # anchor_at (see ledger.py). Fill history before the anchor is displayed
+    # but never needed for reconciliation, so limited venue history depth
+    # cannot break the "verified" claim.
+    anchor_balance_micros: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    anchor_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -117,3 +124,41 @@ class Settlement(Base):
     fee_micros: Mapped[int] = mapped_column(BigInteger, default=0)
     settled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class EquitySnapshot(Base):
+    """One reconciliation run: venue-reported cash vs. ledger-computed cash."""
+
+    __tablename__ = "equity_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    strategy_id: Mapped[int] = mapped_column(ForeignKey("strategies.id"), index=True)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    venue_balance_micros: Mapped[int] = mapped_column(BigInteger)
+    computed_cash_micros: Mapped[int] = mapped_column(BigInteger)
+    divergence_micros: Mapped[int] = mapped_column(BigInteger)  # venue - computed
+    tolerance_micros: Mapped[int] = mapped_column(BigInteger)
+    reconciled: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ---- append-only enforcement (invariant #3) ---------------------------------
+
+APPEND_ONLY_MODELS = (Fill, Settlement)
+
+
+class AppendOnlyViolation(RuntimeError):
+    pass
+
+
+@event.listens_for(Session, "before_flush")
+def _enforce_append_only(session: Session, flush_context, instances) -> None:
+    """ORM-level guard: any attempt to UPDATE or DELETE a ledger row fails
+    before it reaches the database. Postgres additionally enforces this with
+    triggers (migration 0003), so it holds even for raw SQL."""
+    for obj in session.dirty:
+        if isinstance(obj, APPEND_ONLY_MODELS) and session.is_modified(obj):
+            raise AppendOnlyViolation(f"{type(obj).__name__} rows are append-only; cannot update")
+    for obj in session.deleted:
+        if isinstance(obj, APPEND_ONLY_MODELS):
+            raise AppendOnlyViolation(f"{type(obj).__name__} rows are append-only; cannot delete")

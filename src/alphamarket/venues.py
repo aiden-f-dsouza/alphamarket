@@ -13,7 +13,7 @@ import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -23,6 +23,7 @@ from alphamarket.connectors.registry import SUPPORTED_VENUES, build_connector
 from alphamarket.db import get_db
 from alphamarket.ingest import sync_account
 from alphamarket.models import Strategy, User, VenueAccount, VenueAccountStatus, utcnow
+from alphamarket.reconcile import reconcile_account, take_anchor
 from alphamarket.vault import encrypt_secret
 
 logger = logging.getLogger(__name__)
@@ -100,6 +101,10 @@ def connect(payload: ConnectIn, db: Session = Depends(get_db), user: User = Depe
             ),
         )
 
+    # Reconciliation anchor: the balance at this moment is what every later
+    # equity number is measured from (see ledger.py).
+    anchor = take_anchor(connector)
+
     account = VenueAccount(
         user_id=user.id,
         venue=payload.venue,
@@ -109,6 +114,8 @@ def connect(payload: ConnectIn, db: Session = Depends(get_db), user: User = Depe
         status=VenueAccountStatus.ACTIVE,
         # None from the probe means "undetermined", recorded as unchecked.
         scope_checked_at=utcnow() if writable is False else None,
+        anchor_balance_micros=anchor.balance_micros,
+        anchor_at=anchor.at,
     )
     db.add(account)
     db.flush()
@@ -150,6 +157,33 @@ def manual_sync(account_id: int, db: Session = Depends(get_db), user: User = Dep
         "imported_fills": result.new_fills,
         "imported_settlements": result.new_settlements,
     }
+
+
+class SnapshotOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    strategy_id: int
+    as_of: datetime
+    venue_balance_micros: int
+    computed_cash_micros: int
+    divergence_micros: int
+    tolerance_micros: int
+    reconciled: bool
+
+
+@router.post("/{account_id}/reconcile", response_model=SnapshotOut)
+def manual_reconcile(
+    account_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)
+):
+    """Run reconciliation now (the worker also runs it nightly)."""
+    account = _owned_account(db, account_id, user)
+    if account.status == VenueAccountStatus.DISCONNECTED:
+        raise HTTPException(status_code=409, detail="Account is disconnected")
+    try:
+        return reconcile_account(db, account)
+    except Exception:
+        logger.exception("manual reconcile failed for account %s", account.id)
+        raise HTTPException(status_code=502, detail="Reconcile failed; see status.") from None
 
 
 @router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT)

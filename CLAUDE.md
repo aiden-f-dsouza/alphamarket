@@ -22,12 +22,15 @@ deliberately out of scope).
 - `src/alphamarket/` — app package. `main.py` (app factory), `auth.py`,
   `config.py` (pydantic-settings), `db.py`, `models.py`, `money.py` (fixed-point),
   `vault.py` (Fernet credential encryption; needs VAULT_KEY), `venues.py`
-  (key connect/disconnect/sync API), `ingest.py` (idempotent ledger ingestion),
-  `worker.py` (APScheduler polling loop)
+  (key connect/disconnect/sync/reconcile API), `ingest.py` (idempotent ledger
+  ingestion), `ledger.py` (cash-curve math), `reconcile.py` (venue balance vs
+  ledger; quarantine), `worker.py` (APScheduler: polling + nightly reconcile)
 - `src/alphamarket/connectors/` — `base.py` defines the venue-agnostic contract
   (VenueConnector + Normalized* models); one module per venue (`kalshi.py`);
   `registry.py` is the only import path core code may use
 - `alembic/` — migrations, hand-written for ledger tables
+- `docs/methodology.md` — public methodology page source; every ledger/stats
+  formula lands here alongside its unit test
 - `tests/` — pytest; unit tests use in-memory SQLite via the `client` fixture
 
 ## Invariants (do not violate, do not "improve away")
