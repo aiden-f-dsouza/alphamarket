@@ -215,9 +215,9 @@ Sized for one person working part-time alongside classes. Each milestone is demo
    api.elections.kalshi.com now 401s); payload shapes identical to demo.
    Real account returned 3 fills but 5 settlements: fill history depth is
    limited on prod, which is exactly what the connect-time anchor design
-   exists for (BUILD_PLAN 2.3). Before connecting the real account via the
-   dashboard, confirm the prod key is READ-ONLY (the connect flow checks
-   GET /api_keys and will reject a read+write key like the demo one).
+   exists for (BUILD_PLAN 2.3). Read-only prod key created and verified
+   (smoke test reports READ-ONLY); the original read+write prod key should
+   be revoked on Kalshi. The demo key is still read+write.
    AIDEN: (b) `fly launch` per docs/deploy.md; (c) connect your real account
    and let it reconcile three nights; (d) Kalshi ToS check on third-party
    read access; (e) post per docs/launch.md and log objections.
