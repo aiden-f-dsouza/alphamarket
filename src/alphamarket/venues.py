@@ -116,6 +116,7 @@ def connect(payload: ConnectIn, db: Session = Depends(get_db), user: User = Depe
         scope_checked_at=utcnow() if writable is False else None,
         anchor_balance_micros=anchor.balance_micros,
         anchor_at=anchor.at,
+        anchor_positions=anchor.positions,
     )
     db.add(account)
     db.flush()

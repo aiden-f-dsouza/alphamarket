@@ -58,6 +58,9 @@ def _mock_venue(scopes=("read",), fills=None, settlements=None):
     respx.get(f"{BASE}/portfolio/settlements").mock(
         return_value=httpx.Response(200, json=settlements or {"settlements": [], "cursor": None})
     )
+    respx.get(f"{BASE}/portfolio/positions").mock(
+        return_value=httpx.Response(200, json=_fixture("kalshi_positions.json"))
+    )
 
 
 def _connect(client, pem=None):
@@ -178,6 +181,13 @@ def test_connect_records_reconciliation_anchor_and_reconciles(client, user, sess
         account = db.get(VenueAccount, account_id)
         assert account.anchor_balance_micros == to_micros("1101.8980")  # fixture balance
         assert account.anchor_at is not None
+        assert account.anchor_positions == [
+            {
+                "ticker": "KXETH15M-26AUG312315-15",
+                "position_micros": -840_000,
+                "cost_micros": 478_800,
+            }
+        ]
 
     # The fixture fill predates the anchor, so the ledger explains the balance exactly.
     resp = client.post(f"/venues/{account_id}/reconcile")

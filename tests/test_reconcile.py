@@ -153,6 +153,7 @@ def test_take_anchor_waits_out_nearby_fills(monkeypatch):
 
     anchor = reconcile.take_anchor(stub, settle_seconds=5.0, attempts=3)
     assert anchor.balance_micros == to_micros("100.00")
+    assert anchor.positions == []
     assert sleeps == [5.0, 5.0]  # retried, then gave up on the last observation
 
 

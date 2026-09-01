@@ -24,7 +24,9 @@ deliberately out of scope).
   `vault.py` (Fernet credential encryption; needs VAULT_KEY), `venues.py`
   (key connect/disconnect/sync/reconcile API), `ingest.py` (idempotent ledger
   ingestion), `ledger.py` (cash-curve math), `reconcile.py` (venue balance vs
-  ledger; quarantine), `worker.py` (APScheduler: polling + nightly reconcile)
+  ledger; quarantine), `stats.py` (returns/drawdown/Sharpe/risk score/flags,
+  pure functions), `analytics.py` (persists strategy_stats), `worker.py`
+  (APScheduler: polling + nightly reconcile + stats)
 - `src/alphamarket/connectors/` — `base.py` defines the venue-agnostic contract
   (VenueConnector + Normalized* models); one module per venue (`kalshi.py`);
   `registry.py` is the only import path core code may use

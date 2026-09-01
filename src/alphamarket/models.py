@@ -14,7 +14,19 @@ Project invariants (see CLAUDE.md):
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, LargeBinary, String, Text, event
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    event,
+)
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from alphamarket.db import Base
@@ -61,6 +73,11 @@ class VenueAccount(Base):
     # cannot break the "verified" claim.
     anchor_balance_micros: Mapped[int | None] = mapped_column(BigInteger, default=None)
     anchor_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # Open positions the venue reported at anchor time, each
+    # {ticker, position_micros (signed, +yes/-no), cost_micros}. Seeds the
+    # equity replay so pre-anchor positions carry their real cost basis and
+    # stale ones (settled outside returned history) cannot inflate equity.
+    anchor_positions: Mapped[list | None] = mapped_column(JSON, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -139,6 +156,31 @@ class EquitySnapshot(Base):
     divergence_micros: Mapped[int] = mapped_column(BigInteger)  # venue - computed
     tolerance_micros: Mapped[int] = mapped_column(BigInteger)
     reconciled: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class StrategyStats(Base):
+    """One stats run (M3). Ratios are floats because they are dimensionless;
+    money fields stay integer micros (invariant #1)."""
+
+    __tablename__ = "strategy_stats"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    strategy_id: Mapped[int] = mapped_column(ForeignKey("strategies.id"), index=True)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    track_days: Mapped[int] = mapped_column(Integer)
+    n_fills: Mapped[int] = mapped_column(Integer)
+    n_settlements: Mapped[int] = mapped_column(Integer)
+    total_return: Mapped[float | None] = mapped_column(Float, default=None)
+    max_drawdown: Mapped[float] = mapped_column(Float)
+    sharpe: Mapped[float | None] = mapped_column(Float, default=None)
+    sortino: Mapped[float | None] = mapped_column(Float, default=None)
+    win_rate: Mapped[float | None] = mapped_column(Float, default=None)
+    risk_score: Mapped[int] = mapped_column(Integer)
+    equity_micros: Mapped[int] = mapped_column(BigInteger)
+    realized_pnl_micros: Mapped[int] = mapped_column(BigInteger)
+    flags: Mapped[list] = mapped_column(JSON, default=list)
+    extras: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

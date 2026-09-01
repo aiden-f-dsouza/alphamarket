@@ -78,7 +78,8 @@ equity_snapshots id, strategy_id, as_of, venue_balance_micros, computed_cash_mic
                  divergence_micros, tolerance_micros, reconciled (bool)
 venue_accounts   + anchor_balance_micros, anchor_at  (reconciliation anchor, M2)
 strategy_stats   strategy_id, as_of, total_return, max_drawdown, sharpe, sortino,
-                 win_rate, risk_score, n_fills, track_days, json_extras
+                 win_rate, risk_score, n_fills, n_settlements, track_days,
+                 equity_micros, realized_pnl_micros, flags (json), extras (json)
 ```
 
 Notes that matter:
@@ -165,6 +166,16 @@ Sized for one person working part-time alongside classes. Each milestone is demo
 1. Returns, drawdowns, Sharpe/Sortino, win rate, concentration, risk score 1-10. Document every formula (this becomes the TR-5 methodology page).
 2. Fraud/risk heuristics v0: martingale sizing pattern, stake-spike, single-ticker concentration. Flag, do not auto-delist.
 3. Trade on the demo account yourself for a couple of weeks in the background so you have live organic data flowing.
+
+   STATUS 2026-09-01: M3.1-M3.2 built. `stats.py` (equity = cash + open
+   positions at cost; daily series; total return, max drawdown, Sharpe,
+   Sortino, win rate, concentration, max stake; risk score 1-10; flags:
+   martingale_sizing, stake_spike, single_series_concentration), persisted
+   nightly to `strategy_stats` by `analytics.py`. Every formula is in
+   docs/methodology.md with a hand-computed test. M3.3 (organic demo trading)
+   is on Aiden: the demo has no liquidity, so fills only happen when the
+   demo's own matching produces them (one so far).
+   NOT YET: mark-to-market of open positions (needs market last prices).
 
 ### M4. Product surface (weeks 7-9)
 1. Creator dashboard: connection status, ingestion freshness, stats, flags.

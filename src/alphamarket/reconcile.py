@@ -47,6 +47,7 @@ def tolerance_for(balance_micros: int) -> int:
 class Anchor:
     balance_micros: int
     at: datetime
+    positions: list[dict]  # [{ticker, position_micros, cost_micros}]
 
 
 def take_anchor(
@@ -63,12 +64,24 @@ def take_anchor(
         balance: NormalizedBalance = connector.fetch_balance()
         recent = connector.fetch_fills(since=t0.replace(microsecond=0))
         if not any(abs((f.filled_at - t0).total_seconds()) <= settle_seconds for f in recent):
-            return Anchor(balance_micros=balance.balance_micros, at=t0)
+            return Anchor(balance.balance_micros, t0, _positions_snapshot(connector))
         if attempt < attempts - 1:
             time.sleep(settle_seconds)
     # Activity is continuous; take the last observation and let the first
     # reconciliation run judge it.
-    return Anchor(balance_micros=balance.balance_micros, at=t0)
+    return Anchor(balance.balance_micros, t0, _positions_snapshot(connector))
+
+
+def _positions_snapshot(connector: VenueConnector) -> list[dict]:
+    return [
+        {
+            "ticker": p.ticker,
+            "position_micros": p.position_micros,
+            "cost_micros": p.market_exposure_micros,
+        }
+        for p in connector.fetch_positions()
+        if p.position_micros != 0
+    ]
 
 
 def _connector_for(account: VenueAccount) -> VenueConnector:
