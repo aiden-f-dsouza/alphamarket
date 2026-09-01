@@ -233,6 +233,31 @@ def test_write_scope_undetermined_when_key_absent_or_errored():
 
 
 @respx.mock
+def test_retries_on_429_then_succeeds(monkeypatch):
+    sleeps: list[float] = []
+    monkeypatch.setattr("alphamarket.connectors.kalshi.time.sleep", sleeps.append)
+    respx.get(f"{BASE}/portfolio/balance").mock(
+        side_effect=[
+            httpx.Response(429, headers={"Retry-After": "2"}),
+            httpx.Response(503),
+            httpx.Response(200, json=_fixture("kalshi_balance.json")),
+        ]
+    )
+    assert _connector().fetch_balance().balance_micros == 1_101_898_000
+    assert 2.0 in sleeps  # honoured Retry-After
+    assert any(s == pytest.approx(1.0) for s in sleeps)  # 0.5 * 2**1 backoff after the 503
+
+
+@respx.mock
+def test_gives_up_after_max_attempts(monkeypatch):
+    monkeypatch.setattr("alphamarket.connectors.kalshi.time.sleep", lambda s: None)
+    route = respx.get(f"{BASE}/portfolio/balance").mock(return_value=httpx.Response(503))
+    with pytest.raises(httpx.HTTPStatusError):
+        _connector().fetch_balance()
+    assert route.call_count == KalshiConnector.MAX_ATTEMPTS
+
+
+@respx.mock
 def test_http_error_propagates():
     respx.get(f"{BASE}/portfolio/balance").mock(return_value=httpx.Response(401, json={}))
     with pytest.raises(httpx.HTTPStatusError):

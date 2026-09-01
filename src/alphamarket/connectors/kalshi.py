@@ -103,12 +103,38 @@ class KalshiConnector(VenueConnector):
             "KALSHI-ACCESS-SIGNATURE": sign_request(self.private_key, timestamp_ms, method, path),
         }
 
+    # Kalshi allows ~10 authenticated req/s; a polite floor between calls plus
+    # exponential backoff on 429/5xx/transport errors (BUILD_PLAN M1.1).
+    MIN_INTERVAL = 0.11
+    RETRY_STATUSES = (429, 500, 502, 503, 504)
+    MAX_ATTEMPTS = 4
+    BACKOFF_BASE = 0.5
+
+    _last_request_at: float = 0.0
+
     def _get(self, endpoint: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         path = f"{self._path_prefix}{endpoint}"
         url = f"{self.base_url}{endpoint}"
-        resp = self.client.get(url, params=params, headers=self._headers("GET", path))
-        resp.raise_for_status()
-        return resp.json()
+        for attempt in range(self.MAX_ATTEMPTS):
+            wait = self.MIN_INTERVAL - (time.monotonic() - self._last_request_at)
+            if wait > 0:
+                time.sleep(wait)
+            self._last_request_at = time.monotonic()
+            try:
+                resp = self.client.get(url, params=params, headers=self._headers("GET", path))
+            except httpx.TransportError:
+                if attempt == self.MAX_ATTEMPTS - 1:
+                    raise
+                time.sleep(self.BACKOFF_BASE * 2**attempt)
+                continue
+            if resp.status_code in self.RETRY_STATUSES and attempt < self.MAX_ATTEMPTS - 1:
+                retry_after = resp.headers.get("Retry-After")
+                delay = float(retry_after) if retry_after else self.BACKOFF_BASE * 2**attempt
+                time.sleep(delay)
+                continue
+            resp.raise_for_status()
+            return resp.json()
+        raise RuntimeError("unreachable")  # pragma: no cover
 
     def _paginate(
         self, endpoint: str, items_key: str, params: dict[str, Any] | None = None

@@ -71,6 +71,7 @@ history of "did the ledger explain the balance?" is itself auditable.
   for classifying them is planned before public launch.
 - Credentials are encrypted at rest with a server-side key. This is not a
   hardware security module. Disconnecting erases the stored key immediately.
+  Full detail: [security and privacy](/security).
 - Qualitative strategy descriptions are written by the trader and are labeled
   as unverified wherever they appear.
 

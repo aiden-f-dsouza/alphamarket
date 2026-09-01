@@ -204,6 +204,20 @@ Sized for one person working part-time alongside classes. Each milestone is demo
 3. Recruit 10-20 Kalshi traders (r/Kalshi, prediction-market Discords, X). Their objections are your next roadmap.
 4. Only after this works, revisit the PRD's Phase 2 questions (second venue, paper mirroring, and whether the marketplace layer justifies talking to a lawyer).
 
+   STATUS 2026-09-01: everything buildable for M5 is built; the rest is
+   Aiden's to run. Built: `scripts/preflight.py` (refuses unsafe prod
+   config: default SECRET_KEY, missing VAULT_KEY, insecure cookies, missing
+   append-only triggers, non-Postgres DB), docs/security.md served at
+   /security (the "what we can see and what we can never do" explainer),
+   docs/launch.md (outreach draft, questions to ask, pre-post checklist),
+   connector retry/backoff + 10 req/s floor (M1.1 leftover).
+   AIDEN: (a) read-only smoke against your real account with the prod key
+   (`KALSHI_ENV=prod` + prod key id in .env, `uv run python
+   scripts/kalshi_smoke.py`) to confirm production payload shapes match
+   demo; (b) `fly launch` per docs/deploy.md; (c) connect your real account
+   and let it reconcile three nights; (d) Kalshi ToS check on third-party
+   read access; (e) post per docs/launch.md and log objections.
+
 Stop-loss points: if M2 reconciliation cannot be made reliable, the "verified" claim is dead and the project should pivot or stop. If M5 recruiting gets zero traction with a working product, the demand assumption is falsified cheaply.
 
 ---

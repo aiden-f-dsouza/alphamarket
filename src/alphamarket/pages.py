@@ -28,7 +28,7 @@ from alphamarket.venues import ConnectIn, _owned_account, connect_account
 
 router = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
-METHODOLOGY_MD = Path(__file__).resolve().parents[2] / "docs" / "methodology.md"
+DOCS = Path(__file__).resolve().parents[2] / "docs"
 
 
 def _user(request: Request, db: Session) -> User | None:
@@ -210,7 +210,17 @@ def strategy_page(request: Request, slug: str, db: Session = Depends(get_db)):
     return _render(request, "strategy.html", page=page_data(db, strategy))
 
 
+def _doc(request: Request, name: str) -> HTMLResponse:
+    md = (DOCS / f"{name}.md").read_text()
+    body = markdown.markdown(md, extensions=["tables", "fenced_code"])
+    return _render(request, "methodology.html", body=body)
+
+
 @router.get("/methodology", response_class=HTMLResponse)
 def methodology(request: Request):
-    body = markdown.markdown(METHODOLOGY_MD.read_text(), extensions=["tables", "fenced_code"])
-    return _render(request, "methodology.html", body=body)
+    return _doc(request, "methodology")
+
+
+@router.get("/security", response_class=HTMLResponse)
+def security(request: Request):
+    return _doc(request, "security")

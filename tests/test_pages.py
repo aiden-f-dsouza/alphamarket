@@ -152,6 +152,8 @@ def test_listing_editor_api_cannot_touch_numbers(connected, logged_in):
     assert "risk_score" not in resp.json()
 
 
-def test_methodology_renders(client):
+def test_methodology_and_security_render(client):
     html = client.get("/methodology").text
     assert "Reconciliation" in html and "Risk score" in html
+    html = client.get("/security").text
+    assert "read-only" in html and "Disconnecting erases" in html

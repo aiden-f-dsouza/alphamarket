@@ -16,6 +16,7 @@ deliberately out of scope).
 - Lint/format: `uv run ruff check --fix . && uv run ruff format .`
 - Kalshi smoke test: `uv run python scripts/kalshi_smoke.py` (needs .env + demo key)
 - Ingestion worker: `uv run python -m alphamarket.worker` (polls connected accounts)
+- Prod preflight: `uv run python scripts/preflight.py` (must pass before real users)
 
 ## Layout
 
@@ -35,7 +36,8 @@ deliberately out of scope).
   `registry.py` is the only import path core code may use
 - `alembic/` — migrations, hand-written for ledger tables
 - `docs/methodology.md` — public methodology page source; every ledger/stats
-  formula lands here alongside its unit test. `docs/deploy.md` + `Dockerfile`
+  formula lands here alongside its unit test. `docs/security.md` (served at
+  /security), `docs/launch.md` (M5 outreach), `docs/deploy.md` + `Dockerfile`
   + `fly.toml` — deployment (web + worker processes)
 - `tests/` — pytest; unit tests use in-memory SQLite via the `client` fixture
 
