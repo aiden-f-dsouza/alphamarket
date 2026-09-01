@@ -262,3 +262,11 @@ def test_http_error_propagates():
     respx.get(f"{BASE}/portfolio/balance").mock(return_value=httpx.Response(401, json={}))
     with pytest.raises(httpx.HTTPStatusError):
         _connector().fetch_balance()
+
+
+def test_prod_base_url_matches_current_docs():
+    """api.elections.kalshi.com started returning 401 for valid keys (seen live
+    2026-09-01); docs.kalshi.com now lists external-api.kalshi.com."""
+    from alphamarket.config import KALSHI_BASE_URLS
+
+    assert KALSHI_BASE_URLS["prod"] == "https://external-api.kalshi.com/trade-api/v2"

@@ -2,9 +2,13 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Hosts per docs.kalshi.com quick start, checked 2026-09-01. The former prod
+# host api.elections.kalshi.com now returns 401 for valid keys. Demo keeps the
+# legacy alias because every recorded fixture and live check used it; the
+# documented demo host is external-api.demo.kalshi.co.
 KALSHI_BASE_URLS = {
     "demo": "https://demo-api.kalshi.co/trade-api/v2",
-    "prod": "https://api.elections.kalshi.com/trade-api/v2",
+    "prod": "https://external-api.kalshi.com/trade-api/v2",
 }
 
 
