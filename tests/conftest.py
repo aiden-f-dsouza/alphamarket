@@ -16,16 +16,18 @@ from alphamarket.main import create_app
 
 
 @pytest.fixture(autouse=True)
-def test_vault_key():
-    """Give the cached settings a throwaway Fernet key so vault code works in
-    tests without depending on the developer's .env."""
+def test_settings():
+    """Pin the cached settings so tests never depend on the developer's .env:
+    a throwaway Fernet key for the vault, and KALSHI_ENV=demo so respx mocks
+    (which target the demo host) always match. Invariant #6: no live calls."""
     from alphamarket.config import get_settings
 
     settings = get_settings()
-    original = settings.vault_key
+    original = (settings.vault_key, settings.kalshi_env)
     settings.vault_key = Fernet.generate_key().decode()
+    settings.kalshi_env = "demo"
     yield
-    settings.vault_key = original
+    settings.vault_key, settings.kalshi_env = original
 
 
 @pytest.fixture()
