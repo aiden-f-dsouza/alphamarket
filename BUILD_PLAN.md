@@ -211,10 +211,14 @@ Sized for one person working part-time alongside classes. Each milestone is demo
    /security (the "what we can see and what we can never do" explainer),
    docs/launch.md (outreach draft, questions to ask, pre-post checklist),
    connector retry/backoff + 10 req/s floor (M1.1 leftover).
-   AIDEN: (a) read-only smoke against your real account with the prod key
-   (`KALSHI_ENV=prod` + prod key id in .env, `uv run python
-   scripts/kalshi_smoke.py`) to confirm production payload shapes match
-   demo; (b) `fly launch` per docs/deploy.md; (c) connect your real account
+   DONE 2026-09-01 (a) prod smoke: host is external-api.kalshi.com (the old
+   api.elections.kalshi.com now 401s); payload shapes identical to demo.
+   Real account returned 3 fills but 5 settlements: fill history depth is
+   limited on prod, which is exactly what the connect-time anchor design
+   exists for (BUILD_PLAN 2.3). Before connecting the real account via the
+   dashboard, confirm the prod key is READ-ONLY (the connect flow checks
+   GET /api_keys and will reject a read+write key like the demo one).
+   AIDEN: (b) `fly launch` per docs/deploy.md; (c) connect your real account
    and let it reconcile three nights; (d) Kalshi ToS check on third-party
    read access; (e) post per docs/launch.md and log objections.
 
