@@ -1,0 +1,119 @@
+{
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "title": "Landing \u00b7 investors",
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 2760
+    },
+    {
+      "file": "Marketplace.dc.html",
+      "title": "Marketplace",
+      "x": 1560,
+      "y": 0,
+      "w": 1440,
+      "h": 1500
+    },
+    {
+      "file": "Strategy.dc.html",
+      "title": "Strategy \u00b7 diligence page",
+      "x": 3120,
+      "y": 0,
+      "w": 1440,
+      "h": 2200
+    },
+    {
+      "file": "Tail.dc.html",
+      "title": "Tail flow",
+      "x": 0,
+      "y": 2900,
+      "w": 1440,
+      "h": 1700
+    },
+    {
+      "file": "Portfolio.dc.html",
+      "title": "Portfolio",
+      "x": 1560,
+      "y": 2900,
+      "w": 1440,
+      "h": 1360
+    },
+    {
+      "file": "Creator.dc.html",
+      "title": "Creator profile",
+      "x": 3120,
+      "y": 2900,
+      "w": 1440,
+      "h": 1640
+    },
+    {
+      "file": "Feed.dc.html",
+      "title": "Feed and rooms",
+      "x": 0,
+      "y": 4680,
+      "w": 1440,
+      "h": 1500
+    },
+    {
+      "file": "Creators.dc.html",
+      "title": "Landing \u00b7 creators",
+      "x": 1560,
+      "y": 4680,
+      "w": 1440,
+      "h": 1600
+    },
+    {
+      "file": "Invite.dc.html",
+      "title": "Invite",
+      "x": 3120,
+      "y": 4680,
+      "w": 1440,
+      "h": 1120
+    },
+    {
+      "file": "Verification.dc.html",
+      "title": "Verification",
+      "x": 0,
+      "y": 6420,
+      "w": 1440,
+      "h": 2450
+    },
+    {
+      "file": "Transparency.dc.html",
+      "title": "Transparency",
+      "x": 1560,
+      "y": 6420,
+      "w": 1440,
+      "h": 1420
+    },
+    {
+      "file": "Research.dc.html",
+      "title": "Research",
+      "x": 3120,
+      "y": 6420,
+      "w": 1440,
+      "h": 1520
+    }
+  ],
+  "annotations": [
+    {
+      "id": "site-note",
+      "x": 0,
+      "y": -200,
+      "w": 520,
+      "text": "Koine design pack, direction A (Prospectus): warm off-white, Newsreader headlines, IBM Plex body and mono numerals, ink CTAs, green reserved for verified. Every name, handle, market and number is SAMPLE data. Rows: (1) public marketplace surface, (2) investor flows, (3) social + creator acquisition, (4) trust pages."
+    },
+    {
+      "id": "tail-note",
+      "x": 1000,
+      "y": 2780,
+      "w": 420,
+      "text": "Tail, Portfolio and fees need a trade-scoped key and a performance fee: out of MVP scope per BUILD_PLAN until legal review. Designed now so the accelerator sees the full product; the stubbed site should show these as sample/demo."
+    }
+  ],
+  "launch": {
+    "view": "canvas"
+  }
+}

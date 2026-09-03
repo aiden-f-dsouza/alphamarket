@@ -1,0 +1,13 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "title": "Landing", "x": 0, "y": 0, "w": 1440, "h": 2140 },
+    { "file": "Explore.dc.html", "title": "Explore", "x": 1560, "y": 0, "w": 1440, "h": 1200 },
+    { "file": "Strategy.dc.html", "title": "Public strategy page", "x": 3120, "y": 0, "w": 1440, "h": 1950 },
+    { "file": "Dashboard.dc.html", "title": "Trader dashboard", "x": 1560, "y": 1340, "w": 1440, "h": 1560 },
+    { "file": "Connect.dc.html", "title": "Connect a key", "x": 3120, "y": 2090, "w": 1440, "h": 1100 }
+  ],
+  "annotations": [
+    { "id": "sample-data", "x": 0, "y": -150, "w": 420, "text": "Direction: dark tape. Names, handles, markets and every number are SAMPLE data for the demo. Copy is drafted from the product's real behaviour (read-only keys, nightly reconciliation, unverified thesis box)." }
+  ],
+  "launch": { "view": "canvas" }
+}
