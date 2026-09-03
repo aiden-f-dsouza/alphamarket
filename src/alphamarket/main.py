@@ -7,7 +7,7 @@ from alphamarket.config import get_settings
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="AlphaMarket", version="0.1.0")
+    app = FastAPI(title="Koine", version="0.1.0")
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.secret_key,

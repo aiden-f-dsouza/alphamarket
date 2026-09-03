@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     # Session cookie flags; true behind HTTPS at deploy (M4.4).
     secure_cookies: bool = False
     public_base_url: str = "http://localhost:8000"
+    # Demo build for the accelerator: serves clearly-labelled SAMPLE data on
+    # pages the MVP cannot compute yet (tailing, portfolio, feed) and pads the
+    # marketplace with sample strategies. Never on for real users: preflight
+    # refuses it, and every sample page carries a "Sample data" banner.
+    demo_mode: bool = False
 
     @property
     def sqlalchemy_url(self) -> str:

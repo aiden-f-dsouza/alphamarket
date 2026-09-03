@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Portfolio · Koine{% endblock %}
+{% block nav_active %}portfolio{% endblock %}
+{% block style %}
+  .top { display:grid; grid-template-columns:1fr 340px; gap:24px; align-items:start; }
+  .arow { display:grid; grid-template-columns:1fr 110px 110px 90px 90px 70px; align-items:center; gap:16px; padding:14px 0; border-bottom:1px solid var(--line); }
+  .arow .r { text-align:right; }
+  .act { display:grid; grid-template-columns:100px 90px 1fr 80px; gap:14px; align-items:baseline; padding:11px 0; border-bottom:1px solid var(--line); }
+  @media (max-width:1000px) { .top { grid-template-columns:1fr; } .arow { grid-template-columns:1fr 110px; } .arow .hide { display:none; } }
+{% endblock %}
+{% block content %}
+<div class="spread">
+  <div class="stack" style="gap:8px"><span class="label">Portfolio</span><h1 style="font-size:40px">Your tailed strategies</h1></div>
+  <div style="display:flex;gap:12px"><button class="btn secondary" type="button" disabled title="Available when tailing launches">Connect an account</button><a class="btn" href="/marketplace">Browse strategies</a></div>
+</div>
+<div class="top">
+  <div class="card">
+    <div class="stats four" style="border-bottom:1px solid var(--line)">
+      <div class="stat"><span class="label">Portfolio value</span><span class="v" style="font-size:28px">{{ m.usd(p.value) }}<small>{{ p.accounts }} accounts</small></span></div>
+      <div class="stat"><span class="label">P&amp;L, all time</span><span class="v good" style="font-size:28px">{{ "+" if p.pnl >= 0 }}{{ m.usd(p.pnl) }}<small>{{ m.pct(p.pnl_pct) }}</small></span></div>
+      <div class="stat"><span class="label">Current drawdown</span><span class="v bad" style="font-size:28px">{{ m.pct(-p.current_dd) }}<small>worst {{ m.pct(-p.worst_dd) }}</small></span></div>
+      <div class="stat"><span class="label">Fees paid</span><span class="v" style="font-size:28px">{{ m.usd(p.fees_paid) }}<small>20% above HWM</small></span></div>
+    </div>
+    <div class="body" style="gap:10px;padding:20px 28px">
+      <div class="spread"><span class="label">Portfolio value · 90 days</span><span class="mono small muted">net of fees</span></div>
+      <div class="chart" style="grid-template-columns:52px 1fr">
+        <div class="y" style="padding-bottom:22px">{% for i in range(5) %}<span>{{ m.usd(p.curve_hi - (p.curve_hi - p.curve_lo) * i / 4, 0) }}</span>{% endfor %}</div>
+        <div class="stack" style="gap:8px">
+          <svg width="100%" viewBox="0 0 900 200" preserveAspectRatio="none" style="display:block;height:200px;overflow:visible">{% for i in range(5) %}<line x1="0" y1="{{ 50 * i }}" x2="900" y2="{{ 50 * i }}" stroke="var(--line)" vector-effect="non-scaling-stroke"/>{% endfor %}<polyline points="{{ p.curve }}" fill="none" stroke="var(--brand)" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>
+          <div class="x">{% for d in p.x_labels %}<span>{{ d }}</span>{% endfor %}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="card"><div class="body" style="gap:4px;padding:20px 24px"><span class="label" style="padding-bottom:6px">Portfolio risk</span><div class="kv">{% for a, b in p.risk %}<div><span>{{ a }}</span><span class="{{ 'bad' if b.startswith('−') }}">{{ b }}</span></div>{% endfor %}</div></div></div>
+</div>
+<div class="grid2">
+  <div class="card"><div class="body" style="gap:4px;padding:20px 28px">
+    <div class="arow" style="padding:0 0 8px;border-bottom:1px solid var(--line2)"><span class="label">Strategy</span><span class="label r">Allocated</span><span class="label r hide">Value</span><span class="label r hide">Return</span><span class="label r hide">Drawdown</span><span class="label r hide">Limit</span></div>
+    {% for a in p.allocations %}
+    <div class="arow">
+      <div class="stack" style="gap:3px"><a href="/s/{{ a.slug }}" style="font-weight:500">{{ a.name }}</a><span class="mono small muted">{{ a.handle }} · {{ a.days }}d tailing</span></div>
+      <span class="mono r text2" style="font-size:14px">{{ m.usd(a.allocated, 0) }}</span>
+      <span class="mono r hide">{{ m.usd(a.value) }}</span>
+      <span class="mono r good hide" style="font-size:14px">{{ m.pct(a.ret) }}</span>
+      <span class="mono r bad hide" style="font-size:14px">{{ m.pct(-a.dd) }}</span>
+      <span class="mono r muted hide" style="font-size:12px">−15%</span>
+    </div>
+    {% endfor %}
+  </div></div>
+  <div class="card"><div class="body" style="gap:4px;padding:20px 28px">
+    <div class="spread" style="padding-bottom:8px;border-bottom:1px solid var(--line2)"><span class="label">Activity</span><span class="mono small muted">all accounts</span></div>
+    {% for when, kind, what, amt in p.activity %}
+    <div class="act"><span class="mono small muted">{{ when }}</span><span class="label" style="color:var(--text2)">{{ kind }}</span><span class="small" style="font-size:14px">{{ what }}</span><span class="mono small r {{ 'good' if amt and amt > 0 else ('bad' if amt else '') }}" style="text-align:right">{% if amt %}{{ "+" if amt > 0 }}{{ m.usd(amt) }}{% endif %}</span></div>
+    {% endfor %}
+  </div></div>
+</div>
+{% endblock %}

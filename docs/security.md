@@ -1,6 +1,6 @@
 # Security and privacy: what we can see, and what we can never do
 
-This is the plain-English version of how AlphaMarket handles your Kalshi
+This is the plain-English version of how Koine handles your Kalshi
 connection. It is deliberately short. If anything here stops being true, this
 page changes first.
 
@@ -27,8 +27,8 @@ list. We poll these every few minutes and once nightly for reconciliation.
 - **Place, amend, or cancel orders.** The key has no write scope; Kalshi
   enforces that on their side, not us.
 - **Move money.** There is no deposit, withdrawal, or transfer capability in
-  the Kalshi API for any key, and AlphaMarket has no payment integration at
-  all. No money moves through AlphaMarket, ever.
+  the Kalshi API for any key, and Koine has no payment integration at
+  all. No money moves through Koine, ever.
 - **See your Kalshi login, email, or password.** The API key is not your
   login.
 

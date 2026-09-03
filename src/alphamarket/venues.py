@@ -103,7 +103,7 @@ def connect_account(db: Session, user: User, payload: ConnectIn) -> dict:
         raise HTTPException(
             status_code=422,
             detail=(
-                "This API key has write (trading) scope. AlphaMarket only accepts "
+                "This API key has write (trading) scope. Koine only accepts "
                 "read-only keys: create a new key with read-only scope and connect that."
             ),
         )

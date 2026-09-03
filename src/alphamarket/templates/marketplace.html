@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Marketplace · Koine{% endblock %}
+{% block nav_active %}marketplace{% endblock %}
+{% block style %}
+  .tabs { display:flex; align-items:center; justify-content:space-between; gap:24px; border-bottom:1px solid var(--line); }
+  .tabs > div { display:flex; gap:28px; }
+  .tabs a, .tabs span[aria-disabled] { display:inline-flex; align-items:center; gap:8px; font-size:14px; font-weight:500; padding:10px 0; color:var(--muted); border-bottom:1.5px solid transparent; }
+  .tabs a.on { color:var(--text); border-bottom-color:var(--brand); }
+  .tabs span[aria-disabled] { cursor:default; }
+  .tabs i { font:10px var(--mono); letter-spacing:.06em; text-transform:uppercase; font-style:normal; color:var(--muted); border:1px solid var(--line2); padding:2px 6px; border-radius:var(--r); }
+  .search { display:flex; align-items:center; gap:8px; width:280px; height:38px; padding:0 12px; background:var(--surface); border:1px solid var(--line2); border-radius:var(--r); }
+  .search input { border:0; padding:0; height:100%; font-size:14px; background:none; } .search input:focus { outline:none; }
+  .filters { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  .lrow { display:grid; grid-template-columns:36px minmax(0,1fr) 112px 96px 96px 72px 64px 150px 88px; align-items:center; gap:18px; padding:16px 24px; border-bottom:1px solid var(--line); }
+  .lrow.head { padding:12px 24px; border-bottom:1px solid var(--line2); background:var(--bg); }
+  .lrow .r { text-align:right; }
+  .lrow:last-child { border-bottom:0; }
+  @media (max-width:1000px) { .lrow { grid-template-columns:36px 1fr 96px; } .lrow .hide { display:none; } .tabs { flex-direction:column; align-items:flex-start; } }
+{% endblock %}
+{% block content %}
+<div class="spread">
+  <div class="stack" style="gap:12px">
+    <h1>Marketplace</h1>
+    <p class="text2" style="max-width:720px">Every row is computed from venue data and reconciled nightly. {% if demo %}Ranked by the Koine score: risk-adjusted return, consistency, drawdown and length of verified record. Not by raw return.{% else %}Sorted by total return since verification; the risk-adjusted Koine score arrives with the first 90-day records.{% endif %}</p>
+  </div>
+  <div class="stack" style="align-items:flex-end;gap:4px"><span class="mono" style="font-size:32px;font-weight:500;line-height:1">{{ rows|length }}</span><span class="label">{{ "verified strateg" ~ ("y" if rows|length == 1 else "ies") }}</span></div>
+</div>
+
+<div class="tabs">
+  <div><a class="on" href="/marketplace" aria-current="page">Prediction markets</a><span aria-disabled="true" title="Not yet available">Stocks <i>soon</i></span><span aria-disabled="true" title="Not yet available">Crypto <i>soon</i></span></div>
+  <form method="get" action="/marketplace" class="search" role="search">
+    {% if tag %}<input type="hidden" name="tag" value="{{ tag }}">{% endif %}{% if incubating %}<input type="hidden" name="incubating" value="1">{% endif %}
+    {{ m.icon("search", 14, "var(--muted)") }}<input type="search" name="q" value="{{ q }}" placeholder="Search strategies or creators" aria-label="Search strategies or creators">
+  </form>
+</div>
+
+<div class="filters">
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    {% set keep = ('&incubating=1' if incubating) ~ ('&q=' ~ q|urlencode if q) %}
+    <a class="chip {{ 'on' if not tag }}" href="/marketplace{{ '?' ~ keep[1:] if keep }}">All</a>
+    {% for t in tags %}<a class="chip {{ 'on' if t == tag }}" href="/marketplace?tag={{ t|urlencode }}{{ keep }}">{{ t }}</a>{% endfor %}
+  </div>
+  <form method="get" action="/marketplace" class="toggle mono small text2">
+    {% if tag %}<input type="hidden" name="tag" value="{{ tag }}">{% endif %}{% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
+    <input type="checkbox" name="incubating" value="1" {% if incubating %}checked{% endif %} onchange="this.form.submit()"> Show incubating
+  </form>
+</div>
+
+<div class="card">
+  <div class="lrow head">
+    <span class="label">#</span><span class="label">Strategy</span><span class="label hide">60 days</span><span class="label r">Return</span><span class="label r hide">Worst DD</span><span class="label r hide">Sharpe</span><span class="label r hide">Risk</span><span class="label hide">{{ "Capacity" if demo else "Reconciliation" }}</span><span class="label r hide">{{ "Score" if demo else "Verified" }}</span>
+  </div>
+  {% for r in rows %}
+  <div class="lrow">
+    <span class="mono small muted">{{ "%02d"|format(loop.index) }}</span>
+    <div class="stack" style="gap:6px"><a href="/s/{{ r.slug }}" style="font-size:16px;font-weight:500">{{ r.name }}</a>
+      <div class="badges"><span class="mono small muted">{{ r.display_name }}</span>{% for t in r.tags %}<span class="tag">{{ t }}</span>{% endfor %}{% if r.incubating %}<span class="badge warn">incubating · {{ r.track_days }}d</span>{% else %}{{ m.verified(r.track_days ~ "d") }}{% endif %}</div></div>
+    <div class="hide">{{ m.sparkline(r.spark, r.total_return >= 0) }}</div>
+    <span class="mono r {{ 'good' if r.total_return >= 0 else 'bad' }}" style="font-size:16px">{{ m.pct(r.total_return) }}</span>
+    <span class="mono r bad hide" style="font-size:14px">{{ m.pct(-r.max_drawdown) }}</span>
+    <span class="mono r hide" style="font-size:14px">{{ m.num(r.sharpe) if r.sharpe is defined else "—" }}</span>
+    <span class="mono r hide" style="font-size:14px">{{ r.risk_score }}<span class="muted">/10</span></span>
+    {% if r.capacity_k is defined %}
+    <div class="stack hide" style="gap:5px"><span class="mono small text2">${{ r.tailing_k }}k <span class="muted">of ~${{ r.capacity_k }}k</span></span>{{ m.bar(r.tailing_k * 100 / r.capacity_k) }}</div>
+    <span class="mono r hide" style="font-size:16px;font-weight:500">{{ "%.1f"|format(r.score) }}</span>
+    {% else %}
+    <span class="mono small hide" style="display:inline-flex;align-items:center;gap:6px">{% if r.reconciled %}{{ m.icon("check", 14, "var(--good)", 2) }}<span class="text2">matched last night</span>{% elif r.reconciled is none %}<span class="muted">first run pending</span>{% else %}{{ m.icon("x", 14, "var(--warn)", 2) }}<span class="warn">diverged</span>{% endif %}</span>
+    <span class="mono r hide" style="font-size:14px">{{ r.track_days }}<span class="muted"> d</span></span>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="body"><span class="muted">{% if q %}Nothing matches “{{ q }}”{{ " in this tag" if tag }}. <a href="/marketplace" style="text-decoration:underline">Clear the search.</a>{% else %}No {{ "strategies with this tag" if tag else "verified strategies" }} yet.{% endif %}{% if not incubating %} Strategies under 90 verified days are hidden; switch on “Show incubating” to see them.{% endif %}</span></div>
+  {% endfor %}
+</div>
+
+<div class="grid2">
+  <div class="card plain"><div class="body" style="gap:8px;padding:20px 24px"><span class="label">How the score works</span><p class="small text2">Sharpe and Sortino carry most of the weight. Consistency (share of profitable months), worst drawdown and verified days adjust it. A strategy under 90 verified days is incubating and cannot rank above 5.0 regardless of return. <a href="/verification" style="text-decoration:underline">Full formula on the Verification page.</a></p></div></div>
+  <div class="card plain"><div class="body" style="gap:8px;padding:20px 24px"><span class="label">Why losers are listed</span><p class="small text2">Strategies that are losing money stay on the marketplace with their record intact. Hiding them would make the winners look like the whole population. A diverged reconciliation quarantines a page until it matches again. <a href="/transparency" style="text-decoration:underline">Platform-wide outcomes.</a></p></div></div>
+</div>
+{% endblock %}

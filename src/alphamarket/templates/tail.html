@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% set s = t.strategy %}
+{% block title %}Tail {{ s.name }} · Koine{% endblock %}
+{% block nav_active %}marketplace{% endblock %}
+{% block style %}
+  .cols { display:grid; grid-template-columns:minmax(0, 720px) 1fr; gap:64px; align-items:start; }
+  .stepper { display:flex; align-items:center; gap:12px; }
+  .stepper > div { display:flex; align-items:center; gap:10px; font-size:14px; color:var(--muted); }
+  .stepper > div.on { color:var(--text); }
+  .stepper i { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:50%; font:12px var(--mono); font-style:normal; border:1px solid var(--line2); }
+  .stepper > div.on i { color:var(--surface); background:var(--brand); border-color:var(--brand); }
+  .stepper > span { flex-grow:1; height:1px; background:var(--line2); }
+  .acct { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 18px; border:1px solid var(--brand); border-radius:var(--r); background:var(--surface); }
+  .radio { display:inline-flex; width:18px; height:18px; border-radius:50%; border:5px solid var(--brand); }
+  .big { font:500 36px var(--mono); }
+  .can > div { display:flex; align-items:flex-start; gap:10px; font-size:14px; color:var(--text2); line-height:1.4; }
+  @media (max-width:1000px) { .cols { grid-template-columns:1fr; } .stepper > div span { display:none; } }
+{% endblock %}
+{% block content %}
+<div class="cols">
+  <div class="stack" style="gap:32px">
+    <div class="stack">
+      <span class="label">Tail · {{ s.name }} · by {{ s.display_name }}</span>
+      <h1 style="font-size:40px">Tail from your own account.</h1>
+      <p class="text2">Set the amount and the limits. Trades are mirrored into the account you choose, in proportion to your allocation. Stop any time.</p>
+    </div>
+    <div class="stepper">
+      <div class="on"><i>1</i><span>Account</span></div><span></span><div class="on"><i>2</i><span>Allocation</span></div><span></span><div class="on"><i>3</i><span>Drawdown limit</span></div><span></span><div class="on"><i>4</i><span>Fees</span></div><span></span><div><i>5</i><span>Confirm</span></div>
+    </div>
+    <div class="stack" style="gap:12px"><span class="label">1 · Connected account</span>
+      <div class="acct">
+        <div style="display:flex;align-items:center;gap:12px"><span class="radio"></span><div class="stack" style="gap:2px"><span style="font-weight:500">{{ t.account.venue }} · ····{{ t.account.last4 }}</span><span class="mono small muted">trade-scoped key · connected {{ t.account.connected }} · no withdrawal permission</span></div></div>
+        <span class="mono">{{ m.usd(t.account.balance) }}</span>
+      </div>
+      <div><button class="btn secondary sm" type="button" disabled title="Available when tailing launches">{{ m.icon("plus", 14) }}Connect another account</button></div>
+    </div>
+    <div class="grid2">
+      <div class="card"><div class="body" style="padding:20px 24px">
+        <span class="label">2 · Allocation</span>
+        <span style="display:inline-flex;align-items:baseline;gap:6px"><span class="big">{{ m.usd(t.allocation, 0) }}</span><span class="mono small muted">{{ t.allocation_pct }}% of account</span></span>
+        {{ m.bar(t.allocation_pct, "var(--brand)", 6) }}
+        <div class="spread mono muted" style="font-size:11px"><span>${{ t.min_usd }} min</span><span>{{ m.usd(t.account.balance, 0) }}</span></div>
+        <span class="small muted">Koine mirrors each trade at {{ "%.0f"|format(t.allocation) }} / {{ "%.0f"|format(s.stats.equity) }} of the creator's size.</span>
+      </div></div>
+      <div class="card"><div class="body" style="padding:20px 24px">
+        <span class="label">3 · Maximum drawdown</span>
+        <span style="display:inline-flex;align-items:baseline;gap:6px"><span class="big bad">{{ m.pct(-t.dd_limit, 0) }}</span><span class="mono small muted">stop at {{ m.usd(t.stop_at, 0) }}</span></span>
+        {{ m.bar(t.dd_limit * 200, "var(--bad)", 6) }}
+        <div class="spread mono muted" style="font-size:11px"><span>−5%</span><span>−50%</span></div>
+        <span class="small muted">If your allocation falls {{ "%.0f"|format(t.dd_limit * 100) }}% from its high, mirroring stops and you are notified. The strategy's worst drawdown so far is {{ "%.1f"|format(s.stats.max_drawdown * 100) }}%.</span>
+      </div></div>
+    </div>
+    <div class="card"><div class="body" style="gap:4px;padding:20px 24px">
+      <span class="label" style="padding-bottom:6px">4 · Fees</span>
+      {% for a, b in t.fee_rows %}<div style="display:grid;grid-template-columns:200px 1fr;gap:16px;padding:10px 0;border-bottom:1px solid var(--line);font-size:14px"><span class="text2">{{ a }}</span><span>{{ b }}</span></div>{% endfor %}
+    </div></div>
+    <div class="card ink"><div class="body" style="gap:14px">
+      <span class="label">5 · Confirm</span>
+      <span style="font-size:16px;line-height:1.5">Koine will place mirrored trades in {{ t.account.venue }} ····{{ t.account.last4 }} using a trade-scoped key. <span class="text2">That key cannot withdraw, transfer or deposit funds. Koine never holds your money.</span></span>
+      <label style="display:flex;align-items:flex-start;gap:12px;font-size:14px;line-height:1.5" class="text2"><input type="checkbox" style="width:18px;height:18px;margin:2px 0 0;padding:0;flex-shrink:0;accent-color:var(--surface)">I understand this is a live trading strategy with a {{ s.stats.track_days }}-day record. I can lose money, including more than the drawdown limit in a fast market.</label>
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap"><a class="btn light lg" href="/s/{{ s.slug }}" title="Sample flow: tailing is not live yet">Start tailing</a><span class="small text2">Sample flow. Tailing launches after the verification layer; nothing is placed.</span></div>
+    </div></div>
+  </div>
+  <div class="stack" style="gap:20px">
+    <div class="card"><div class="body" style="gap:14px;padding:20px 24px">
+      <span class="label">You are tailing</span>
+      <div class="stack" style="gap:4px"><span style="font-weight:600">{{ s.name }}</span><span class="small muted">{{ s.display_name }} · Kalshi</span></div>
+      {{ m.verified("Verified", s.stats.track_days) }}
+      <div class="stats two" style="border-top:1px solid var(--line)">
+        <div class="stat" style="padding:12px 0 0"><span class="label">Return</span><span class="v good" style="font-size:18px">{{ m.pct(s.stats.total_return) }}</span></div>
+        <div class="stat" style="padding:12px 0 0"><span class="label">Worst DD</span><span class="v bad" style="font-size:18px">{{ m.pct(-s.stats.max_drawdown) }}</span></div>
+      </div>
+    </div></div>
+    <div class="card plain"><div class="body can" style="gap:10px;padding:20px 24px">
+      <span class="label">What Koine can and cannot do</span>
+      <div>{{ m.icon("check", 16, "var(--good)", 2) }}Place and close mirrored positions, sized to your allocation</div>
+      <div>{{ m.icon("check", 16, "var(--good)", 2) }}Stop when your drawdown limit is hit</div>
+      <div>{{ m.icon("x", 16, "var(--bad)", 2) }}Withdraw, transfer or deposit funds</div>
+      <div>{{ m.icon("x", 16, "var(--bad)", 2) }}Trade outside the tailed strategy</div>
+      <div>{{ m.icon("x", 16, "var(--bad)", 2) }}See or share the creator's strategy logic</div>
+    </div></div>
+  </div>
+</div>
+{% endblock %}

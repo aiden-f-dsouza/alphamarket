@@ -40,6 +40,7 @@ packages = ["src/alphamarket"]
 line-length = 100
 target-version = "py312"
 src = ["src", "tests", "scripts"]
+extend-exclude = ["design"]  # mockup canvas sources, not app code
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

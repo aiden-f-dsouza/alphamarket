@@ -1,27 +1,132 @@
 {% extends "base.html" %}
-{% block content %}
-<div class="panel">
-  <h1>Stop posting screenshots. Post a link that proves it.</h1>
-  <p class="muted">Connect a <strong>read-only</strong> Kalshi API key. AlphaMarket ingests your fills and settlements straight from the venue, reconciles them against your balance nightly, and publishes a verified track record page. No money moves. Self-reported numbers never appear. <a href="/methodology">How verification works.</a></p>
-</div>
-{% if error %}<div class="error">{{ error }}</div>{% endif %}
-<div class="grid2">
-  <div class="panel">
-    <h2>Create account</h2>
-    <form method="post" action="/signup-form">
-      <label>Display name (shown publicly)</label><input name="display_name" required minlength="2" maxlength="80">
-      <label>Email (never shown)</label><input name="email" type="email" required>
-      <label>Password (10+ characters)</label><input name="password" type="password" required minlength="10">
-      <p><button type="submit">Sign up</button></p>
-    </form>
+{% import "_macros.html" as m %}
+{% block title %}Koine · Invest in traders who can prove it{% endblock %}
+{% block style %}
+  .hero { display:grid; grid-template-columns:minmax(0, 600px) minmax(0, 540px); justify-content:space-between; align-items:center; gap:48px; padding:88px 0 80px; }
+  .hero h1 { font-size:64px; }
+  .hero-card { width:100%; max-width:540px; box-shadow:0 24px 60px -30px rgba(20,21,24,.25); }
+  .trust { display:flex; align-items:center; gap:22px; flex-wrap:wrap; font:12px var(--mono); color:var(--muted); }
+  .trust span { display:inline-flex; align-items:center; gap:6px; }
+  .points { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); }
+  .points > div { display:flex; flex-direction:column; gap:14px; padding:28px 28px 32px; border-right:1px solid var(--line); }
+  .points > div:last-child { border-right:0; }
+  .points i { display:inline-flex; width:36px; height:36px; align-items:center; justify-content:center; background:var(--bg); border-radius:var(--r); }
+  .how { display:grid; grid-template-columns:420px 1fr; gap:96px; padding-top:112px; }
+  .steps > div { display:grid; grid-template-columns:56px 1fr; gap:20px; padding:28px 0; border-top:1px solid var(--line); }
+  .steps > div:last-child { border-bottom:1px solid var(--line); }
+  .proof { display:grid; grid-template-columns:1fr 1fr; gap:64px; padding-top:112px; align-items:start; }
+  .lrow { display:grid; grid-template-columns:1fr 100px 100px 80px 90px; align-items:center; gap:16px; padding:14px 0; border-top:1px solid var(--line); }
+  .lrow .r { text-align:right; }
+  .ctas { display:grid; grid-template-columns:1fr 1fr; gap:24px; padding:112px 0 96px; }
+  .ctas .card { padding:40px; gap:16px; }
+  @media (max-width:1000px) { .hero { grid-template-columns:1fr; padding:48px 0; } .hero h1 { font-size:44px; } .points, .how, .proof, .ctas { grid-template-columns:1fr; gap:32px; } .points > div { border-right:0; border-bottom:1px solid var(--line); } .lrow { grid-template-columns:1fr 100px; } .lrow .hide { display:none; } }
+{% endblock %}
+{% block body %}
+<div class="section hero">
+  <div class="stack" style="gap:28px">
+    <span class="label good">Verified strategy marketplace · prediction markets first</span>
+    <h1>Invest in traders who can prove it.</h1>
+    <p class="lead" style="font-size:18px;max-width:520px">Koine verifies trading track records straight from the venue, then lets you tail the ones you trust from your own account, with a drawdown limit you set. No screenshots, no signal groups, no custody.</p>
+    <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin-top:4px">
+      <a class="btn lg" href="/marketplace">Browse verified strategies</a>
+      <a href="/verification" class="text2" style="display:inline-flex;align-items:center;gap:8px;font-weight:500">How verification works {{ m.icon("arrow", 14) }}</a>
+    </div>
+    <div class="trust" style="margin-top:8px">
+      <span>{{ m.icon("lock", 13, "var(--muted)") }}Read-only verification keys</span>
+      <span>{{ m.icon("check", 13, "var(--muted)", 2) }}Reconciled nightly</span>
+      <span>{{ m.icon("x", 13, "var(--muted)", 2) }}Never holds funds</span>
+    </div>
   </div>
-  <div class="panel">
-    <h2>Log in</h2>
-    <form method="post" action="/login-form">
-      <label>Email</label><input name="email" type="email" required>
-      <label>Password</label><input name="password" type="password" required>
-      <p><button type="submit">Log in</button></p>
-    </form>
+  {{ m.strategy_card(featured) }}
+</div>
+
+<div class="section">
+  <div class="card points">
+    <div><i>{{ m.icon("shield", 18, "var(--brand)") }}</i><h3>Track records are verified</h3><p class="small text2">Every number is computed by Koine from the venue's own fill and settlement data, pulled with a read-only key. Nothing on a strategy page was typed by its creator.</p></div>
+    <div><i>{{ m.icon("lock", 18, "var(--brand)") }}</i><h3>Your money stays in your account</h3><p class="small text2">Tailing mirrors a strategy into your own brokerage account. Koine never holds, moves or can withdraw a dollar of it.</p></div>
+    <div><i>{{ m.icon("eye-off", 18, "var(--brand)") }}</i><h3>Strategies stay private</h3><p class="small text2">Creators are verified on outcomes. They never reveal their model, code or thesis to Koine or to you.</p></div>
+    <div><i>{{ m.icon("scale", 18, "var(--brand)") }}</i><h3>Creators earn only when you profit</h3><p class="small text2">A performance fee on gains above your high-water mark. No gains, no fee. No subscriptions, no signal groups.</p></div>
+  </div>
+</div>
+
+<div class="section how">
+  <div class="stack" style="gap:20px">
+    <span class="label">How it works</span>
+    <h2 style="font-size:36px">Proof first. Then, and only then, capital.</h2>
+    <p class="text2" style="font-size:16px">Every strategy on Koine earns its place with a record we computed ourselves. Returns are never shown without the drawdown it took to get them.</p>
+    <div><a class="btn secondary" href="/verification">Read the methodology</a></div>
+  </div>
+  <div class="steps">
+    <div><span class="mono muted small" style="padding-top:4px">01</span><div class="stack" style="gap:8px"><h3 style="font-size:20px">A creator connects a read-only key</h3><p class="text2">Koine checks the key's scope before storing it. A key that can place orders is refused. Fills and settlements stream into an append-only ledger.</p></div></div>
+    <div><span class="mono muted small" style="padding-top:4px">02</span><div class="stack" style="gap:8px"><h3 style="font-size:20px">The ledger is reconciled every night</h3><p class="text2">We replay every trade and compare the computed balance against the venue's. If they disagree, the page is quarantined until they match.</p></div></div>
+    <div><span class="mono muted small" style="padding-top:4px">03</span><div class="stack" style="gap:8px"><h3 style="font-size:20px">You tail with limits you set</h3><p class="text2">Pick an allocation and a maximum drawdown. Mirrored trades land in your own account. Breach the limit and tailing stops.</p></div></div>
+  </div>
+</div>
+
+<div class="section proof">
+  <div class="stack" style="gap:20px">
+    <span class="label">Ranked by risk-adjusted return</span>
+    <h2>What is verified today.</h2>
+    <div>
+      <div class="lrow" style="border-top:0;padding-top:0"><span class="label">Strategy</span><span class="label r">Return</span><span class="label r hide">Worst DD</span><span class="label r hide">Sharpe</span><span class="label r hide">Record</span></div>
+      {% for r in top %}
+      <div class="lrow">
+        <div class="stack" style="gap:3px"><a href="/s/{{ r.slug }}" style="font-weight:500">{{ r.name }}</a><span class="mono small muted">{{ r.display_name }}</span></div>
+        <span class="mono r {{ 'good' if r.total_return >= 0 else 'bad' }}">{{ m.pct(r.total_return) }}</span>
+        <span class="mono r bad hide">{{ m.pct(-r.max_drawdown) }}</span>
+        <span class="mono r hide">{{ m.num(r.sharpe) if r.sharpe is defined else "—" }}</span>
+        <span class="r hide" style="display:inline-flex;justify-content:flex-end">{% if r.incubating %}<span class="badge warn">{{ r.track_days }}d</span>{% else %}{{ m.verified(r.track_days ~ "d") }}{% endif %}</span>
+      </div>
+      {% else %}
+      <div class="lrow" style="grid-template-columns:1fr"><span class="text2">No verified strategies yet. The first records are being computed; a page goes live after its first nightly reconciliation.</span></div>
+      {% endfor %}
+    </div>
+    <a href="/marketplace" style="display:inline-flex;align-items:center;gap:8px;font-weight:500">Open the marketplace {{ m.icon("arrow", 14) }}</a>
+  </div>
+  <div class="stack" style="gap:20px">
+    <span class="label">What a page proves</span>
+    <h2>A narrow claim, made precisely.</h2>
+    <div class="grid2" style="gap:32px">
+      <div class="hairline-list"><span class="label" style="display:block;padding:0 0 8px;border-bottom:1px solid var(--line2)">Verified</span>
+        <div>{{ m.icon("check", 18, "var(--good)", 2) }}<span>Every trade happened at the venue, in that account.</span></div>
+        <div>{{ m.icon("check", 18, "var(--good)", 2) }}<span>Returns are net of venue fees, to the sub-cent.</span></div>
+        <div>{{ m.icon("check", 18, "var(--good)", 2) }}<span>The equity curve matched the venue balance last night.</span></div>
+        <div>{{ m.icon("check", 18, "var(--good)", 2) }}<span>Drawdowns and losing months are shown at the same size as gains.</span></div>
+      </div>
+      <div class="hairline-list text2"><span class="label" style="display:block;padding:0 0 8px;border-bottom:1px solid var(--line2)">Not verified</span>
+        <div>{{ m.icon("minus", 18, "var(--muted)", 2) }}<span>That the creator will keep winning.</span></div>
+        <div>{{ m.icon("minus", 18, "var(--muted)", 2) }}<span>Anything the creator wrote about the strategy.</span></div>
+        <div>{{ m.icon("minus", 18, "var(--muted)", 2) }}<span>Activity older than the venue's history allows.</span></div>
+        <div>{{ m.icon("minus", 18, "var(--muted)", 2) }}<span>Positions held on venues that are not connected.</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" id="signup" style="padding-top:112px">
+  <div class="card"><div class="body" style="flex-direction:row;align-items:center;justify-content:space-between;gap:24px;padding:28px;flex-wrap:wrap">
+    {% if user %}
+    <div class="stack" style="gap:4px"><h3>You're logged in as {{ user.display_name }}.</h3><span class="small muted">Connect a key or manage your listing from the dashboard.</span></div>
+    <a class="btn" href="/dashboard">Go to dashboard</a>
+    {% else %}
+    <div class="stack" style="gap:4px"><h3>Create a free account.</h3><span class="small muted">Investors browse and follow. Creators connect a read-only key from the dashboard.</span></div>
+    <div style="display:flex;align-items:center;gap:20px"><a class="btn" href="/signup">Create account</a><a href="/login" class="text2" style="font-weight:500">Log in</a></div>
+    {% endif %}
+  </div></div>
+</div>
+
+<div class="section ctas">
+  <div class="card ink">
+    <span class="label">For investors</span>
+    <span class="serif" style="font-size:30px;line-height:1.15">Tail a verified strategy from your own account.</span>
+    <span class="text2">Set an allocation and a drawdown limit. Pay a fee only on profit above your high-water mark.</span>
+    <div style="margin-top:8px"><a class="btn light" href="/marketplace">Browse strategies</a></div>
+  </div>
+  <div class="card">
+    <span class="label">For creators</span>
+    <span class="serif brand-c" style="font-size:30px;line-height:1.15">Get paid for outcomes. Keep your edge to yourself.</span>
+    <span class="text2">Connect a read-only key. We publish the record; you never reveal the strategy.</span>
+    <div style="margin-top:8px"><a class="btn secondary" href="/creators">Verify a track record</a></div>
   </div>
 </div>
 {% endblock %}

@@ -24,6 +24,8 @@ def main() -> int:
         problems.append("KALSHI_ENV=prod but SECURE_COOKIES is false (session cookie over HTTP)")
     if s.kalshi_env == "prod" and s.public_base_url.startswith("http://"):
         problems.append("PUBLIC_BASE_URL is http:// in prod")
+    if s.demo_mode:
+        problems.append("DEMO_MODE is on (sample pages would be served to real users)")
 
     try:
         with engine.connect() as conn:

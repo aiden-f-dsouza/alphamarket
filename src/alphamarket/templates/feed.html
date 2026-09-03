@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Feed · Koine{% endblock %}
+{% block nav_active %}feed{% endblock %}
+{% block style %}
+  .cols { display:grid; grid-template-columns:220px minmax(0, 1fr) 340px; gap:32px; align-items:start; }
+  .side a, .side span[aria-disabled] { display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:var(--r); font-size:14px; font-weight:500; color:var(--text2); border:1px solid transparent; }
+  .side a.on { color:var(--text); background:var(--surface); border-color:var(--line2); }
+  .side span[aria-disabled] { color:var(--muted); cursor:default; }
+  .room { display:flex; align-items:center; justify-content:space-between; font-size:14px; color:var(--text2); padding:4px 0; }
+  .post { display:flex; flex-direction:column; gap:12px; padding:20px 24px; }
+  .ctx { display:inline-flex; align-items:center; gap:6px; font:11px var(--mono); color:var(--good); background:var(--goodbg); padding:4px 8px; border-radius:var(--r); margin-left:auto; }
+  .ctx.none { color:var(--muted); background:transparent; }
+  .strat { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border:1px solid var(--line2); border-radius:var(--r); background:var(--bg); }
+  .msg { display:flex; flex-direction:column; gap:3px; padding:8px 0; }
+  @media (max-width:1000px) { .cols { grid-template-columns:1fr; } }
+{% endblock %}
+{% block content %}
+<div class="cols">
+  <div class="stack side" style="gap:24px">
+    <div class="stack" style="gap:4px">
+      <a class="on" href="/feed" aria-current="page">{{ m.icon("users", 16, "var(--text)") }}Following</a>
+      <span aria-disabled="true" title="Filters arrive with the live feed">{{ m.icon("shield", 16, "var(--muted)") }}Verified only</span>
+      <span aria-disabled="true" title="Filters arrive with the live feed">{{ m.icon("filter", 16, "var(--muted)") }}Prediction markets</span>
+      <span aria-disabled="true" title="Filters arrive with the live feed">{{ m.icon("chat", 16, "var(--muted)") }}Rooms</span>
+    </div>
+    <div class="stack" style="gap:8px"><span class="label">Rooms</span>{% for name, n in f.rooms %}<span class="room">#{{ name }}<span class="mono muted" style="font-size:11px">{{ n }}</span></span>{% endfor %}</div>
+  </div>
+  <div class="stack" style="gap:16px">
+    <div class="card" style="flex-direction:row;align-items:center;gap:12px;padding:14px 18px"><span class="avatar"></span><span class="muted" style="flex-grow:1">Post an update. Your verified numbers travel with it.</span><button class="btn sm" type="button" disabled title="Posting is not live in the sample build">Post</button></div>
+    {% for p in f.posts %}
+    <div class="card post">
+      <div style="display:flex;align-items:center;gap:10px"><span class="avatar"></span>{% if p.context %}<a href="/u/{{ p.handle }}" class="small" style="font-weight:500">{{ p.handle }}</a>{% else %}<span class="small" style="font-weight:500">{{ p.handle }}</span>{% endif %}<span class="mono small muted">{{ p.when }}</span>
+        {% if p.context %}<span class="ctx">{{ m.icon("shield", 12, "var(--good)", 2) }}{{ p.context }}</span>{% else %}<span class="ctx none">no verified record</span>{% endif %}</div>
+      <p>{{ p.body }}</p>
+      {% if p.strategy_row %}{% set r = p.strategy_row %}
+      <a class="strat" href="/s/{{ r.slug }}"><div class="stack" style="gap:2px"><span class="small" style="font-weight:500">{{ r.name }}</span><span class="mono small muted">{{ r.display_name }} · Kalshi</span></div><div class="mono small" style="display:flex;align-items:center;gap:14px"><span class="good">{{ m.pct(r.total_return) }}</span><span class="bad">{{ m.pct(-r.max_drawdown) }} DD</span>{{ m.icon("arrow", 14, "var(--muted)") }}</div></a>
+      {% endif %}
+      <div class="mono small muted" style="display:flex;gap:18px"><span>{{ p.likes }} likes</span><span>{{ p.replies }} {{ "reply" if p.replies == 1 else "replies" }}</span><span>Share</span></div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="stack" style="gap:20px">
+    <div class="card"><div class="body" style="gap:4px;padding:16px 20px">
+      <div class="spread" style="align-items:center;padding-bottom:8px;border-bottom:1px solid var(--line)"><span class="small" style="display:inline-flex;align-items:center;gap:8px;font-weight:600">{{ m.icon("chat", 16) }}#tailing-questions</span><span class="mono muted" style="font-size:11px">96 online</span></div>
+      {% for h, t, b in f.thread %}<div class="msg"><span class="mono small muted"><span style="color:var(--text);font-weight:500;font-family:var(--sans)">{{ h }}</span> · {{ t }}</span><span style="font-size:14px;line-height:1.45">{{ b }}</span></div>{% endfor %}
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px;padding:10px 12px;border:1px solid var(--line2);border-radius:var(--r)"><span class="muted" style="font-size:14px;flex-grow:1">Message #tailing-questions</span>{{ m.icon("arrow", 16, "var(--muted)") }}</div>
+    </div></div>
+    <div class="card plain"><div class="body" style="gap:8px;padding:16px 20px"><span class="label">Feed rules</span><p class="small text2">Performance claims in posts are ignored. The only numbers next to a name are the ones Koine computed. Accounts without a verified record are labelled as such.</p></div></div>
+  </div>
+</div>
+{% endblock %}

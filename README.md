@@ -1,4 +1,4 @@
-# AlphaMarket (working title)
+# Koine (working title; package still `alphamarket`)
 
 Verified track records for prediction-market traders. Connect a read-only
 Kalshi API key, get a platform-computed, provably real performance page.

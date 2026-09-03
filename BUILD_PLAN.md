@@ -183,17 +183,48 @@ Sized for one person working part-time alongside classes. Each milestone is demo
 3. Listing editor (name, thesis, tags), privacy default to display-name only.
 4. Deploy: single VPS or Fly.io/Railway, Postgres managed or on the box, HTTPS, backups. Supabase is also fine as hosted Postgres + auth if you would rather not run auth yourself.
 
-   STATUS 2026-09-01: M4.1-M4.3 built, M4.4 prepared. Jinja + Chart.js
+   STATUS 2026-09-01: M4.1-M4.3 built, M4.4 prepared. Jinja
    (`pages.py`, `templates/`): landing/login, creator dashboard (connection
    status, freshness, stats, flags, reconciliation history, sync/reconcile/
-   disconnect, connect form), listing editor (`strategies.py`: name, thesis,
-   tags, public toggle; numbers have no write path), public page
-   `/s/{slug}` + JSON `/api/strategies/{slug}` (`public.py`: equity and
-   drawdown curves, monthly grid, risk score, verified-since and incubation
-   badges, last-reconciliation badge, unverified description label,
-   methodology link; display name only). Quarantined/delisted/unlisted
-   pages 404. `/methodology` renders docs/methodology.md. Nightly job
-   promotes incubating -> live at 90 days.
+   disconnect), connect page `/dashboard/connect`, listing editor
+   (`strategies.py`: name, thesis, tags, public toggle; numbers have no
+   write path), public page `/s/{slug}` + JSON `/api/strategies/{slug}`
+   (`public.py`: equity and drawdown curves, monthly grid, risk score,
+   recent settlements, verified-since and incubation badges,
+   last-reconciliation badge, unverified description label, methodology
+   link; display name only), explore `/explore` (visible strategies with
+   stats, sorted by return; incubating hidden unless `?incubating=1`; tag
+   filter). Quarantined/delisted/unlisted pages 404. `/methodology` renders
+   docs/methodology.md. Nightly job promotes incubating -> live at 90 days.
+   UI redesign 2026-09-01 ("dark tape": IBM Plex Sans/Mono, hairlines, 2px
+   radii, green/red only; mockups in `design/`, canvas at
+   claude.ai/code/artifact/2b548812-d82d-4d9a-b563-7824b70f2965). Charts
+   are server-rendered inline SVG (`charts.py`, unit-tested geometry); the
+   Chart.js CDN dependency is gone. The landing card features a real public
+   page (top of /explore) or an empty state, never sample numbers.
+   DESIGN PACK 2026-09-02: project renamed Koine (working name). Full-vision
+   design pack for the accelerator deliverable in `design/koine/` (build.py
+   generates 15 artboards; canvas at
+   claude.ai/code/artifact/72054e6f-8f4f-4c3b-b9fe-1c2d05d92528). Lead
+   direction A "Prospectus": warm off-white, Newsreader/Plex, ink CTAs,
+   green reserved for verified. Tail/Portfolio/fees pages are mockups of
+   out-of-scope features (hard non-goals still apply); the end-of-week
+   stubbed site shows them with sample data only.
+   STUB SITE 2026-09-02: direction A carried into the live templates
+   (base.html tokens, trireme logo as inline SVG, Koine brand). New routes:
+   /creators, /marketplace (/explore redirects), /s/{slug}/tail, /portfolio,
+   /u/{handle}, /feed, /invite, /verification, /transparency, /research.
+   `DEMO_MODE=true` serves `demo.py` sample data under a banner for the
+   pages the MVP cannot compute (tail, portfolio, feed, creator profiles)
+   and pads the marketplace; off by default, refused by preflight, covered
+   by tests/test_demo_pages.py. Real pages keep invariant #5 untouched.
+   UX pass 2026-09-02 (Aiden's review): nav collapsed to Marketplace /
+   Feed / Learn menu / For creators, account avatar menu when logged in,
+   mobile Menu; /login and /signup pages (errors render beside the form,
+   logged-out dashboard redirects to /login); one shared Learn sub-nav on
+   verification, transparency, research, security; marketplace search
+   (`?q=`); no `href="#"` anywhere (stubbed controls are disabled buttons,
+   pinned by test_navigation_is_consistent).
    Deploy: Dockerfile, fly.toml (web + worker), docs/deploy.md,
    SECURE_COOKIES + postgres:// URL rewrite. Actual `fly launch` is Aiden's
    (needs an account and a domain).
@@ -244,7 +275,7 @@ Knowledge prerequisites (gaps to close early, none are blocking):
 - [ ] RSA-PSS request signing (M0 scratch script closes this)
 - [ ] SQLAlchemy 2.0 style + Alembic migrations
 - [ ] Time-weighted return and drawdown math (needed for M2/M3; your Kalshi/CLV background covers most of it)
-- [ ] Basic frontend charting (lightweight-charts or Chart.js is enough)
+- [x] Basic frontend charting (inline SVG, `charts.py`)
 
 Process:
 - [ ] Read Kalshi's API terms of service and confirm third-party read access on behalf of users is permitted; note any clauses about aggregating or displaying account data

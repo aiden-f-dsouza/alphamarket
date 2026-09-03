@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Transparency · Koine{% endblock %}
+{% block nav_active %}transparency{% endblock %}
+{% block style %}
+  .head { display:grid; grid-template-columns:minmax(0, 620px) 1fr; gap:64px; align-items:end; }
+  .hist { display:flex; align-items:flex-end; gap:8px; height:190px; padding-top:10px; border-bottom:1px solid var(--line2); }
+  .hist > div { display:flex; flex-direction:column; align-items:center; gap:8px; flex-grow:1; }
+  .hist b { width:100%; border-radius:4px 4px 0 0; display:block; }
+  .frow { display:grid; grid-template-columns:1fr 160px 220px 1fr; gap:16px; align-items:baseline; padding:14px 0; border-bottom:1px solid var(--line); }
+  @media (max-width:1000px) { .head { grid-template-columns:1fr; } .frow { grid-template-columns:1fr; gap:4px; } }
+{% endblock %}
+{% block content %}
+{{ m.learn_tabs("transparency") }}
+<div class="head">
+  <div class="stack" style="gap:16px">
+    <span class="label">Transparency</span>
+    <h1>The whole population, not the winners.</h1>
+    <p class="lead" style="font-size:16px">Everything on this page is computed from every strategy that has ever connected, including the ones that lost, disconnected or were quarantined. Updated nightly.</p>
+  </div>
+  <span class="mono small muted" style="text-align:right">{% if t.demo %}Figures shown are sample data. The live page draws from the platform ledger.{% else %}Computed from the platform ledger as of the last nightly run.{% endif %}</span>
+</div>
+<div class="card"><div class="stats five">
+  <div class="stat"><span class="label">Strategies ever verified</span><span class="v">{{ t.ever }}</span></div>
+  <div class="stat"><span class="label">Losing money today</span><span class="v bad">{{ t.losing }}<small>{{ "%.0f"|format(t.losing * 100 / t.ever) if t.ever else 0 }}%</small></span></div>
+  <div class="stat"><span class="label">Median return, net</span><span class="v {{ 'good' if (t.median_return or 0) >= 0 else 'bad' }}">{{ m.pct(t.median_return) }}<small>all records</small></span></div>
+  <div class="stat"><span class="label">Median worst drawdown</span><span class="v bad">{{ m.pct(-t.median_dd) if t.median_dd is not none else "—" }}</span></div>
+  <div class="stat"><span class="label">Quarantined or delisted</span><span class="v">{{ t.removed }}<small>records kept</small></span></div>
+</div></div>
+{% if t.histogram %}
+<div class="grid2">
+  <div class="card"><div class="body" style="gap:16px">
+    <span class="label">Net return since verification, all {{ t.ever }} strategies</span>
+    {% set mx = t.histogram|map(attribute=1)|max %}
+    <div class="hist">{% for label, n in t.histogram %}<div><span class="mono small text2">{{ n }}</span><b style="height:{{ (140 * n / mx)|int }}px;background:{{ 'var(--bad)' if label.startswith('<') or label.startswith('−') else 'var(--brand)' }}"></b><span class="mono muted" style="font-size:11px;white-space:nowrap">{{ label }}</span></div>{% endfor %}</div>
+    <p class="small text2">{{ t.losing }} of {{ t.ever }} are under water. Investors tailing the median strategy would have made {{ "%.1f"|format(t.median_return * 100) }}% net of fees, with a {{ "%.1f"|format(t.median_dd * 100) }}% drawdown along the way.</p>
+  </div></div>
+  <div class="card"><div class="body" style="gap:16px">
+    <span class="label">Investor outcomes, all tailing positions</span>
+    <div class="stack" style="gap:14px">{% for a, pc in t.outcomes %}<div class="stack" style="gap:6px"><div class="spread" style="font-size:14px"><span class="text2">{{ a }}</span><span class="mono">{{ pc }}%</span></div>{{ m.bar(pc, "var(--brand)", 6) }}</div>{% endfor %}</div>
+    <p class="small text2">Fees are only ever a share of profit above a high-water mark, so an investor under water has paid nothing.</p>
+  </div></div>
+</div>
+<div class="card"><div class="body" style="gap:4px">
+  <div class="spread" style="padding-bottom:8px;border-bottom:1px solid var(--line2)"><span class="label">Failed, quarantined and losing strategies</span><span class="mono small muted">records are never deleted</span></div>
+  {% for a, b, c, d in t.failed %}<div class="frow"><span style="font-weight:500">{{ a }}</span><span class="mono small text2">{{ b }}</span><span class="mono small bad">{{ c }}</span><span class="small muted">{{ d }}</span></div>{% endfor %}
+</div></div>
+{% else %}
+<div class="card plain"><div class="body"><p class="text2">{% if t.ever %}Return distributions, investor outcomes and the register of quarantined strategies appear once the platform has enough records to show a population rather than a handful of names.{% else %}No strategy has completed a nightly reconciliation yet. The first records populate this page automatically.{% endif %}</p></div></div>
+{% endif %}
+{% endblock %}

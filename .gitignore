@@ -18,3 +18,7 @@ keys/
 .claude/settings.local.json
 # Misplaced Claude Code settings file; the real one lives in .claude/
 /settings.json
+
+# Generated design artifacts (compiled from build.py)
+design/*-screens.html
+design/koine/*-design-pack.html

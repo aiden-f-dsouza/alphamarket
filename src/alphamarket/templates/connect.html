@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Connect Kalshi · Koine{% endblock %}
+{% block nav_active %}dashboard{% endblock %}
+{% block style %}
+  .connect { display:grid; grid-template-columns:220px minmax(0, 560px) minmax(0, 1fr); gap:48px; }
+  .step { display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--line); font-size:14px; }
+  .step i { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; font:12px var(--mono); font-style:normal; border-radius:50%; border:1px solid var(--line2); color:var(--muted); }
+  .step.on i { background:var(--brand); border-color:var(--brand); color:var(--surface); }
+  .step.off { color:var(--muted); }
+  @media (max-width:1000px) { .connect { grid-template-columns:1fr; } }
+{% endblock %}
+{% block content %}
+<div class="connect">
+  <div class="stack" style="gap:20px">
+    <span class="label">Connect Kalshi</span>
+    <div class="stack" style="gap:0">
+      <div class="step on"><i>1</i>Create a read-only key at Kalshi</div>
+      <div class="step on"><i>2</i>Paste it here</div>
+      <div class="step off"><i>3</i>Scope check</div>
+      <div class="step off"><i>4</i>Import and verify</div>
+    </div>
+    <p class="small muted" style="line-height:1.55">In Kalshi: Account → API keys → New key. Choose <span class="text2">read-only</span>. Download the PEM file once; Kalshi won't show it again.</p>
+  </div>
+
+  <div class="stack" style="gap:28px">
+    <div class="stack"><h1 style="font-size:40px">Paste a read-only key.</h1>
+      <p class="text2" style="font-size:16px">We check the scope before we store it. A key that can place orders is refused, and you'll be asked to make a read-only one instead.</p></div>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <form method="post" action="/dashboard/connect" class="card" autocomplete="off">
+      <div class="body" style="padding:28px;gap:22px">
+        <label class="field"><span class="label">Strategy name</span><input name="strategy_name" required minlength="2" maxlength="120" placeholder="Shown on your public page"></label>
+        <label class="field"><span class="label">API key id</span><input class="mono" name="key_id" required autocomplete="off" placeholder="From Kalshi → API keys"></label>
+        <label class="field"><span class="label">Private key (PEM)</span><textarea class="mono" name="private_key_pem" required placeholder="Paste the contents of the .pem file"></textarea><span class="note">Encrypted before it touches the database. Erased when you disconnect.</span></label>
+        <div class="spread" style="align-items:center;padding-top:4px">
+          <span class="mono small muted" style="display:inline-flex;align-items:center;gap:8px">{{ m.icon("lock", 14, "var(--muted)") }}Environment: {{ "production" if settings.kalshi_env == "prod" else settings.kalshi_env }}</span>
+          <button class="btn" type="submit">Check scope and import</button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <div class="stack" style="gap:0;padding-top:4px">
+    <span class="label" style="padding-bottom:8px;border-bottom:1px solid var(--line2)">What happens next</span>
+    <div class="hairline-list">
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Key scope is read-only</span><span class="small muted">A key with trading permission is rejected before anything is stored.</span></div></div>
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Key is encrypted with a server-side vault key</span><span class="small muted">Stored ciphertext only. Never logged, never returned by any page or API.</span></div></div>
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>First import from Kalshi</span><span class="small muted">Fills and settlements are pulled as far back as the venue returns them. Your verified window starts now, not earlier.</span></div></div>
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>First balance reconciliation tonight</span><span class="small muted">The page goes public once the ledger matches your venue balance.</span></div></div>
+    </div>
+  </div>
+</div>
+{% endblock %}

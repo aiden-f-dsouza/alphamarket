@@ -28,9 +28,25 @@ deliberately out of scope).
   ledger; quarantine), `stats.py` (returns/drawdown/Sharpe/risk score/flags,
   pure functions), `analytics.py` (persists strategy_stats), `worker.py`
   (APScheduler: polling + nightly reconcile + stats + incubation promotion),
-  `strategies.py` (listing editor), `public.py` (public page data + JSON API),
-  `pages.py` + `templates/` (Jinja HTML: landing, dashboard, /s/{slug},
-  /methodology)
+  `strategies.py` (listing editor), `public.py` (public page data + JSON API
+  + marketplace listing), `charts.py` (SVG polyline geometry, pure),
+  `demo.py` (SAMPLE data for DEMO_MODE; invariant 7), `pages.py`
+  + `templates/` (Jinja HTML: `/` investor landing, `/creators`,
+  `/marketplace` (`/explore` redirects), `/s/{slug}`, `/s/{slug}/tail`,
+  `/portfolio`, `/u/{handle}`, `/feed`, `/invite`, `/verification`
+  (= `/methodology`), `/transparency`, `/research`, `/security` (these four
+  share the Learn sub-nav), `/login`, `/signup`, dashboard,
+  `/dashboard/connect`; `_macros.html` holds the logo, icons, number
+  formatting, the Learn tabs and the landing card; charts are inline SVG.
+  Nav menus are `<details>` elements; the only client JS closes them and
+  copies the invite link. Stubbed controls are disabled buttons, never
+  `href="#"` (pinned by a test).
+  Brand is **Koine** (package name unchanged); design tokens live in
+  `base.html` (warm off-white, Newsreader headlines, IBM Plex body/mono,
+  navy from the logo for CTAs, green reserved for "verified").
+- `design/koine/` — the Koine design pack (`build.py` generates the .dc.html
+  artboards; canvas linked from BUILD_PLAN). `design/` root holds the older
+  AlphaMarket dark mockups. Both excluded from ruff
 - `src/alphamarket/connectors/` — `base.py` defines the venue-agnostic contract
   (VenueConnector + Normalized* models); one module per venue (`kalshi.py`);
   `registry.py` is the only import path core code may use
@@ -56,6 +72,10 @@ deliberately out of scope).
 5. Public pages show ONLY platform-computed numbers from venue data.
    Self-reported performance is never displayed (PRD TR-1).
 6. No live API calls in tests. Use respx mocks or recorded fixtures.
+7. `DEMO_MODE` (default false) is the only way sample numbers reach a page.
+   Sample pages carry the "Sample data" banner, demo-only routes 404 when it
+   is off, and `scripts/preflight.py` refuses to launch with it on. Never
+   merge sample and real rows without the `demo` flag on the sample row.
 
 ## Conventions
 

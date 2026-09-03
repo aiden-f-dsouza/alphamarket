@@ -1,8 +1,17 @@
 {% extends "base.html" %}
-{% block title %}Methodology · AlphaMarket{% endblock %}
+{% import "_macros.html" as m %}
+{% block title %}{{ title }} · Koine{% endblock %}
+{% block nav_active %}{{ nav_key }}{% endblock %}
+{% block style %}
+  .doc { max-width:760px; line-height:1.65; font-size:16px; padding-top:8px; }
+  .doc h1 { font-size:44px; margin:0 0 24px; } .doc h2 { font-family:var(--serif); font-weight:500; color:var(--brand); font-size:26px; margin:40px 0 12px; } .doc h3 { font-size:18px; margin:28px 0 8px; }
+  .doc p, .doc li { color:var(--text2); } .doc strong { color:var(--text); font-weight:600; }
+  .doc a { color:var(--text); text-decoration:underline; }
+  .doc code { font:13px/1.5 var(--mono); color:var(--text); background:var(--surface); border:1px solid var(--line); padding:1px 5px; border-radius:var(--r); }
+  .doc pre { background:var(--surface); border:1px solid var(--line2); border-radius:var(--r); padding:16px 20px; overflow-x:auto; } .doc pre code { border:0; padding:0; background:none; }
+  .doc table { margin:16px 0; } .doc td { font-family:var(--sans); font-size:14px; color:var(--text2); }
+{% endblock %}
 {% block content %}
-<div class="panel" style="line-height:1.65">
-<style>.panel pre { background:var(--bg); padding:12px; border-radius:8px; overflow:auto; } .panel code { font-size:13px; } .panel h1 { margin-top:0 } .panel h2 { text-transform:none; letter-spacing:0; color:var(--text); font-size:20px; margin-top:24px }</style>
-{{ body|safe }}
-</div>
+{{ m.learn_tabs(nav_key) }}
+<div class="doc">{{ body|safe }}</div>
 {% endblock %}

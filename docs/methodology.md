@@ -1,12 +1,12 @@
 # Methodology: what a verified track record proves, and what it does not
 
-This page is the public contract behind every number AlphaMarket displays.
+This page is the public contract behind every number Koine displays.
 Every formula here is pinned by a unit test with hand-computed expected values
 (`tests/test_ledger.py`, `tests/test_reconcile.py`).
 
 ## Where the numbers come from
 
-- Every number on a strategy page is computed by AlphaMarket from data pulled
+- Every number on a strategy page is computed by Koine from data pulled
   directly from the venue (Kalshi) using a **read-only** API key the trader
   connected. Traders cannot enter, edit, or upload performance figures.
 - The key's scope is checked at connect time against the venue's own key
@@ -47,7 +47,7 @@ settlement revenue as real cash, exactly as the venue does.
 
 ## Reconciliation
 
-Nightly, and on demand, AlphaMarket re-reads the venue balance and compares it
+Nightly, and on demand, Koine re-reads the venue balance and compares it
 with `cash(now)` computed purely from stored fills and settlements:
 
 ```

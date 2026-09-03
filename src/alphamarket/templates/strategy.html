@@ -1,83 +1,182 @@
 {% extends "base.html" %}
-{% block title %}{{ page.name }} · AlphaMarket{% endblock %}
+{% import "_macros.html" as m %}
+{% block title %}{{ page.name }} · Koine{% endblock %}
+{% block nav_active %}marketplace{% endblock %}
+{% block style %}
+  .crumbs { display:flex; align-items:center; gap:8px; font:12px var(--mono); color:var(--muted); }
+  .head { display:grid; grid-template-columns:1fr 360px; gap:48px; align-items:start; }
+  .cols { display:grid; grid-template-columns:1fr 340px; gap:32px; align-items:start; }
+  .srow { display:grid; grid-template-columns:1fr 56px 64px 96px; align-items:center; gap:16px; padding:12px 0; border-bottom:1px solid var(--line); }
+  .side { font:11px var(--mono); letter-spacing:.08em; text-align:center; padding:4px 0; border-radius:var(--r); border:1px solid; }
+  .wrow { display:grid; grid-template-columns:150px 80px 90px 1fr; gap:16px; align-items:baseline; padding:12px 0; border-bottom:1px solid var(--line); }
+  @media (max-width:1000px) { .head, .cols { grid-template-columns:1fr; } .wrow { grid-template-columns:1fr 80px; } .wrow > :nth-child(n+3) { display:none; } }
+{% endblock %}
 {% block content %}
 {% set st = page.stats %}
-<div class="panel">
-  <h1>{{ page.name }}</h1>
-  <p class="muted">by {{ page.display_name }} · {{ page.venue }}{% if page.venue_env != "prod" %} <span class="badge warn">{{ page.venue_env }} environment</span>{% endif %}</p>
-  <p>
-    {% if page.verified_since %}<span class="badge good">platform-verified since {{ page.verified_since[:10] }}</span>{% endif %}
-    {% if st and page.incubating %}<span class="badge warn">incubating ({{ st.track_days }}/90 days)</span>{% elif st %}<span class="badge good">{{ st.track_days }} days verified</span>{% endif %}
-    {% if page.reconciled is not none %}<span class="badge {{ 'good' if page.reconciled else 'bad' }}">last reconciliation: {{ "matched venue balance" if page.reconciled else "diverged" }}</span>{% endif %}
-    {% for t in page.style_tags %}<span class="badge">{{ t }}</span>{% endfor %}
-  </p>
-  <p class="small muted">Every number on this page is computed by AlphaMarket from venue data pulled with a read-only key. Nothing here was entered by the trader. <a href="/methodology">What this proves and what it doesn't.</a></p>
+<div class="crumbs"><a href="/marketplace" class="muted">Marketplace</a>{{ m.icon("chev", 12, "var(--muted)") }}<span>Prediction markets</span>{{ m.icon("chev", 12, "var(--muted)") }}<span class="text2">{{ page.name }}</span></div>
+
+<div class="head">
+  <div class="stack" style="gap:14px">
+    <div class="badges">
+      {% if page.verified_since %}{% if st and page.incubating %}<span class="badge warn">incubating · {{ st.track_days }}/90 days</span>{% else %}{{ m.verified("Verified from venue data", st.track_days if st else None) }}{% endif %}{% endif %}
+      {% if page.reconciled is not none %}<span class="badge {{ 'good' if page.reconciled else 'bad' }}">{{ m.icon("check" if page.reconciled else "x", 12, "currentColor", 2) }}{{ "reconciled last night" if page.reconciled else "reconciliation diverged" }}</span>{% endif %}
+      {% if page.venue_env != "prod" %}<span class="badge warn">{{ page.venue_env }} environment</span>{% endif %}
+    </div>
+    <h1 style="font-size:48px">{{ page.name }}</h1>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <span class="avatar"></span>
+      {% if page.demo %}<a href="/u/{{ page.display_name }}" style="font-weight:500">by {{ page.display_name }}</a><span class="small muted">· Kalshi · {{ page.creator.strategies }} verified strateg{{ "y" if page.creator.strategies == 1 else "ies" }} · {{ page.creator.followers }} followers</span>
+      {% else %}<span style="font-weight:500">by {{ page.display_name }}</span><span class="small muted">· {{ page.venue }}</span>{% endif %}
+      <span style="display:flex;gap:6px;margin-left:6px">{% for t in page.style_tags %}<span class="tag">{{ t }}</span>{% endfor %}</span>
+    </div>
+    <span class="mono small muted">platform-verified since {{ page.verified_since[:10] if page.verified_since else "first reconciliation pending" }}</span>
+  </div>
+  {% if page.capacity %}
+  <div class="card"><div class="body" style="padding:20px 24px">
+    <div class="spread" style="align-items:baseline"><span class="label">Tail this strategy</span><span class="mono small muted">min ${{ page.capacity.min_usd }}</span></div>
+    <div class="kv" style="font-size:14px">
+      <div><span>Performance fee</span><span>{{ page.capacity.fee }}</span></div>
+      <div><span>Capacity left</span><span>~${{ page.capacity.left_k }}k</span></div>
+      <div><span>Currently tailing</span><span>${{ "%.1f"|format(page.capacity.tailing_k) }}k · {{ page.capacity.investors }} investors</span></div>
+    </div>
+    <a class="btn lg" href="/s/{{ page.slug }}/tail">Tail from my account</a>
+    <span class="small muted" style="display:inline-flex;align-items:center;gap:6px">{{ m.icon("lock", 12, "var(--muted)") }}Koine cannot withdraw from your account.</span>
+  </div></div>
+  {% endif %}
 </div>
 
 {% if not st %}
-<div class="panel"><p class="muted">Statistics are computed nightly; this strategy's first run is pending.</p></div>
+<div class="card plain"><div class="body"><span class="muted">Statistics are computed nightly; this strategy's first run is pending.</span></div></div>
 {% else %}
-<div class="panel">
-  <div class="tiles">
-    <div class="tile"><div class="k">Total return</div><div class="v {{ 'good' if (st.total_return or 0) >= 0 else 'bad' }}">{{ "%.2f"|format((st.total_return or 0) * 100) }}%</div></div>
-    <div class="tile"><div class="k">Max drawdown</div><div class="v bad">{{ "%.2f"|format(st.max_drawdown * 100) }}%</div></div>
-    <div class="tile"><div class="k">Risk score</div><div class="v">{{ st.risk_score }}<span class="muted small">/10</span></div></div>
-    <div class="tile"><div class="k">Sharpe</div><div class="v">{{ "%.2f"|format(st.sharpe) if st.sharpe is not none else "—" }}</div></div>
-    <div class="tile"><div class="k">Sortino</div><div class="v">{{ "%.2f"|format(st.sortino) if st.sortino is not none else "—" }}</div></div>
-    <div class="tile"><div class="k">Win rate</div><div class="v">{{ "%.0f"|format(st.win_rate * 100) ~ "%" if st.win_rate is not none else "—" }}</div></div>
-    <div class="tile"><div class="k">Realized P&L</div><div class="v {{ 'good' if st.realized_pnl >= 0 else 'bad' }}">${{ "%.2f"|format(st.realized_pnl) }}</div></div>
-    <div class="tile"><div class="k">Settled trades</div><div class="v">{{ st.n_settlements }}</div></div>
+<div class="card"><div class="stats six">
+  <div class="stat"><span class="label">Return, net of fees</span><span class="v {{ 'good' if (st.total_return or 0) >= 0 else 'bad' }}">{{ m.pct(st.total_return) }}<small>{{ st.track_days }}d</small></span></div>
+  <div class="stat"><span class="label">Worst drawdown</span><span class="v bad">{{ m.pct(-st.max_drawdown) }}</span></div>
+  <div class="stat"><span class="label">Sharpe</span><span class="v">{{ m.num(st.sharpe) }}</span></div>
+  <div class="stat"><span class="label">Risk score</span><span class="v">{{ st.risk_score }}<small>/10</small></span></div>
+  {% if page.vs_benchmark is defined %}<div class="stat"><span class="label">vs. S&amp;P 500</span><span class="v {{ 'good' if page.vs_benchmark >= 0 else 'bad' }}">{{ m.pct(page.vs_benchmark) }}<small>pts</small></span></div>
+  <div class="stat"><span class="label">Capacity</span><span class="v">${{ page.capacity.capacity_k }}k<small>est.</small></span></div>
+  {% else %}<div class="stat"><span class="label">Realized P&amp;L</span><span class="v {{ 'good' if st.realized_pnl >= 0 else 'bad' }}">{{ m.usd(st.realized_pnl) }}</span></div>
+  <div class="stat"><span class="label">Settled trades</span><span class="v">{{ st.n_settlements }}</span></div>{% endif %}
+</div></div>
+
+<div class="cols">
+  <div class="stack" style="gap:24px">
+    {% if charts %}
+    <div class="card"><div class="body" style="gap:14px">
+      <div class="spread" style="align-items:center"><span class="label">Growth of {{ m.usd(st.equity_curve[0][1], 0) }} · net of venue fees · open positions at cost</span><span class="mono small muted">all {{ st.track_days }} verified days</span></div>
+      {% if charts.benchmarks %}<div class="legend"><span><i style="border-color:var(--brand)"></i>This strategy</span>{% for label, pts, dashed in charts.benchmarks %}<span><i style="border-color:var(--gray);{{ 'border-top-style:dashed' if dashed }}"></i>{{ label }}</span>{% endfor %}</div>{% endif %}
+      <div class="chart">
+        <div class="y" style="padding-bottom:26px">{% for t in charts.equity_ticks %}<span>{{ m.usd(t, 0) }}</span>{% endfor %}</div>
+        <div class="stack" style="gap:8px">
+          <svg width="100%" viewBox="0 0 {{ charts.w }} {{ charts.equity_h }}" preserveAspectRatio="none" style="display:block;height:260px;overflow:visible">
+            {% for i in range(5) %}<line x1="0" y1="{{ charts.equity_h * i / 4 }}" x2="{{ charts.w }}" y2="{{ charts.equity_h * i / 4 }}" stroke="var(--line)" vector-effect="non-scaling-stroke"/>{% endfor %}
+            {% for label, pts, dashed in charts.benchmarks or [] %}<polyline points="{{ pts }}" fill="none" stroke="var(--gray)" stroke-width="1.5" {% if dashed %}stroke-dasharray="4 4"{% endif %} stroke-linejoin="round" vector-effect="non-scaling-stroke"/>{% endfor %}
+            <polyline points="{{ charts.equity }}" fill="none" stroke="var(--brand)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+          </svg>
+          <div class="x">{% for d in charts.x_labels %}<span>{{ d }}</span>{% endfor %}</div>
+        </div>
+      </div>
+      <div class="chart" style="margin-top:8px;padding-top:16px;border-top:1px solid var(--line)">
+        <div class="y"><span>0%</span><span>{{ m.pct(charts.drawdown_floor, 0) }}</span></div>
+        <div class="stack" style="gap:8px"><span class="label">Drawdown from peak</span>
+          <svg width="100%" viewBox="0 0 {{ charts.w }} {{ charts.drawdown_h }}" preserveAspectRatio="none" style="display:block;height:110px">
+            <line x1="0" y1="0.5" x2="{{ charts.w }}" y2="0.5" stroke="var(--line2)" vector-effect="non-scaling-stroke"/>
+            <polygon points="0,0 {{ charts.drawdown }} {{ charts.w }},0" fill="var(--bad)" fill-opacity="0.10"/>
+            <polyline points="{{ charts.drawdown }}" fill="none" stroke="var(--bad)" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+          </svg>
+        </div>
+      </div>
+      {% if page.benchmark_note %}<span class="mono muted" style="font-size:11px">{{ page.benchmark_note }}</span>{% endif %}
+    </div></div>
+    {% endif %}
+
+    <div class="grid2">
+      <div class="card"><div class="body">
+        <span class="label">Monthly returns</span>
+        {% set months = st.monthly_returns %}
+        {% if months %}
+        <div style="overflow-x:auto"><table>
+          <tr><th>Year</th>{% for mo in ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"] %}<th class="num">{{ mo }}</th>{% endfor %}</tr>
+          {% for y in months|map(attribute=0)|unique|list %}
+          <tr><td class="text2">{{ y }}</td>
+            {% for mi in range(1, 13) %}{% set cell = months|selectattr(0, "equalto", y)|selectattr(1, "equalto", mi)|list %}
+            <td class="num {{ ('good' if cell[0][2] >= 0 else 'bad') if cell else 'muted' }}">{{ m.pct(cell[0][2]) if cell else "·" }}</td>{% endfor %}
+          </tr>
+          {% endfor %}
+        </table></div>
+        {% else %}<span class="muted">No complete month yet.</span>{% endif %}
+      </div></div>
+      <div class="card"><div class="body" style="gap:4px">
+        <span class="label" style="padding-bottom:6px">Worst periods</span>
+        {% for a, b, c, d in page.worst_periods or [] %}
+        <div class="wrow"><span class="mono small text2">{{ a }}</span><span class="mono bad" style="font-size:15px">{{ m.pct(b) }}</span><span class="mono small text2">{{ c }}</span><span class="small muted">{{ d }}</span></div>
+        {% else %}
+        <span class="small text2" style="padding:8px 0">Worst drawdown so far: <span class="mono bad">{{ m.pct(-st.max_drawdown) }}</span>. Dated worst periods and recovery times are listed once a strategy has 90 verified days.</span>
+        {% endfor %}
+      </div></div>
+    </div>
+
+    <div class="card plain"><div class="body" style="flex-direction:row;align-items:center;gap:12px;padding:16px 20px">
+      {% if st.flags %}{{ m.icon("x", 16, "var(--warn)", 2) }}<span class="small text2"><span class="warn">Behavioural flags: {{ st.flags|join(", ") }}.</span> <a href="/verification" style="text-decoration:underline">What these mean.</a></span>
+      {% else %}{{ m.icon("check", 16, "var(--good)", 2) }}<span class="small text2"><span style="color:var(--text)">No behavioural flags.</span> Martingale sizing, stake spikes and single-series concentration are checked nightly.</span>{% endif %}
+    </div></div>
+
+    <div class="card"><div class="body">
+      <div class="badges"><span class="label">Creator's description</span><span class="badge warn">not verified</span></div>
+      <div class="unverified" style="border:0;padding:0">{% if page.description_unverified %}{{ page.description_unverified }}{% else %}<span class="muted">The creator has not written a description.</span>{% endif %}</div>
+      <span class="mono muted" style="font-size:11px">Written by {{ page.display_name }}. Koine does not verify anything in this box; it is unverified.</span>
+    </div></div>
   </div>
-  {% if st.flags %}<p class="warn small" style="margin-top:12px">Behavioural flags: {{ st.flags|join(", ") }} — <a href="/methodology">what these mean</a></p>{% endif %}
-</div>
 
-<div class="grid2">
-  <div class="panel"><h2>Equity (net of venue fees, open positions at cost)</h2><canvas id="equity"></canvas></div>
-  <div class="panel"><h2>Drawdown</h2><canvas id="drawdown"></canvas></div>
-</div>
-
-<div class="panel">
-  <h2>Monthly returns</h2>
-  {% set months = st.monthly_returns %}
-  {% if months %}
-  <table class="months">
-    <tr><th>Year</th>{% for m in ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"] %}<th class="num">{{ m }}</th>{% endfor %}</tr>
-    {% set years = months|map(attribute=0)|unique|list %}
-    {% for y in years %}
-    <tr><td>{{ y }}</td>
-      {% for mi in range(1, 13) %}
-        {% set cell = months|selectattr(0, "equalto", y)|selectattr(1, "equalto", mi)|list %}
-        <td class="{{ ('good' if cell[0][2] >= 0 else 'bad') if cell else 'muted' }}">{{ "%.2f"|format(cell[0][2] * 100) ~ "%" if cell else "·" }}</td>
+  <div class="stack" style="gap:24px">
+    <div class="card"><div class="body" style="gap:4px;padding:20px 24px">
+      <span class="label" style="padding-bottom:6px">Risk</span>
+      <div class="kv">
+        {% if page.risk_rows %}{% for a, b in page.risk_rows %}<div><span>{{ a }}</span><span>{{ b }}</span></div>{% endfor %}
+        {% else %}
+        <div><span>Sharpe (annualised)</span><span>{{ m.num(st.sharpe) }}</span></div>
+        <div><span>Sortino</span><span>{{ m.num(st.sortino) }}</span></div>
+        <div><span>Win rate</span><span>{{ "%.0f"|format(st.win_rate * 100) ~ "%" if st.win_rate is not none else "—" }}</span></div>
+        <div><span>Series concentration</span><span>{{ "%.0f"|format(st.top_series_share * 100) ~ "% in one series" if st.top_series_share is not none else "—" }}</span></div>
+        <div><span>Settled trades</span><span>{{ st.n_settlements }}</span></div>
+        <div><span>Fills</span><span>{{ st.n_fills }}</span></div>
+        {% endif %}
+      </div>
+    </div></div>
+    <div class="card tint"><div class="body" style="gap:6px;padding:20px 24px">
+      <div style="display:flex;align-items:center;gap:8px">{{ m.icon("shield", 16, "var(--good)") }}<span class="small" style="font-weight:600">How this record is verified</span></div>
+      <div class="stack" style="gap:0">
+        <div style="display:flex;gap:10px;padding:9px 0;font-size:14px;color:var(--text2)">{{ m.icon("check", 16, "var(--good)", 2) }}<span>Read-only key, scope re-checked every sync</span></div>
+        <div style="display:flex;gap:10px;padding:9px 0;font-size:14px;color:var(--text2)">{{ m.icon("check", 16, "var(--good)", 2) }}<span>{{ "{:,}".format(st.n_fills) }} fills and {{ "{:,}".format(st.n_settlements) }} settlements from {{ page.venue|capitalize }}</span></div>
+        <div style="display:flex;gap:10px;padding:9px 0;font-size:14px;color:var(--text2)">{{ m.icon("check" if page.reconciled else "minus", 16, "var(--good)" if page.reconciled else "var(--warn)", 2) }}<span>{% if page.reconciled %}Balance reconciled last night: {{ m.usd(st.equity) }} = {{ m.usd(st.equity) }}{% elif page.reconciled is none %}First balance reconciliation runs tonight{% else %}Last reconciliation diverged; page under review{% endif %}</span></div>
+        <div style="display:flex;gap:10px;padding:9px 0;font-size:14px;color:var(--text2)">{{ m.icon("check" if not st.flags else "minus", 16, "var(--good)" if not st.flags else "var(--warn)", 2) }}<span>{{ "No behavioural flags" if not st.flags else "Behavioural flags raised" }}</span></div>
+        <div style="display:flex;gap:10px;padding:9px 0;font-size:14px;color:var(--text2)">{{ m.icon("minus", 16, "var(--warn)", 2) }}<span>Creator's description is not verified</span></div>
+      </div>
+      <a href="/verification" style="display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:500;margin-top:4px">Full methodology {{ m.icon("arrow", 12) }}</a>
+    </div></div>
+    {% if page.discussion %}
+    <div class="card"><div class="body" style="gap:8px;padding:20px 24px">
+      <div class="spread" style="align-items:baseline"><span class="label">Discussion</span><span class="mono small muted">sample thread</span></div>
+      {% for handle, when, is_creator, body in page.discussion %}
+      <div class="stack" style="gap:4px;padding:8px 0;{{ 'border-bottom:1px solid var(--line)' if not loop.last }}"><span class="small text2"><span style="color:var(--text);font-weight:500">{{ handle }}</span> {% if is_creator %}<span class="badge">creator</span>{% endif %} · {{ when }}</span><span class="small" style="font-size:14px">{{ body }}</span></div>
       {% endfor %}
-    </tr>
-    {% endfor %}
-  </table>
-  {% else %}<p class="muted">No complete month yet.</p>{% endif %}
-</div>
-{% endif %}
-
-<div class="panel">
-  <h2>Trader's description <span class="warn">— unverified</span></h2>
-  <div class="unverified">
-    {% if page.description_unverified %}{{ page.description_unverified }}{% else %}<span class="muted">The trader has not written a description.</span>{% endif %}
-    <p class="small muted" style="margin:8px 0 0">Written by the trader. AlphaMarket does not verify anything in this box.</p>
+    </div></div>
+    {% endif %}
+    <div class="stack" style="gap:4px">
+      <div class="spread" style="align-items:baseline;padding-bottom:8px;border-bottom:1px solid var(--line2)"><span class="label">Recent settlements</span><span class="mono small muted">{{ page.recent_settlements|length }} of {{ st.n_settlements }}</span></div>
+      {% for s in page.recent_settlements %}
+      <div class="srow">
+        <div class="stack" style="gap:3px"><span class="mono small">{{ s.ticker }}</span><span class="mono muted" style="font-size:11px">settled {{ s.settled_at }} · result {{ s.result }}</span></div>
+        <span class="side {{ 'good' if s.side == 'yes' else 'bad' }}">{{ s.side }}</span>
+        <span class="mono small text2" style="text-align:right">×{{ "%g"|format(s.count) }}</span>
+        <span class="mono {{ 'good' if s.payout > 0 else 'muted' }}" style="text-align:right;font-size:14px">{{ m.usd(s.payout) }}</span>
+      </div>
+      {% else %}<span class="muted small" style="padding:14px 0">No settlements yet.</span>{% endfor %}
+      <span class="mono muted" style="font-size:11px;margin-top:10px;line-height:1.5">Payout is the venue's settlement revenue; cost basis is in the fills and already reflected in the curve.</span>
+    </div>
   </div>
 </div>
-
-{% if st %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script>
-  const equity = {{ st.equity_curve|tojson }};
-  const dd = {{ st.drawdown_curve|tojson }};
-  const common = { responsive: true, plugins: { legend: { display: false } },
-    scales: { x: { ticks: { color: "#8b93a7", maxTicksLimit: 8 }, grid: { color: "#262a36" } },
-              y: { ticks: { color: "#8b93a7" }, grid: { color: "#262a36" } } } };
-  new Chart(document.getElementById("equity"), { type: "line",
-    data: { labels: equity.map(p => p[0]), datasets: [{ data: equity.map(p => p[1]), borderColor: "#4f8cff", pointRadius: 0, tension: 0.1 }] },
-    options: common });
-  new Chart(document.getElementById("drawdown"), { type: "line",
-    data: { labels: dd.map(p => p[0]), datasets: [{ data: dd.map(p => -p[1] * 100), borderColor: "#e5484d", backgroundColor: "rgba(229,72,77,.25)", fill: true, pointRadius: 0, tension: 0.1 }] },
-    options: { ...common, scales: { ...common.scales, y: { ...common.scales.y, ticks: { color: "#8b93a7", callback: v => v + "%" } } } } });
-</script>
 {% endif %}
+
+<p class="mono small muted" style="line-height:1.6">Every number on this page is computed by Koine from venue data pulled with a read-only key. Nothing here was entered by the creator. Past performance is not a guarantee of future results{% if st %}; a {{ st.track_days }}-day record is short{% endif %}. <a href="/verification" class="text2" style="text-decoration:underline">What this page proves and what it does not.</a></p>
 {% endblock %}

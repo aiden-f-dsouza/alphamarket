@@ -1,56 +1,222 @@
-<!doctype html>
+{% import "_macros.html" as m %}<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}AlphaMarket{% endblock %}</title>
+<title>{% block title %}Koine{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-  :root { --bg:#0f1117; --panel:#171a23; --line:#262a36; --text:#e6e8ef; --muted:#8b93a7;
-          --accent:#4f8cff; --good:#2fbf71; --bad:#e5484d; --warn:#f5a524; }
+  :root { --bg:#f6f4ef; --surface:#ffffff; --line:#e4e0d8; --line2:#cfc9be; --chip:#ece9e2;
+          --text:#141518; --text2:#4a4e56; --muted:#7b8089; --brand:#1b3556; --brand2:#3b7fb8; --gray:#b3b7be;
+          --good:#1b7a47; --bad:#b6363f; --warn:#9a6a10; --goodbg:#e8f2ec; --badbg:#f7e8e9; --warnbg:#f6efdf;
+          --sans:"IBM Plex Sans","Helvetica Neue",Helvetica,Arial,sans-serif;
+          --serif:Newsreader,Georgia,"Times New Roman",serif;
+          --mono:"IBM Plex Mono",Menlo,Consolas,monospace; --r:4px; }
   * { box-sizing:border-box; }
-  body { margin:0; font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); }
-  a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
-  header { display:flex; justify-content:space-between; align-items:center; padding:14px 24px; border-bottom:1px solid var(--line); }
-  header .brand { font-weight:700; letter-spacing:.3px; color:var(--text); }
-  main { max-width:1040px; margin:0 auto; padding:24px; }
-  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:18px 20px; margin-bottom:18px; }
-  h1 { font-size:26px; margin:0 0 6px; } h2 { font-size:17px; margin:0 0 12px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
-  .muted { color:var(--muted); } .small { font-size:13px; }
-  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
-  .tile { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:12px 14px; }
-  .tile .k { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
-  .tile .v { font-size:22px; font-weight:600; margin-top:2px; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 var(--sans); -webkit-font-smoothing:antialiased; }
+  a { color:var(--text); text-decoration:none; } a:hover { color:var(--brand2); }
+  h1, h2 { margin:0; font-family:var(--serif); font-weight:500; letter-spacing:-0.015em; line-height:1.05; text-wrap:balance; color:var(--brand); }
+  h1 { font-size:44px; } h2 { font-size:32px; line-height:1.1; } h3 { margin:0; font-size:18px; font-weight:600; letter-spacing:-0.01em; line-height:1.25; }
+  p { margin:0; text-wrap:pretty; }
+  .serif { font-family:var(--serif); font-weight:500; letter-spacing:-0.01em; }
+  .mono { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  .label { font-family:var(--mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+  .muted { color:var(--muted); } .text2 { color:var(--text2); } .small { font-size:13px; } .brand-c { color:var(--brand); }
   .good { color:var(--good); } .bad { color:var(--bad); } .warn { color:var(--warn); }
-  .badge { display:inline-block; padding:3px 9px; border-radius:999px; font-size:12px; border:1px solid var(--line); margin-right:6px; background:var(--bg); }
-  .badge.good { border-color:var(--good); } .badge.warn { border-color:var(--warn); } .badge.bad { border-color:var(--bad); }
-  table { width:100%; border-collapse:collapse; font-size:14px; } th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); } th { color:var(--muted); font-weight:600; }
-  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
-  input, textarea, select { width:100%; padding:9px 10px; border-radius:7px; border:1px solid var(--line); background:var(--bg); color:var(--text); font:inherit; }
-  textarea { min-height:90px; font-family:ui-monospace,Menlo,monospace; font-size:13px; }
-  label { display:block; margin:10px 0 4px; color:var(--muted); font-size:13px; }
-  button { padding:9px 14px; border-radius:7px; border:1px solid var(--accent); background:var(--accent); color:#fff; font:inherit; cursor:pointer; }
-  button.secondary { background:transparent; color:var(--text); border-color:var(--line); }
-  button.danger { background:transparent; color:var(--bad); border-color:var(--bad); }
+  .lead { font-size:17px; line-height:1.55; color:var(--text2); }
+
+  /* chrome */
+  .nav { display:flex; align-items:center; justify-content:space-between; gap:24px; height:64px; padding:0 48px; border-bottom:1px solid var(--line); }
+  .brand { display:flex; align-items:center; gap:10px; color:var(--brand); font-family:var(--serif); font-size:22px; font-weight:500; line-height:1; }
+  .brand:hover { color:var(--brand); }
+  .nav-left { display:flex; align-items:center; gap:36px; }
+  .seg { display:flex; align-items:center; gap:2px; padding:3px; background:var(--chip); border-radius:var(--r); }
+  .seg a { font-family:var(--mono); font-size:12px; letter-spacing:.04em; padding:7px 14px; border-radius:var(--r); color:var(--muted); }
+  .seg a.on { color:var(--text); background:var(--surface); box-shadow:0 1px 2px rgba(20,21,24,.08); }
+  .nav-links { display:flex; align-items:center; gap:28px; }
+  .nav-links > a, .nav-links > details > summary { display:inline-flex; align-items:center; gap:5px; font-size:14px; font-weight:500; color:var(--text2); padding:6px 0; border-bottom:1.5px solid transparent; cursor:pointer; }
+  .nav-links > a.active, .nav-links > details.active > summary { color:var(--text); border-bottom-color:var(--brand); }
+  .nav-links > details[open] > summary { color:var(--text); }
+  .nav-right { display:flex; align-items:center; gap:20px; }
+  .nav-right > a:not(.btn) { font-size:14px; font-weight:500; color:var(--text2); padding:6px 0; border-bottom:1.5px solid transparent; }
+  .nav-right > a.active { color:var(--text); border-bottom-color:var(--brand); }
+  .avatar { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:#d9d4c9; font:11px var(--mono); color:var(--text2); flex-shrink:0; }
+  /* menus: <details> so they work without script; the script below only closes them on outside click */
+  details.menu { position:relative; }
+  details.menu > summary { list-style:none; cursor:pointer; } details.menu > summary::-webkit-details-marker { display:none; }
+  details.menu > summary.avatar { border:2px solid transparent; box-sizing:content-box; } details.menu[open] > summary.avatar { border-color:var(--brand); }
+  details.menu > .drop { position:absolute; top:calc(100% + 10px); right:0; min-width:230px; padding:6px; background:var(--surface); border:1px solid var(--line2); border-radius:var(--r); box-shadow:0 16px 40px -16px rgba(20,21,24,.3); display:flex; flex-direction:column; z-index:20; }
+  details.menu > .drop.left { right:auto; left:0; }
+  .drop a, .drop button { display:flex; flex-direction:column; align-items:flex-start; gap:1px; width:100%; padding:8px 12px; border:0; border-radius:var(--r); background:none; font:500 14px/1.4 var(--sans); color:var(--text); text-align:left; cursor:pointer; }
+  .drop a:hover, .drop button:hover, .drop a:focus-visible, .drop button:focus-visible { background:var(--bg); color:var(--text); }
+  .drop a.on { color:var(--brand); }
+  .drop small { font-size:12px; color:var(--muted); font-weight:400; }
+  .drop hr { width:100%; border:0; border-top:1px solid var(--line); margin:6px 0; }
+  .drop .who { padding:8px 12px 6px; display:flex; flex-direction:column; gap:1px; font-size:14px; }
+  .drop form { display:contents; }
+  .nav-mobile { display:none; }
+  .subnav { display:flex; align-items:center; gap:28px; border-bottom:1px solid var(--line); overflow-x:auto; }
+  .subnav a { font-size:14px; font-weight:500; padding:10px 0; margin-bottom:-1px; color:var(--muted); border-bottom:1.5px solid transparent; white-space:nowrap; }
+  .subnav a.on { color:var(--text); border-bottom-color:var(--brand); }
+  :focus-visible { outline:2px solid var(--brand2); outline-offset:2px; }
+  .demo-strip { display:flex; align-items:center; justify-content:center; gap:10px; padding:8px 24px; background:var(--warnbg); color:var(--warn); font:12px var(--mono); letter-spacing:.04em; border-bottom:1px solid #e9dcc0; }
+  .footer { display:grid; grid-template-columns:1.4fr repeat(4, minmax(0, 1fr)); gap:48px; padding:48px 120px 40px; border-top:1px solid var(--line); margin-top:auto; }
+  .footer .col { display:flex; flex-direction:column; gap:10px; }
+  .footer .col a { font-size:14px; color:var(--text2); }
+  .page { display:flex; flex-direction:column; min-height:100vh; }
+  main { width:100%; max-width:1200px; margin:0 auto; padding:48px 24px 64px; display:flex; flex-direction:column; gap:28px; }
+  .section { width:100%; max-width:1200px; margin:0 auto; padding:0 24px; }
+
+  /* controls */
+  .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; height:44px; padding:0 20px; font:500 14px var(--sans); border-radius:var(--r); cursor:pointer; white-space:nowrap;
+         color:var(--surface); background:var(--brand); border:1px solid var(--brand); }
+  .btn:hover { color:var(--surface); background:#24466f; }
+  .btn.secondary { color:var(--text); background:var(--surface); border-color:var(--line2); } .btn.secondary:hover { color:var(--text); border-color:var(--muted); }
+  .btn.danger { color:var(--bad); background:transparent; border-color:var(--bad); } .btn.danger:hover { color:var(--bad); background:var(--badbg); }
+  .btn.light { color:var(--brand); background:var(--surface); border-color:var(--surface); }
+  .btn.lg { height:48px; padding:0 22px; } .btn.sm { height:36px; padding:0 14px; font-size:13px; }
+  .btn[disabled], .btn.disabled { color:var(--muted); background:var(--chip); border-color:var(--chip); cursor:not-allowed; }
+  .btn[disabled]:hover, .btn.disabled:hover { color:var(--muted); background:var(--chip); border-color:var(--chip); }
   form.inline { display:inline; }
-  .error { background:#3a1d20; border:1px solid var(--bad); color:#ffb4b7; padding:10px 12px; border-radius:8px; margin-bottom:14px; }
-  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:18px; } @media (max-width:800px) { .grid2 { grid-template-columns:1fr; } }
-  .unverified { border-left:3px solid var(--warn); padding:10px 14px; background:var(--bg); border-radius:0 8px 8px 0; }
-  canvas { max-height:280px; }
-  .months td { text-align:right; font-variant-numeric:tabular-nums; }
+  .field { display:flex; flex-direction:column; gap:8px; }
+  .field .note { font-size:13px; color:var(--muted); }
+  input, textarea, select { width:100%; background:var(--surface); color:var(--text); border:1px solid var(--line2); border-radius:var(--r); padding:12px 14px; font:15px/1.4 var(--sans); }
+  input:focus, textarea:focus { outline:none; border-color:var(--brand2); }
+  input.mono, textarea.mono { font:13px/1.5 var(--mono); }
+  textarea { min-height:120px; resize:vertical; }
+  .toggle { display:flex; align-items:center; gap:12px; font-size:14px; cursor:pointer; }
+  .toggle input { appearance:none; width:36px; height:20px; margin:0; padding:2px; border:0; border-radius:10px; background:var(--line2); position:relative; cursor:pointer; }
+  .toggle input::after { content:""; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:var(--surface); transition:left .12s; }
+  .toggle input:checked { background:var(--good); } .toggle input:checked::after { left:18px; }
+  .error { padding:12px 16px; border:1px solid var(--bad); border-radius:var(--r); background:var(--badbg); color:var(--bad); font-size:14px; }
+  .notice { padding:12px 16px; border:1px solid var(--line2); border-radius:var(--r); background:var(--surface); font-size:14px; color:var(--text2); }
+
+  /* surfaces */
+  .card { display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--line2); border-radius:var(--r); overflow:hidden; }
+  .card.plain { background:transparent; }
+  .card.ink { background:var(--brand); color:var(--surface); border-color:var(--brand); } .card.ink .label { color:#b9c3d1; } .card.ink .text2 { color:#b9c3d1; } .card.ink h2, .card.ink .serif { color:var(--surface); }
+  .card.tint { background:var(--goodbg); border-color:#cfe3d6; }
+  .card > .row { display:flex; align-items:center; justify-content:space-between; gap:24px; padding:20px 24px; border-bottom:1px solid var(--line); }
+  .card > .row:last-child { border-bottom:0; }
+  .card > .body, .body { padding:24px 28px; display:flex; flex-direction:column; gap:12px; }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); }
+  .stats.two { grid-template-columns:repeat(2, minmax(0,1fr)); } .stats.three { grid-template-columns:repeat(3, minmax(0,1fr)); }
+  .stats.four { grid-template-columns:repeat(4, minmax(0,1fr)); } .stats.five { grid-template-columns:repeat(5, minmax(0,1fr)); } .stats.six { grid-template-columns:repeat(6, minmax(0,1fr)); }
+  .stat { display:flex; flex-direction:column; gap:6px; padding:18px 20px; border-right:1px solid var(--line); border-bottom:1px solid var(--line); }
+  .stats > .stat:last-child { border-right:0; } .stats.two > .stat, .stats.three > .stat, .stats.four > .stat, .stats.five > .stat, .stats.six > .stat { border-bottom:0; }
+  .stat .v { font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:24px; font-weight:500; line-height:1; }
+  .stat .v small { font-size:13px; color:var(--muted); margin-left:5px; font-weight:400; }
+  .badge { display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11px; letter-spacing:.06em; text-transform:uppercase; padding:5px 9px; border-radius:var(--r); color:var(--text2); background:var(--chip); }
+  .badge.good { color:var(--good); background:var(--goodbg); } .badge.warn { color:var(--warn); background:var(--warnbg); } .badge.bad { color:var(--bad); background:var(--badbg); }
+  .badges { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .tag { font-family:var(--mono); font-size:11px; letter-spacing:.04em; color:var(--text2); border:1px solid var(--line2); padding:4px 8px; border-radius:var(--r); }
+  .chip { display:inline-flex; align-items:center; gap:6px; font-size:14px; font-weight:500; padding:9px 14px; border-radius:var(--r); color:var(--text2); border:1px solid var(--line2); background:var(--surface); }
+  .chip.on { color:var(--surface); background:var(--brand); border-color:var(--brand); }
+  .bar { display:block; width:100%; background:var(--line); border-radius:999px; overflow:hidden; } .bar > span { display:block; height:100%; border-radius:999px; }
+  table { width:100%; border-collapse:collapse; }
+  th { text-align:left; padding:10px 8px; font-family:var(--mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:500; border-bottom:1px solid var(--line2); }
+  td { padding:11px 8px; border-bottom:1px solid var(--line); font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:13px; }
+  th.num, td.num { text-align:right; }
+  .hairline-list > * { display:flex; align-items:flex-start; gap:12px; padding:14px 0; border-bottom:1px solid var(--line); }
+  .kv > * { display:flex; justify-content:space-between; align-items:baseline; gap:16px; padding:10px 0; border-bottom:1px solid var(--line); font-size:14px; }
+  .kv > * > :first-child { color:var(--text2); } .kv > * > :last-child { font-family:var(--mono); }
+  .icon { flex-shrink:0; }
+  .grid2 { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:24px; }
+  .grid3 { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:20px; }
+  .spread { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; }
+  .stack { display:flex; flex-direction:column; gap:10px; }
+  .unverified { padding:20px 22px; border:1px solid var(--line2); border-radius:var(--r); background:var(--surface); line-height:1.55; }
+  .chart { display:grid; grid-template-columns:44px 1fr; gap:12px; }
+  .chart .y { display:flex; flex-direction:column; justify-content:space-between; align-items:flex-end; }
+  .chart .x { display:flex; justify-content:space-between; }
+  .chart .y span, .chart .x span { font-family:var(--mono); font-size:11px; color:var(--muted); }
+  .legend { display:flex; align-items:center; gap:18px; font-size:13px; color:var(--text2); }
+  .legend span { display:inline-flex; align-items:center; gap:7px; } .legend i { width:14px; border-top:2px solid; }
+  @media (max-width:1000px) { .grid2, .grid3 { grid-template-columns:1fr; } .nav { padding-left:20px; padding-right:20px; } .nav-links, .nav-right > a:not(.btn), .nav-right > .account { display:none; } .nav-mobile { display:block; } .footer { grid-template-columns:1fr 1fr; padding:40px 24px; } h1 { font-size:34px; } .stats.four, .stats.five, .stats.six { grid-template-columns:repeat(2, minmax(0,1fr)); } .stats.four > .stat, .stats.five > .stat, .stats.six > .stat { border-bottom:1px solid var(--line); } }
+  {% block style %}{% endblock %}
 </style>
 </head>
 <body>
-<header>
-  <a class="brand" href="/">AlphaMarket</a>
-  <nav class="small">
-    <a href="/methodology">Methodology</a>
-    &nbsp;·&nbsp; <a href="/security">Security &amp; privacy</a>
-    {% if request.session.get("user_id") %}
-      &nbsp;·&nbsp; <a href="/dashboard">Dashboard</a>
-      &nbsp;·&nbsp; <form class="inline" method="post" action="/logout-form"><button class="secondary" type="submit">Log out</button></form>
+<div class="page">
+{% set nav %}{% block nav_active %}{% endblock %}{% endset %}{% set nav = nav|trim %}
+{% set learn = [("verification", "/verification", "Verification", "How every number is computed"), ("transparency", "/transparency", "Transparency", "Outcomes across the whole platform"), ("research", "/research", "Research", "Reading a track record"), ("security", "/security", "Security & privacy", "What Koine holds, and what it cannot do")] %}
+{% set in_learn = nav in ["verification", "transparency", "research", "security"] %}
+<nav class="nav" aria-label="Primary">
+  <div class="nav-left">
+    <a class="brand" href="/">{{ m.logo(30) }}Koine</a>
+    <div class="nav-links">
+      <a href="/marketplace" class="{{ 'active' if nav == 'marketplace' }}">Marketplace</a>
+      {% if settings.demo_mode %}<a href="/feed" class="{{ 'active' if nav == 'feed' }}">Feed</a>{% endif %}
+      <details class="menu {{ 'active' if in_learn }}">
+        <summary>Learn {{ m.icon("chevd", 12, "currentColor", 2) }}</summary>
+        <div class="drop left">{% for key, href, label, hint in learn %}<a href="{{ href }}" class="{{ 'on' if nav == key }}">{{ label }}<small>{{ hint }}</small></a>{% endfor %}</div>
+      </details>
+      <a href="/creators" class="{{ 'active' if nav == 'creators' }}">For creators</a>
+    </div>
+  </div>
+  <div class="nav-right">
+    {% if user %}
+      {% if settings.demo_mode %}<a href="/portfolio" class="{{ 'active' if nav == 'portfolio' }}">Portfolio</a>{% endif %}
+      <a href="/dashboard" class="{{ 'active' if nav == 'dashboard' }}">Dashboard</a>
+      <details class="menu account">
+        <summary class="avatar" title="Account menu" aria-label="Account menu">{{ user.display_name[:2]|upper }}</summary>
+        <div class="drop">
+          <div class="who"><span style="font-weight:500">{{ user.display_name }}</span><small>Signed in</small></div>
+          <hr>
+          <a href="/dashboard">Dashboard</a>
+          <a href="/dashboard/connect">Connect a key</a>
+          <a href="/invite">Invite</a>
+          <hr>
+          <form method="post" action="/logout-form"><button type="submit">Log out</button></form>
+        </div>
+      </details>
+    {% else %}
+      <a href="/login" class="{{ 'active' if nav == 'login' }}">Log in</a>
+      <a href="/signup" class="btn sm">Get started</a>
     {% endif %}
-  </nav>
-</header>
-<main>{% block content %}{% endblock %}</main>
+    <details class="menu nav-mobile">
+      <summary class="btn secondary sm" aria-label="Menu">Menu {{ m.icon("chevd", 12, "currentColor", 2) }}</summary>
+      <div class="drop">
+        <a href="/marketplace" class="{{ 'on' if nav == 'marketplace' }}">Marketplace</a>
+        {% if settings.demo_mode %}<a href="/feed" class="{{ 'on' if nav == 'feed' }}">Feed</a>{% endif %}
+        <a href="/creators" class="{{ 'on' if nav == 'creators' }}">For creators</a>
+        <hr>
+        {% for key, href, label, hint in learn %}<a href="{{ href }}" class="{{ 'on' if nav == key }}">{{ label }}</a>{% endfor %}
+        <hr>
+        {% if user %}
+          {% if settings.demo_mode %}<a href="/portfolio">Portfolio</a>{% endif %}
+          <a href="/dashboard">Dashboard</a>
+          <form method="post" action="/logout-form"><button type="submit">Log out</button></form>
+        {% else %}
+          <a href="/login">Log in</a>
+        {% endif %}
+      </div>
+    </details>
+  </div>
+</nav>
+{% if demo %}<div class="demo-strip">{{ m.icon("eye", 14, "currentColor") }}Sample data · this is a demo build. Names, handles, markets and every number on this page are illustrative.</div>{% endif %}
+{% block body %}<main>{% block content %}{% endblock %}</main>{% endblock %}
+<footer class="footer">
+  <div class="col" style="gap:14px">
+    <a class="brand" href="/">{{ m.logo(30) }}Koine</a>
+    <p class="small text2" style="max-width:300px">Invest together. A verified marketplace for trading strategies: records are computed from venue data, never typed in.</p>
+    <span class="mono muted" style="font-size:12px">Koine never holds investor funds.</span>
+  </div>
+  <div class="col"><span class="label">Product</span><a href="/marketplace">Marketplace</a>{% if settings.demo_mode %}<a href="/feed">Feed</a><a href="/portfolio">Portfolio</a>{% endif %}<a href="/creators">For creators</a></div>
+  <div class="col"><span class="label">Trust</span><a href="/verification">Verification</a><a href="/transparency">Transparency</a><a href="/security">Security &amp; privacy</a></div>
+  <div class="col"><span class="label">Learn</span><a href="/research">Research</a><a href="/verification">Verification</a><a href="/transparency">Transparency</a></div>
+  <div class="col"><span class="label">Account</span>{% if user %}<a href="/dashboard">Dashboard</a>{% else %}<a href="/login">Log in</a><a href="/signup">Create account</a>{% endif %}<a href="/invite">Invite</a></div>
+</footer>
+</div>
+<script>
+  // Close any open menu on an outside click or Escape. Menus work without this; it only tidies them.
+  document.addEventListener("click", function (e) {
+    document.querySelectorAll("details.menu[open]").forEach(function (d) { if (!d.contains(e.target)) d.removeAttribute("open"); });
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") document.querySelectorAll("details.menu[open]").forEach(function (d) { d.removeAttribute("open"); });
+  });
+</script>
 </body>
 </html>

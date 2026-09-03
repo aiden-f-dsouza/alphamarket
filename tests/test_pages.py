@@ -80,14 +80,20 @@ def connected(logged_in, session_factory):
 
 def test_landing_and_login_flow(client):
     assert client.get("/").status_code == 200
-    assert client.get("/dashboard", follow_redirects=False).headers["location"] == "/"
+    assert client.get("/dashboard", follow_redirects=False).headers["location"] == "/login"
+    assert "Create your account" in client.get("/signup").text
+    assert "Get started" in client.get("/").text  # logged-out nav
     client.post(
         "/signup-form",
         data={"email": "a@example.com", "password": "hunter2hunter2", "display_name": "Ann"},
     )
-    assert "Welcome, Ann" in client.get("/dashboard").text
+    assert "Ann" in client.get("/dashboard").text
+    html = client.get("/").text  # landing stays reachable when logged in
+    assert "Go to dashboard" in html and "Sign up" not in html
     bad = client.post("/login-form", data={"email": "a@example.com", "password": "wrong"})
-    assert "Invalid credentials" in bad.text
+    assert "Invalid credentials" in bad.text and 'role="alert"' in bad.text
+    assert "Get started" not in client.get("/marketplace").text  # logged-in nav shows the account
+    assert client.get("/login", follow_redirects=False).headers["location"] == "/dashboard"
 
 
 def test_connect_form_and_dashboard(connected, logged_in):
@@ -97,6 +103,45 @@ def test_connect_form_and_dashboard(connected, logged_in):
     assert "read-only verified" in html
     assert "Public page" in html
     assert "-----BEGIN" not in html  # key material never rendered
+
+
+def test_connect_page_and_rejection(logged_in):
+    assert "Paste a read-only key" in logged_in.get("/dashboard/connect").text
+    with respx.mock:
+        respx.get(f"{BASE}/api_keys").mock(
+            return_value=httpx.Response(
+                200, json={"api_keys": [{"api_key_id": "k", "name": "k", "scopes": ["write"]}]}
+            )
+        )
+        resp = logged_in.post(
+            "/dashboard/connect",
+            data={"key_id": "k", "private_key_pem": _pem(), "strategy_name": "Bad Key"},
+        )
+    assert resp.status_code == 200  # re-rendered connect page with the error
+    assert "Paste a read-only key" in resp.text
+    assert "-----BEGIN" not in resp.text
+
+
+def test_landing_features_a_real_page_or_empty_state(client, connected, logged_in):
+    logged_in.post("/logout-form")
+    html = client.get("/").text
+    assert "BTC Hourly Fade" in html  # the featured card is a real public page
+    assert "incubating" in html
+
+
+def test_explore_lists_visible_strategies(connected, logged_in):
+    logged_in.post(
+        f"/dashboard/strategy/{connected['id']}",
+        data={"name": "BTC Hourly Fade", "style_tags": "btc", "public": "on"},
+    )
+    html = logged_in.get("/explore").text
+    assert "BTC Hourly Fade" not in html  # < 90 days: incubating, hidden by default
+    html = logged_in.get("/explore?incubating=1").text
+    assert "BTC Hourly Fade" in html and "incubating" in html
+    assert "<polyline" in html  # sparkline drawn from the daily equity series
+    assert "BTC Hourly Fade" not in logged_in.get("/explore?incubating=1&tag=other").text
+    logged_in.post(f"/dashboard/strategy/{connected['id']}", data={"name": "BTC Hourly Fade"})
+    assert "BTC Hourly Fade" not in logged_in.get("/explore?incubating=1").text
 
 
 def test_public_page_shows_platform_numbers_and_labels_description(connected, logged_in):
@@ -118,6 +163,7 @@ def test_public_page_shows_platform_numbers_and_labels_description(connected, lo
     assert "platform-verified since" in html
     assert "incubating" in html
     assert "mean-reversion" in html
+    assert "<polyline" in html and "chart.js" not in html.lower()  # inline SVG, no CDN
 
     data = logged_in.get(f"/api/strategies/{connected['slug']}").json()
     assert data["stats"]["risk_score"] >= 1
