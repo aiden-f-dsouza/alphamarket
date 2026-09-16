@@ -1,0 +1,15 @@
+# Vercel installs from this file (it does not read pyproject/uv.lock).
+# Keep in sync with the runtime dependencies in pyproject.toml. The worker-only
+# dependency (apscheduler) is omitted: no worker runs on Vercel.
+fastapi>=0.115
+sqlalchemy>=2.0
+psycopg[binary]>=3.2
+pydantic-settings>=2.4
+email-validator>=2.2
+cryptography>=43.0
+httpx>=0.27
+bcrypt>=4.2
+itsdangerous>=2.2
+jinja2>=3.1
+markdown>=3.6
+python-multipart>=0.0.9
