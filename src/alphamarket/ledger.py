@@ -24,7 +24,10 @@ before the anchor is already reflected in the anchor balance, and any
 settlement after it (even of a pre-anchor position) is real cash in.
 
 Contract quantities and prices both carry the 1e6 scale, so count * price
-carries 1e12 and money.notional_micros brings it back exactly.
+carries 1e12 and money.notional_micros brings it back exactly. A venue that
+reports an average price finer than 1e-6 (Polymarket) also reports the gross
+cash of the fill; that figure is stored as `notional_micros` and used in
+place of the product, so cash still reproduces the venue to the micro.
 """
 
 from dataclasses import dataclass
@@ -59,9 +62,18 @@ class LedgerEvent:
     cash_after_micros: int
 
 
+def fill_notional(fill: FillLike) -> int:
+    """Gross value of a fill before fees: the venue-reported figure when the
+    fill carries one, otherwise price x count computed exactly."""
+    reported = getattr(fill, "notional_micros", None)
+    if reported is not None:
+        return reported
+    return notional_micros(fill.price_micros, fill.count_micros)
+
+
 def fill_cash_flow(fill: FillLike) -> int:
     """Signed cash movement of one fill, in micros."""
-    notional = notional_micros(fill.price_micros, fill.count_micros)
+    notional = fill_notional(fill)
     if Action(fill.action) is Action.BUY:
         return -(notional + fill.fee_micros)
     return notional - fill.fee_micros

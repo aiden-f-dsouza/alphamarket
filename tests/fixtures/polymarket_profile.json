@@ -1,0 +1,23 @@
+{
+    "$schema": "https://gamma-api.polymarket.com/schemas/PublicProfileResponse.json",
+    "createdAt": "2024-08-12T12:36:11.301563Z",
+    "proxyWallet": "0xec981ed70ae69c5cbcac08c1ba063e734f6bafcd",
+    "profileImage": "https://polymarket-upload.s3.us-east-2.amazonaws.com/profile-image-676309-f2f67538-7038-46ab-98e3-8ce979b9f0b2.png",
+    "displayUsernamePublic": true,
+    "bio": "getting adversely selected",
+    "pseudonym": "Nervous-Parallelogram",
+    "name": "0xheavy888",
+    "users": [
+        {
+            "id": "676309",
+            "creator": false,
+            "mod": false,
+            "communityMod": false
+        }
+    ],
+    "xUsername": "elucidxte",
+    "verifiedBadge": false,
+    "takerTier": 6,
+    "takerTierName": "Obsidian",
+    "weightedVolume": 1128564.90836
+}

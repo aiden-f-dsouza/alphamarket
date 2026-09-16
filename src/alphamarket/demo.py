@@ -18,7 +18,7 @@ capacity, worst periods, tailing) that real pages simply omit.
 import random
 from datetime import date, timedelta
 
-from alphamarket.charts import polyline
+from alphamarket.charts import polyline, window_x
 
 VERIFIED_SINCE = date(2026, 5, 6)
 AS_OF = date(2026, 9, 1)
@@ -314,6 +314,7 @@ def _row(s: dict) -> dict:
         "track_days": s["days"],
         "reconciled": True,
         "spark": polyline(curve[-_STRIP_SPARK:], 120, 32),
+        "spark_dd": window_x(curve[-_STRIP_SPARK:], 120),
         "sharpe": s["sharpe"],
         "tailing_k": s["tailing_k"],
         "capacity_k": s["capacity_k"],
@@ -326,6 +327,37 @@ def _row(s: dict) -> dict:
 def marketplace_rows() -> list[dict]:
     """Sample rows for the marketplace, ranked by the sample Koine score."""
     return sorted((_row(s) for s in _STRATEGIES), key=lambda r: r["score"], reverse=True)
+
+
+_TICKER = [
+    ("Weather & CPI mean reversion", "KXHIGHNY-26AUG31-T90", "no", True, 60.0, "2026-09-01"),
+    ("Fed path, both directions", "KXFED-26SEP-25", "yes", True, 200.0, "2026-09-01"),
+    ("Daily temperature spreads", "KXHIGHCHI-26AUG31-T84", "yes", False, 0.0, "2026-09-01"),
+    ("Election polling arbitrage", "KXSEN-26OH-D", "no", True, 150.0, "2026-08-31"),
+    ("Weather & CPI mean reversion", "KXHIGHDEN-26AUG30-T95", "no", True, 60.0, "2026-08-31"),
+    ("Long-tail sports underdogs", "KXNFLTOT-26W1-KCBAL-O47", "no", False, 0.0, "2026-08-31"),
+    ("Fed path, both directions", "KXJOBS-26AUG-150", "no", True, 150.0, "2026-08-29"),
+    ("Earnings-day binaries", "KXAAPL-26AUG-B215", "yes", True, 90.0, "2026-08-29"),
+    ("Election polling arbitrage", "KXGOV-26NJ-D", "yes", True, 110.0, "2026-08-28"),
+    ("Daily temperature spreads", "KXHIGHLAX-26AUG27-T88", "no", True, 40.0, "2026-08-28"),
+]
+
+
+def ticker() -> list[dict]:
+    """Sample settled trades for the landing ticker; shape mirrors
+    `public.recent_public_settlements`."""
+    return [
+        {
+            "strategy": name,
+            "ticker": t,
+            "side": side,
+            "won": won,
+            "payout": pay,
+            "settled_at": when,
+            "demo": True,
+        }
+        for name, t, side, won, pay, when in _TICKER
+    ]
 
 
 def featured() -> dict:

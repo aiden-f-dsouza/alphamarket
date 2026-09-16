@@ -196,3 +196,98 @@ def test_connect_records_reconciliation_anchor_and_reconciles(client, user, sess
     assert body["reconciled"] is True
     assert body["divergence_micros"] == 0
     assert body["venue_balance_micros"] == to_micros("1101.8980")
+
+
+# ---- Polymarket: address-keyed, no secret, ownership by profile claim (M7) ----
+
+POLY_DATA = "https://data-api.polymarket.com"
+POLY_GAMMA = "https://gamma-api.polymarket.com"
+POLY_ADDRESS = "0x124628E686dB22da39b6Ee43CA786C8A074BD6F2"
+
+
+def _mock_polymarket(bio: str = "getting adversely selected"):
+    profile = dict(_fixture("polymarket_profile.json"), bio=bio)
+    respx.get(f"{POLY_GAMMA}/public-profile").mock(return_value=httpx.Response(200, json=profile))
+    respx.get(f"{POLY_DATA}/activity", params__contains={"type": "TRADE"}).mock(
+        return_value=httpx.Response(200, json=_fixture("polymarket_activity_trades.json"))
+    )
+    respx.get(f"{POLY_DATA}/activity", params__contains={"type": "REDEEM"}).mock(
+        return_value=httpx.Response(200, json=_fixture("polymarket_activity_redeems.json"))
+    )
+    respx.get(f"{POLY_DATA}/positions").mock(
+        return_value=httpx.Response(200, json=_fixture("polymarket_positions.json"))
+    )
+
+
+def _connect_polymarket(client):
+    return client.post(
+        "/venues",
+        json={"venue": "polymarket", "key_id": POLY_ADDRESS, "strategy_name": "Weather fade"},
+    )
+
+
+@respx.mock
+def test_polymarket_connect_stores_no_secret_and_starts_unclaimed(client, user, session_factory):
+    _mock_polymarket()
+    resp = _connect_polymarket(client)
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["imported_fills"] == 4 and body["imported_settlements"] == 3
+    assert body["claimed"] is False and body["claim_code"].startswith("koine-")
+    assert body["verification_tier"] == "unclaimed"
+    with session_factory() as db:
+        account = db.scalars(select(VenueAccount)).one()
+        assert account.encrypted_private_key is None  # nothing secret exists
+        assert account.key_id == POLY_ADDRESS.lower()
+        assert account.venue_env == "prod"
+        # No observable balance: anchored at zero, positions at cost basis.
+        assert account.anchor_balance_micros == 0
+        assert len(account.anchor_positions) == 2
+        assert account.anchor_positions[0]["cost_micros"] == 9_999_900
+        fills = db.scalars(select(Fill)).all()
+        assert {f.notional_micros for f in fills} == {9_999_999}
+        strategy = db.scalars(select(Strategy)).one()
+        slug = strategy.slug
+    # Unclaimed accounts never reach a public page, even with public=True.
+    assert client.get(f"/api/strategies/{slug}").status_code == 404
+
+
+@respx.mock
+def test_polymarket_claim_requires_code_in_bio(client, user, session_factory):
+    _mock_polymarket()
+    account_id = _connect_polymarket(client).json()["id"]
+    resp = client.post(f"/venues/{account_id}/claim")
+    assert resp.status_code == 422
+    assert "koine-" in resp.json()["detail"]
+    with session_factory() as db:
+        account = db.get(VenueAccount, account_id)
+        code = account.claim_code
+        assert account.claimed_at is None
+    _mock_polymarket(bio=f"weather trader · {code}")
+    resp = client.post(f"/venues/{account_id}/claim")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["claimed"] is True
+    assert resp.json()["claim_code"] is None
+    assert resp.json()["verification_tier"] == "fills_only"
+    # Idempotent.
+    assert client.post(f"/venues/{account_id}/claim").status_code == 200
+    # No balance to reconcile against: refused, never quarantined.
+    assert client.post(f"/venues/{account_id}/reconcile").status_code == 409
+
+
+@respx.mock
+def test_polymarket_unknown_address_is_rejected(client, user):
+    respx.get(f"{POLY_GAMMA}/public-profile").mock(
+        return_value=httpx.Response(404, json={"error": "profile not found"})
+    )
+    resp = _connect_polymarket(client)
+    assert resp.status_code == 422
+    assert "Polymarket" in resp.json()["detail"]
+
+
+def test_kalshi_connect_requires_secret(client, user):
+    resp = client.post(
+        "/venues", json={"venue": "kalshi", "key_id": "k", "strategy_name": "No key"}
+    )
+    assert resp.status_code == 422
+    assert "PEM" in resp.json()["detail"]

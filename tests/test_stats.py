@@ -191,3 +191,65 @@ def test_monthly_returns_use_month_end_equity():
         (2026, 8, pytest.approx(0.1)),
     ]
     assert stats.monthly_returns([]) == []
+
+
+def test_mark_positions_values_yes_and_no_sides():
+    from alphamarket.stats import OpenPosition, mark_positions
+
+    positions = [
+        OpenPosition("A", "yes", 2_000_000, 800_000),  # 2 YES bought at 0.40
+        OpenPosition("B", "no", 1_000_000, 700_000),  # 1 NO bought at 0.70
+        OpenPosition("C", "yes", 1_000_000, 500_000),  # no mark available
+    ]
+    m = mark_positions(positions, {"A": 650_000, "B": 200_000, "C": None})
+    # A: 2 × 0.65 = 1.30; B: 1 × (1 - 0.20) = 0.80; C: carried at cost 0.50
+    assert m.open_cost_micros == 2_000_000
+    assert m.open_value_micros == 1_300_000 + 800_000 + 500_000
+    assert m.unmarked_cost_micros == 500_000
+    assert m.unrealized_pnl_micros == 600_000
+
+
+def test_peak_invested_and_return_for_fills_only_venues():
+    """A venue with no observable balance anchors at 0. Buying 10 contracts at
+    $0.40 (+$0.10 fee) draws $4.10 from outside; selling half at $0.60 returns
+    $3.00 - $0.05. Peak invested is the deepest draw, $4.10, and the return on
+    it is P&L / peak."""
+    fills = [
+        NormalizedFill(
+            venue_fill_id="b",
+            ticker="T",
+            side=Side.YES,
+            action=Action.BUY,
+            count_micros=to_micros("10"),
+            price_micros=to_micros("0.40"),
+            fee_micros=to_micros("0.10"),
+            filled_at=T0 + timedelta(days=1, hours=1),
+        ),
+        NormalizedFill(
+            venue_fill_id="s",
+            ticker="T",
+            side=Side.YES,
+            action=Action.SELL,
+            count_micros=to_micros("5"),
+            price_micros=to_micros("0.60"),
+            fee_micros=to_micros("0.05"),
+            filled_at=T0 + timedelta(days=1, hours=2),
+        ),
+    ]
+    r = stats.compute_stats(0, T0, fills, [], as_of=T0 + timedelta(days=2))
+    assert r.peak_invested_micros == to_micros("4.10")
+    # Raw equity: cash -4.10 + 2.95 = -1.15, open cost 2.00 -> 0.85 = P&L.
+    # The curve is shifted by the peak invested so it reads as growth of the
+    # capital at risk: 4.10 -> 4.95, and total_return is the return on it.
+    assert r.equity_micros == to_micros("4.95")
+    assert [e for _, e in r.daily_equity] == [
+        to_micros("4.10"),
+        to_micros("4.95"),
+        to_micros("4.95"),
+    ]
+    assert r.return_on_peak_invested == pytest.approx(0.85 / 4.10)
+    assert r.total_return == pytest.approx(0.85 / 4.10)
+    assert r.cash_micros == to_micros("-1.15")  # raw, for the ledger view
+    # A funded account never draws below zero: metric undefined.
+    funded = stats.compute_stats(to_micros("100"), T0, fills, [], as_of=T0 + timedelta(days=2))
+    assert funded.peak_invested_micros == 0 and funded.return_on_peak_invested is None

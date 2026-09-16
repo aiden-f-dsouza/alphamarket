@@ -56,6 +56,20 @@ def test_demo_pages_render_with_sample_banner(client, demo_on):
     html = client.get("/marketplace?q=weather").text  # search matches name or creator
     assert "Weather &amp; CPI" in html and "Election polling" not in html
     assert "Nothing matches" in client.get("/marketplace?q=zzz").text
+    assert 'class="card scard"' in html and "<polyline" in html  # browsing cards by default
+    table = client.get("/marketplace?view=table").text
+    assert 'class="card scard"' not in table and "Worst DD" in table  # comparison table
+    assert 'href="/marketplace?tag=weather&amp;view=table"' in table  # chips keep the view
+
+
+def test_landing_marks_and_chart(client, demo_on):
+    """Identity marks and the drawn curve come from the same rows the marketplace
+    shows: sample ones under the banner, nothing else."""
+    html = client.get("/").text
+    assert html.count('<svg class="sigil"') >= 4  # featured card + top three
+    assert 'class="draw"' in html and "shaded: worst drawdown" in html
+    html = client.get("/s/weather-cpi-mean-reversion").text
+    assert "data-series=" in html and 'class="draw"' in html  # crosshair series + draw-in
 
 
 def test_navigation_is_consistent(client, demo_on):

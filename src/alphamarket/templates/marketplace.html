@@ -12,11 +12,11 @@
   .search { display:flex; align-items:center; gap:8px; width:280px; height:38px; padding:0 12px; background:var(--surface); border:1px solid var(--line2); border-radius:var(--r); }
   .search input { border:0; padding:0; height:100%; font-size:14px; background:none; } .search input:focus { outline:none; }
   .filters { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
-  .lrow { display:grid; grid-template-columns:36px minmax(0,1fr) 112px 96px 96px 72px 64px 150px 88px; align-items:center; gap:18px; padding:16px 24px; border-bottom:1px solid var(--line); }
+  .lrow { display:grid; grid-template-columns:40px minmax(0,1fr) 112px 96px 96px 72px 64px 150px 88px; align-items:center; gap:18px; padding:16px 24px; border-bottom:1px solid var(--line); }
   .lrow.head { padding:12px 24px; border-bottom:1px solid var(--line2); background:var(--bg); }
   .lrow .r { text-align:right; }
   .lrow:last-child { border-bottom:0; }
-  @media (max-width:1000px) { .lrow { grid-template-columns:36px 1fr 96px; } .lrow .hide { display:none; } .tabs { flex-direction:column; align-items:flex-start; } }
+  @media (max-width:1000px) { .lrow { grid-template-columns:40px 1fr 96px; } .lrow .hide { display:none; } .tabs { flex-direction:column; align-items:flex-start; } }
 {% endblock %}
 {% block content %}
 <div class="spread">
@@ -37,23 +37,46 @@
 
 <div class="filters">
   <div style="display:flex;gap:8px;flex-wrap:wrap">
-    {% set keep = ('&incubating=1' if incubating) ~ ('&q=' ~ q|urlencode if q) %}
+    {% set keep = ('&incubating=1' if incubating) ~ ('&q=' ~ q|urlencode if q) ~ ('&view=table' if view == 'table') %}
     <a class="chip {{ 'on' if not tag }}" href="/marketplace{{ '?' ~ keep[1:] if keep }}">All</a>
     {% for t in tags %}<a class="chip {{ 'on' if t == tag }}" href="/marketplace?tag={{ t|urlencode }}{{ keep }}">{{ t }}</a>{% endfor %}
   </div>
-  <form method="get" action="/marketplace" class="toggle mono small text2">
-    {% if tag %}<input type="hidden" name="tag" value="{{ tag }}">{% endif %}{% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
-    <input type="checkbox" name="incubating" value="1" {% if incubating %}checked{% endif %} onchange="this.form.submit()"> Show incubating
-  </form>
+  <div style="display:flex;align-items:center;gap:20px">
+    <form method="get" action="/marketplace" class="toggle mono small text2">
+      {% if tag %}<input type="hidden" name="tag" value="{{ tag }}">{% endif %}{% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}{% if view == "table" %}<input type="hidden" name="view" value="table">{% endif %}
+      <input type="checkbox" name="incubating" value="1" {% if incubating %}checked{% endif %} onchange="this.form.submit()"> Show incubating
+    </form>
+    {% set base = '/marketplace?' ~ ('tag=' ~ tag|urlencode ~ '&' if tag) ~ ('incubating=1&' if incubating) ~ ('q=' ~ q|urlencode ~ '&' if q) %}
+    <div class="seg" role="group" aria-label="View"><a class="{{ 'on' if view == 'cards' }}" href="{{ base }}view=cards" {% if view == 'cards' %}aria-current="true"{% endif %}>Browse</a><a class="{{ 'on' if view == 'table' }}" href="{{ base }}view=table" {% if view == 'table' %}aria-current="true"{% endif %}>Compare</a></div>
+  </div>
 </div>
+
+{% if view == "cards" and rows %}
+<div class="cards">
+  {% for r in rows %}
+  <a class="card scard" href="/s/{{ r.slug }}">
+    <div class="head">{{ sigil(r.slug, 40) }}<div class="name"><b>{{ r.name }}</b><span class="who">{{ r.display_name }}{% for t in r.tags[:2] %}{{ m.cat(t) }}{% endfor %}</span></div></div>
+    <div class="mid">
+      <span class="ret {{ 'good' if r.total_return >= 0 else 'bad' }}">{{ m.pct(r.total_return) }}</span>
+      <span class="small muted">net of fees · worst drawdown <span class="mono bad">{{ m.pct(-r.max_drawdown) }}</span></span>
+      <svg class="curve" viewBox="0 0 120 32" preserveAspectRatio="none" role="img" aria-label="Last 60 verified days">{{ m.area(r.spark, 120, 32, r.total_return >= 0, r.spark_dd) }}</svg>
+    </div>
+    <div class="foot">
+      <span>{% if r.incubating %}<span class="warn">incubating · {{ r.track_days }}d</span>{% else %}<span class="good">✓ verified</span> {{ r.track_days }}d{% endif %}</span>
+      <span>{% if r.score is defined %}score {{ "%.1f"|format(r.score) }} · {% endif %}risk {{ r.risk_score }}/10</span>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
 
 <div class="card">
   <div class="lrow head">
-    <span class="label">#</span><span class="label">Strategy</span><span class="label hide">60 days</span><span class="label r">Return</span><span class="label r hide">Worst DD</span><span class="label r hide">Sharpe</span><span class="label r hide">Risk</span><span class="label hide">{{ "Capacity" if demo else "Reconciliation" }}</span><span class="label r hide">{{ "Score" if demo else "Verified" }}</span>
+    <span></span><span class="label">Strategy</span><span class="label hide">60 days</span><span class="label r">Return</span><span class="label r hide">Worst DD</span><span class="label r hide">Sharpe</span><span class="label r hide">Risk</span><span class="label hide">{{ "Capacity" if demo else "Reconciliation" }}</span><span class="label r hide">{{ "Score" if demo else "Verified" }}</span>
   </div>
   {% for r in rows %}
   <div class="lrow">
-    <span class="mono small muted">{{ "%02d"|format(loop.index) }}</span>
+    {{ sigil(r.slug, 36) }}
     <div class="stack" style="gap:6px"><a href="/s/{{ r.slug }}" style="font-size:16px;font-weight:500">{{ r.name }}</a>
       <div class="badges"><span class="mono small muted">{{ r.display_name }}</span>{% for t in r.tags %}<span class="tag">{{ t }}</span>{% endfor %}{% if r.incubating %}<span class="badge warn">incubating · {{ r.track_days }}d</span>{% else %}{{ m.verified(r.track_days ~ "d") }}{% endif %}</div></div>
     <div class="hide">{{ m.sparkline(r.spark, r.total_return >= 0) }}</div>
@@ -65,7 +88,7 @@
     <div class="stack hide" style="gap:5px"><span class="mono small text2">${{ r.tailing_k }}k <span class="muted">of ~${{ r.capacity_k }}k</span></span>{{ m.bar(r.tailing_k * 100 / r.capacity_k) }}</div>
     <span class="mono r hide" style="font-size:16px;font-weight:500">{{ "%.1f"|format(r.score) }}</span>
     {% else %}
-    <span class="mono small hide" style="display:inline-flex;align-items:center;gap:6px">{% if r.reconciled %}{{ m.icon("check", 14, "var(--good)", 2) }}<span class="text2">matched last night</span>{% elif r.reconciled is none %}<span class="muted">first run pending</span>{% else %}{{ m.icon("x", 14, "var(--warn)", 2) }}<span class="warn">diverged</span>{% endif %}</span>
+    <span class="mono small hide" style="display:inline-flex;align-items:center;gap:6px">{% if r.verification_tier is defined and r.verification_tier == "fills_only" %}<span class="muted">fills only · {{ r.venue }}</span>{% elif r.reconciled %}{{ m.icon("check", 14, "var(--good)", 2) }}<span class="text2">matched last night</span>{% elif r.reconciled is none %}<span class="muted">first run pending</span>{% else %}{{ m.icon("x", 14, "var(--warn)", 2) }}<span class="warn">diverged</span>{% endif %}</span>
     <span class="mono r hide" style="font-size:14px">{{ r.track_days }}<span class="muted"> d</span></span>
     {% endif %}
   </div>
@@ -73,6 +96,7 @@
   <div class="body"><span class="muted">{% if q %}Nothing matches “{{ q }}”{{ " in this tag" if tag }}. <a href="/marketplace" style="text-decoration:underline">Clear the search.</a>{% else %}No {{ "strategies with this tag" if tag else "verified strategies" }} yet.{% endif %}{% if not incubating %} Strategies under 90 verified days are hidden; switch on “Show incubating” to see them.{% endif %}</span></div>
   {% endfor %}
 </div>
+{% endif %}
 
 <div class="grid2">
   <div class="card plain"><div class="body" style="gap:8px;padding:20px 24px"><span class="label">How the score works</span><p class="small text2">Sharpe and Sortino carry most of the weight. Consistency (share of profitable months), worst drawdown and verified days adjust it. A strategy under 90 verified days is incubating and cannot rank above 5.0 regardless of return. <a href="/verification" style="text-decoration:underline">Full formula on the Verification page.</a></p></div></div>

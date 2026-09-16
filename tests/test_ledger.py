@@ -98,3 +98,23 @@ def test_live_demo_account_reconciles():
     fills = [fill(Action.BUY, "0.84", "0.5700", "0.014500", 10, side=Side.NO)]
     settlements = [settlement("0", 16)]
     assert cash_at(anchor, T0, fills, settlements) == to_micros("1101.4047")
+
+
+def test_reported_notional_overrides_price_times_count():
+    """Polymarket: 21.294467 tokens at a 10-dp average price. The venue says
+    $10.265189 left the wallet; price x count in micros is 9.999999 and the
+    fee is the remainder, so cash matches the venue to the micro."""
+    f = NormalizedFill(
+        venue_fill_id="p",
+        ticker="0xabc",
+        side=Side.YES,
+        action=Action.BUY,
+        count_micros=21_294_467,
+        price_micros=469_606,
+        fee_micros=265_190,
+        filled_at=datetime(2026, 9, 5, tzinfo=UTC),
+        notional_micros=9_999_999,
+    )
+    assert fill_cash_flow(f) == -10_265_189
+    plain = f.model_copy(update={"notional_micros": None, "count_micros": 21_000_000})
+    assert fill_cash_flow(plain) == -(21_000_000 * 469_606 // 1_000_000 + 265_190)

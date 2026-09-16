@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
 from alphamarket.connectors.base import Action, Side
-from alphamarket.ledger import FillLike, SettlementLike, aware, fill_cash_flow
+from alphamarket.ledger import FillLike, SettlementLike, aware, fill_cash_flow, fill_notional
 from alphamarket.money import MICROS_PER_UNIT, notional_micros
 
 ANNUALIZATION_DAYS = 365  # prediction markets settle every day of the year
@@ -61,12 +61,24 @@ class RealizedTrade:
         return self.revenue_micros - self.cost_micros
 
 
+@dataclass(frozen=True)
+class OpenPosition:
+    ticker: str
+    side: str  # "yes" | "no"
+    count_micros: int
+    cost_micros: int
+
+
 @dataclass
 class Replay:
     points: list[EquityPoint]
     realized: list[RealizedTrade]
     buy_notionals: list[tuple[datetime, str, int]]  # (at, ticker, notional) per buy fill
     equity_at_anchor_micros: int
+    open_positions: list[OpenPosition] = field(default_factory=list)  # at the end of the replay
+    # Equity just before each fill and the (ticker, side) count just after it,
+    # keyed by the fill's venue id: what signals.py needs for proportional sizing.
+    fill_context: dict[str, tuple[int, int]] = field(default_factory=dict)
 
 
 def _ticker_key(ticker: str, side: Side) -> tuple[str, str]:
@@ -111,11 +123,13 @@ def replay(
     def snapshot(at: datetime) -> None:
         points.append(EquityPoint(at, cash, open_cost, cash + open_cost))
 
+    fill_context: dict[str, tuple[int, int]] = {}
     for at, kind, obj in events:
         if kind == 0:
             f = obj
             pos = positions[_ticker_key(f.ticker, Side(f.side))]
-            notional = notional_micros(f.price_micros, f.count_micros)
+            notional = fill_notional(f)
+            equity_before = cash + open_cost
             if Action(f.action) is Action.BUY:
                 pos.count_micros += f.count_micros
                 pos.cost_micros += notional
@@ -131,6 +145,9 @@ def replay(
                     open_cost -= released
                     realized.append(RealizedTrade(f.ticker, at, released, notional - f.fee_micros))
             cash += fill_cash_flow(f)
+            venue_id = getattr(f, "venue_fill_id", None)
+            if venue_id is not None:
+                fill_context[venue_id] = (equity_before, pos.count_micros)
         else:
             s = obj
             cost = 0
@@ -143,7 +160,50 @@ def replay(
             cash += s.revenue_micros
         snapshot(at)
 
-    return Replay(points, realized, buys, equity_at_anchor)
+    open_positions = [
+        OpenPosition(ticker, side, pos.count_micros, pos.cost_micros)
+        for (ticker, side), pos in positions.items()
+        if pos.count_micros > 0
+    ]
+    return Replay(points, realized, buys, equity_at_anchor, open_positions, fill_context)
+
+
+# ---- mark-to-market (M6) -----------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Marked:
+    """Open positions valued at public market marks. Positions without a
+    usable mark are carried at cost and their cost is reported separately so
+    the reader can see how much of the book is unmarked."""
+
+    open_cost_micros: int
+    open_value_micros: int
+    unmarked_cost_micros: int
+
+    @property
+    def unrealized_pnl_micros(self) -> int:
+        return self.open_value_micros - self.open_cost_micros
+
+
+def position_value_micros(pos: OpenPosition, yes_mark_micros: int) -> int:
+    """A YES contract is worth the YES mark; a NO contract is worth $1 minus it."""
+    per_contract = yes_mark_micros if pos.side == Side.YES else MICROS_PER_UNIT - yes_mark_micros
+    return notional_micros(per_contract, pos.count_micros)
+
+
+def mark_positions(positions: list[OpenPosition], marks: dict[str, int | None]) -> Marked:
+    """`marks` maps ticker -> YES mark in micros (None or missing = no mark)."""
+    cost = value = unmarked = 0
+    for pos in positions:
+        cost += pos.cost_micros
+        mark = marks.get(pos.ticker)
+        if mark is None:
+            value += pos.cost_micros
+            unmarked += pos.cost_micros
+        else:
+            value += position_value_micros(pos, mark)
+    return Marked(cost, value, unmarked)
 
 
 def daily_equity(rep: Replay, anchor_at: datetime, as_of: datetime) -> list[tuple[date, int]]:
@@ -178,6 +238,28 @@ def total_return(series: list[tuple[date, int]]) -> float | None:
     if not series or series[0][1] <= 0:
         return None
     return series[-1][1] / series[0][1] - 1.0
+
+
+def peak_invested(rep: Replay, anchor_balance_micros: int) -> int:
+    """Most cash the ledger ever needed beyond what it can account for:
+    max over time of (-cash), floored at zero. An account with an observed
+    balance never goes negative, so this is 0 there; a fills-only venue
+    anchored at 0 sees cash go negative on the first buy, and the deepest
+    point is the peak capital the trader had at risk, the denominator of
+    return_on_peak_invested. `anchor_balance_micros` is the cash before any
+    post-anchor event."""
+    worst = max(0, -anchor_balance_micros)
+    for point in rep.points:
+        worst = max(worst, -point.cash_micros)
+    return worst
+
+
+def return_on_peak_invested(rep: Replay, series: list[tuple[date, int]], peak: int) -> float | None:
+    """P&L since the anchor over the peak capital invested. Only defined when
+    total_return is not (anchor equity 0) and some capital was invested."""
+    if peak <= 0 or not series:
+        return None
+    return (series[-1][1] - rep.equity_at_anchor_micros) / peak
 
 
 def max_drawdown(series: list[tuple[date, int]]) -> float:
@@ -333,6 +415,10 @@ class StrategyStatsResult:
     max_stake_fraction: float
     flags: list[str] = field(default_factory=list)
     daily_equity: list[tuple[date, int]] = field(default_factory=list)
+    cash_micros: int = 0
+    open_positions: list[OpenPosition] = field(default_factory=list)
+    peak_invested_micros: int = 0
+    return_on_peak_invested: float | None = None
 
 
 def compute_stats(
@@ -346,6 +432,15 @@ def compute_stats(
     as_of = aware(as_of or datetime.now(UTC))
     rep = replay(anchor_balance_micros, anchor_at, fills, settlements, anchor_positions)
     series = daily_equity(rep, anchor_at, as_of)
+    peak = peak_invested(rep, anchor_balance_micros)
+    on_peak = return_on_peak_invested(rep, series, peak)  # on the raw P&L curve
+    if anchor_balance_micros == 0 and peak > 0:
+        # Fills-only venue (no observable balance, anchored at zero): the raw
+        # curve is P&L, which has no meaningful ratio. Shift it by the peak
+        # capital the trader had at risk so every return-based statistic
+        # reads as growth of that capital; total_return then equals
+        # return_on_peak_invested. See methodology "Verification tiers".
+        series = [(day, equity + peak) for day, equity in series]
     rets = daily_returns(series)
     top_ticker, top_series = concentration(rep.buy_notionals)
     stake = max_stake_fraction(rep)
@@ -376,6 +471,10 @@ def compute_stats(
         max_stake_fraction=stake,
         flags=flags,
         daily_equity=series,
+        cash_micros=rep.points[-1].cash_micros if rep.points else anchor_balance_micros,
+        open_positions=rep.open_positions,
+        peak_invested_micros=peak,
+        return_on_peak_invested=on_peak,
     )
 
 

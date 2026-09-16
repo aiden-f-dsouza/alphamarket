@@ -11,6 +11,17 @@ KALSHI_BASE_URLS = {
     "prod": "https://external-api.kalshi.com/trade-api/v2",
 }
 
+# Polymarket has no demo environment. Three public, unauthenticated hosts
+# (checked 2026-09-06): data-api for per-wallet activity and positions, the
+# CLOB for market state and quotes, gamma for public profiles.
+POLYMARKET_BASE_URLS = {
+    "prod": {
+        "data": "https://data-api.polymarket.com",
+        "clob": "https://clob.polymarket.com",
+        "gamma": "https://gamma-api.polymarket.com",
+    },
+}
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -30,6 +41,8 @@ class Settings(BaseSettings):
     # marketplace with sample strategies. Never on for real users: preflight
     # refuses it, and every sample page carries a "Sample data" banner.
     demo_mode: bool = False
+    # Public market-price refresh cadence (see marketdata.py / worker.py).
+    price_refresh_interval_seconds: int = 300
 
     @property
     def sqlalchemy_url(self) -> str:
@@ -47,6 +60,12 @@ class Settings(BaseSettings):
     @property
     def kalshi_base_url(self) -> str:
         return KALSHI_BASE_URLS[self.kalshi_env]
+
+    polymarket_env: str = "prod"
+
+    def venue_env(self, venue: str) -> str:
+        """Environment new connections of `venue` are made in."""
+        return {"kalshi": self.kalshi_env, "polymarket": self.polymarket_env}[venue]
 
 
 @lru_cache

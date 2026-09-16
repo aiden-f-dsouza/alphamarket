@@ -8,7 +8,7 @@
 {% block content %}
 <div class="spread">
   <div class="stack" style="gap:8px"><span class="label">Creator dashboard</span><h1 style="font-size:40px">{{ user.display_name }}</h1></div>
-  <a class="btn" href="/dashboard/connect">{{ m.icon("plus", 14, "currentColor", 2) }}Connect {{ "another" if rows else "a Kalshi" }} account</a>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">{% for p in profiles %}<a class="btn {{ 'secondary' if not loop.first else '' }}" href="/dashboard/connect?venue={{ p.venue }}">{{ m.icon("plus", 14, "currentColor", 2) }}Connect {{ p.display_name }}</a>{% endfor %}</div>
 </div>
 {% if error %}<div class="error">{{ error }}</div>{% endif %}
 
@@ -20,7 +20,8 @@
       <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap"><h3 style="font-size:22px">{{ s.name if s else "Strategy" }}</h3><span class="mono small muted">{{ a.venue }} · {{ a.venue_env }}</span></div>
       <div class="badges">
         {% if a.status == "active" %}<span class="badge good">connected</span>{% elif a.status == "error" %}<span class="badge bad">sync error</span>{% else %}<span class="badge">disconnected</span>{% endif %}
-        {% if a.scope_checked_at %}<span class="badge good">{{ m.icon("lock", 12, "currentColor", 2) }}read-only verified</span>{% else %}<span class="badge warn">scope unverified</span>{% endif %}
+        {% if not row.profile.needs_secret %}<span class="badge good">{{ m.icon("lock", 12, "currentColor", 2) }}no key held</span>{% elif a.scope_checked_at %}<span class="badge good">{{ m.icon("lock", 12, "currentColor", 2) }}read-only verified</span>{% else %}<span class="badge warn">scope unverified</span>{% endif %}
+        {% if row.tier == "unclaimed" %}<span class="badge warn">ownership unclaimed</span>{% elif row.tier == "fills_only" %}<span class="badge">fills verified · balance not reconciled</span>{% endif %}
         {% if s %}<span class="badge {{ 'warn' if s.status == 'quarantined' else ('good' if s.status == 'live' else '') }}">{{ s.status }}</span>{% endif %}
         {% if row.visible and s %}<a class="small text2" href="/s/{{ s.slug }}" style="display:inline-flex;align-items:center;gap:6px;margin-left:8px;font-weight:500">Public page {{ m.icon("arrow", 12) }}</a>{% else %}<span class="mono small muted" style="margin-left:8px">public page hidden</span>{% endif %}
       </div>
@@ -32,10 +33,22 @@
     </div>
   </div>
 
+  {% if row.tier == "unclaimed" %}
+  <div class="body" style="gap:14px;border-bottom:1px solid var(--line)">
+    <div class="stack" style="gap:6px"><h3>Prove this account is yours</h3>
+      <span class="small text2" style="line-height:1.55">Anyone can paste a public address, so your page stays hidden until we see this code in your {{ row.profile.display_name }} profile bio. Add it, save the bio on {{ row.profile.display_name }}, then press Claim. You can remove it afterwards.</span></div>
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <code class="mono" style="font-size:18px;padding:8px 14px;border:1px solid var(--line2);border-radius:6px">{{ a.claim_code }}</code>
+      <form class="inline" method="post" action="/dashboard/accounts/{{ a.id }}/claim"><button class="btn">Claim</button></form>
+    </div>
+  </div>
+  {% endif %}
+
   {% if st %}
   <div class="stats six" style="border-bottom:1px solid var(--line)">
     <div class="stat"><span class="label">Equity</span><span class="v">{{ m.usd(st.equity_micros / 1000000) }}</span></div>
-    <div class="stat"><span class="label">Total return</span><span class="v {{ 'good' if (st.total_return or 0) >= 0 else 'bad' }}">{{ m.pct(st.total_return) }}</span></div>
+    {% if st.total_return is none and st.extras.get("return_on_peak_invested") is not none %}<div class="stat"><span class="label">Return on peak invested</span><span class="v {{ 'good' if st.extras.get("return_on_peak_invested") >= 0 else 'bad' }}">{{ m.pct(st.extras.get("return_on_peak_invested")) }}</span></div>
+    {% else %}<div class="stat"><span class="label">Total return</span><span class="v {{ 'good' if (st.total_return or 0) >= 0 else 'bad' }}">{{ m.pct(st.total_return) }}</span></div>{% endif %}
     <div class="stat"><span class="label">Worst drawdown</span><span class="v bad">{{ m.pct(-st.max_drawdown) }}</span></div>
     <div class="stat"><span class="label">Risk score</span><span class="v">{{ st.risk_score }}<small>/10</small></span></div>
     <div class="stat"><span class="label">Win rate</span><span class="v">{{ "%.0f"|format((st.win_rate or 0) * 100) }}%</span></div>
@@ -62,9 +75,9 @@
   {% if a.status != "disconnected" %}
   <div class="actions">
     <form class="inline" method="post" action="/dashboard/accounts/{{ a.id }}/sync"><button class="btn secondary">{{ m.icon("sync", 14) }}Sync now</button></form>
-    <form class="inline" method="post" action="/dashboard/accounts/{{ a.id }}/reconcile"><button class="btn secondary">Reconcile now</button></form>
+    {% if row.reconcilable %}<form class="inline" method="post" action="/dashboard/accounts/{{ a.id }}/reconcile"><button class="btn secondary">Reconcile now</button></form>{% else %}<span class="mono small muted">no venue balance to reconcile against</span>{% endif %}
     <span style="flex-grow:1"></span>
-    <form class="inline" method="post" action="/dashboard/accounts/{{ a.id }}/disconnect" onsubmit="return confirm('Disconnect and erase the stored key?')"><button class="btn danger">Disconnect and erase key</button></form>
+    <form class="inline" method="post" action="/dashboard/accounts/{{ a.id }}/disconnect" onsubmit="return confirm('Disconnect this account?')"><button class="btn danger">{{ "Disconnect and erase key" if row.profile.needs_secret else "Disconnect" }}</button></form>
   </div>
   {% endif %}
 </div>
@@ -86,7 +99,8 @@
   <div class="card plain"><div class="body" style="padding:28px;gap:16px">
     <h3>What we hold for this account</h3>
     <div class="hairline-list">
-      <div>{{ m.icon("lock", 18, "var(--text2)") }}<div class="stack" style="gap:3px"><span>Kalshi API key, read-only scope</span><span class="mono muted" style="font-size:12px">encrypted at rest · scope re-checked every sync · erased on disconnect</span></div></div>
+      {% if row.profile.needs_secret %}<div>{{ m.icon("lock", 18, "var(--text2)") }}<div class="stack" style="gap:3px"><span>{{ row.profile.display_name }} API key, read-only scope</span><span class="mono muted" style="font-size:12px">encrypted at rest · scope re-checked every sync · erased on disconnect</span></div></div>
+      {% else %}<div>{{ m.icon("lock", 18, "var(--text2)") }}<div class="stack" style="gap:3px"><span>{{ row.profile.display_name }} wallet address only</span><span class="mono muted" style="font-size:12px">public on-chain identifier · no key of any kind</span></div></div>{% endif %}
       <div>{{ m.icon("eye", 18, "var(--text2)") }}<div class="stack" style="gap:3px"><span>Fills, settlements, balance snapshots</span><span class="mono muted" style="font-size:12px">append-only · never edited · corrections are new rows</span></div></div>
       <div style="border-bottom:0">{{ m.icon("x", 18, "var(--text2)") }}<div class="stack" style="gap:3px"><span>Nothing that can move money</span><span class="mono muted" style="font-size:12px">no orders, no cancels, no deposits, no withdrawals</span></div></div>
     </div>
@@ -96,8 +110,8 @@
 {% else %}
 <div class="card"><div class="body" style="padding:40px;align-items:flex-start;gap:16px">
   <h3>No account connected yet.</h3>
-  <p class="text2" style="max-width:560px">Create a read-only API key at Kalshi and paste it here. We check its scope before storing it, import your fills, and reconcile against your balance tonight. Your public page goes live once the ledger matches.</p>
-  <a class="btn" href="/dashboard/connect">Connect a read-only key</a>
+  <p class="text2" style="max-width:560px">Connect a Kalshi read-only key or a Polymarket wallet address. We import your fills, compute the record ourselves, and (where the venue exposes a balance) reconcile against it nightly. Your public page goes live once the ledger checks out.</p>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">{% for p in profiles %}<a class="btn {{ 'secondary' if not loop.first else '' }}" href="/dashboard/connect?venue={{ p.venue }}">Connect {{ p.display_name }}</a>{% endfor %}</div>
 </div></div>
 {% endfor %}
 {% endblock %}

@@ -84,7 +84,6 @@ def account(db):
 def _stub(monkeypatch, balance: str) -> StubConnector:
     stub = StubConnector(balance)
     monkeypatch.setattr(ingest, "build_connector", lambda *a, **k: stub)
-    monkeypatch.setattr(reconcile, "build_connector", lambda *a, **k: stub)
     return stub
 
 

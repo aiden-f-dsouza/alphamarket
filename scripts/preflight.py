@@ -37,8 +37,11 @@ def main() -> int:
                 trig = conn.execute(
                     text("SELECT count(*) FROM pg_trigger WHERE tgname LIKE '%_append_only'")
                 ).scalar()
-                if trig < 2:
-                    problems.append("append-only triggers missing on fills/settlements")
+                if trig < 5:
+                    problems.append(
+                        "append-only triggers missing (fills, settlements, signals, "
+                        "mirror_fills, mirror_settlements)"
+                    )
     except Exception as exc:  # noqa: BLE001
         problems.append(f"database unreachable: {type(exc).__name__}")
         head = None

@@ -25,6 +25,7 @@ from sqlalchemy import (
     LargeBinary,
     String,
     Text,
+    UniqueConstraint,
     event,
 )
 from sqlalchemy.orm import Mapped, Session, mapped_column
@@ -78,7 +79,17 @@ class VenueAccount(Base):
     # equity replay so pre-anchor positions carry their real cost basis and
     # stale ones (settled outside returned history) cannot inflate equity.
     anchor_positions: Mapped[list | None] = mapped_column(JSON, default=None)
+    # Ownership proof for credential-less venues (M7): the user puts
+    # `claim_code` in their public venue profile and we check for it.
+    # Key-based venues are claimed the moment a valid read-only key is
+    # accepted. An unclaimed account's strategy is never shown publicly.
+    claim_code: Mapped[str | None] = mapped_column(String(40), default=None)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    @property
+    def claimed(self) -> bool:
+        return self.claimed_at is not None
 
 
 class StrategyStatus(StrEnum):
@@ -124,6 +135,9 @@ class Fill(Base):
     count_micros: Mapped[int] = mapped_column(BigInteger)
     price_micros: Mapped[int] = mapped_column(BigInteger)
     fee_micros: Mapped[int] = mapped_column(BigInteger, default=0)
+    # Venue-reported gross value when price x count is not exact (M7);
+    # NULL means price x count, exactly. See ledger.fill_notional.
+    notional_micros: Mapped[int | None] = mapped_column(BigInteger, default=None)
     filled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -187,9 +201,170 @@ class StrategyStats(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+# ---- market data, signals, following and paper tailing (M6) ------------------
+
+
+class MarketPrice(Base):
+    """One observation of a market's public quote. Append-only by convention
+    (history is what lets a paper curve be re-derived); the newest row per
+    ticker is the mark used for valuation."""
+
+    __tablename__ = "market_prices"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    venue: Mapped[str] = mapped_column(String(40))
+    venue_env: Mapped[str] = mapped_column(String(10))
+    ticker: Mapped[str] = mapped_column(String(120), index=True)
+    status: Mapped[str] = mapped_column(String(20))
+    yes_bid_micros: Mapped[int] = mapped_column(BigInteger)
+    yes_ask_micros: Mapped[int] = mapped_column(BigInteger)
+    last_price_micros: Mapped[int] = mapped_column(BigInteger)
+    result: Mapped[str] = mapped_column(String(20), default="")
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    @property
+    def yes_mark_micros(self) -> int | None:
+        """Same rule as NormalizedMarket.yes_mark_micros."""
+        if self.result == "yes":
+            return 1_000_000
+        if self.result == "no":
+            return 0
+        if self.yes_bid_micros > 0 and self.yes_ask_micros > 0:
+            return (self.yes_bid_micros + self.yes_ask_micros) // 2
+        if self.last_price_micros > 0:
+            return self.last_price_micros
+        return None
+
+
+class Signal(Base):
+    """APPEND-ONLY. One row per post-anchor creator fill, in fill order: the
+    event followers monitor and paper allocations mirror. `creator_equity_micros`
+    is the creator's equity (cash + open cost) just before the fill, which is
+    the denominator of proportional sizing."""
+
+    __tablename__ = "signals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    strategy_id: Mapped[int] = mapped_column(ForeignKey("strategies.id"), index=True)
+    fill_id: Mapped[int] = mapped_column(ForeignKey("fills.id"), unique=True)
+    ticker: Mapped[str] = mapped_column(String(120), index=True)
+    side: Mapped[str] = mapped_column(String(10))
+    action: Mapped[str] = mapped_column(String(10))
+    count_micros: Mapped[int] = mapped_column(BigInteger)
+    price_micros: Mapped[int] = mapped_column(BigInteger)
+    creator_equity_micros: Mapped[int] = mapped_column(BigInteger)
+    position_after_micros: Mapped[int] = mapped_column(BigInteger)  # creator's (ticker, side)
+    filled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    emitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Follow(Base):
+    """A user watching a strategy: feeds and notifications, nothing else."""
+
+    __tablename__ = "follows"
+    __table_args__ = (UniqueConstraint("user_id", "strategy_id", name="uq_follows_user_strategy"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    strategy_id: Mapped[int] = mapped_column(ForeignKey("strategies.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AllocationMode(StrEnum):
+    PAPER = "paper"  # virtual capital; nothing is placed anywhere
+    LIVE = "live"  # NOT AVAILABLE: needs a licensed party (see execution.py)
+
+
+class AllocationStatus(StrEnum):
+    ACTIVE = "active"
+    STOPPED = "stopped"
+
+
+class Allocation(Base):
+    """A follower's tail of one strategy. In paper mode the allocation is a
+    virtual cash balance that mirrors the creator's signals proportionally;
+    the resulting positions are valued at public market marks."""
+
+    __tablename__ = "allocations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    strategy_id: Mapped[int] = mapped_column(ForeignKey("strategies.id"), index=True)
+    mode: Mapped[str] = mapped_column(String(10), default=AllocationMode.PAPER)
+    allocation_micros: Mapped[int] = mapped_column(BigInteger)  # starting virtual cash
+    drawdown_limit_bps: Mapped[int] = mapped_column(Integer)  # e.g. 1500 = stop at -15%
+    status: Mapped[str] = mapped_column(String(20), default=AllocationStatus.ACTIVE)
+    stop_reason: Mapped[str | None] = mapped_column(String(40), default=None)
+    high_water_micros: Mapped[int] = mapped_column(BigInteger)
+    # Signals with id <= this have been considered (mirrored or skipped).
+    last_signal_id: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class MirrorFill(Base):
+    """APPEND-ONLY. A follower-side fill produced from one signal. Paper rows
+    carry the modelled price and fee; a live row (not available) would carry
+    the venue's."""
+
+    __tablename__ = "mirror_fills"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    allocation_id: Mapped[int] = mapped_column(ForeignKey("allocations.id"), index=True)
+    signal_id: Mapped[int] = mapped_column(ForeignKey("signals.id"), index=True)
+    mode: Mapped[str] = mapped_column(String(10))
+    ticker: Mapped[str] = mapped_column(String(120), index=True)
+    side: Mapped[str] = mapped_column(String(10))
+    action: Mapped[str] = mapped_column(String(10))
+    count_micros: Mapped[int] = mapped_column(BigInteger)
+    price_micros: Mapped[int] = mapped_column(BigInteger)
+    fee_micros: Mapped[int] = mapped_column(BigInteger, default=0)
+    venue_order_id: Mapped[str | None] = mapped_column(String(120), default=None)
+    filled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MirrorSettlement(Base):
+    """APPEND-ONLY. A follower position closed by market settlement, paying
+    $1 per contract on the winning side and nothing on the other."""
+
+    __tablename__ = "mirror_settlements"
+    __table_args__ = (
+        UniqueConstraint("allocation_id", "ticker", name="uq_mirror_settlements_alloc_ticker"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    allocation_id: Mapped[int] = mapped_column(ForeignKey("allocations.id"), index=True)
+    ticker: Mapped[str] = mapped_column(String(120), index=True)
+    market_result: Mapped[str] = mapped_column(String(20))
+    yes_count_micros: Mapped[int] = mapped_column(BigInteger, default=0)
+    no_count_micros: Mapped[int] = mapped_column(BigInteger, default=0)
+    revenue_micros: Mapped[int] = mapped_column(BigInteger)
+    settled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AllocationSnapshot(Base):
+    """One valuation of an allocation (nightly and on stop): the follower's
+    curve is the series of these rows."""
+
+    __tablename__ = "allocation_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    allocation_id: Mapped[int] = mapped_column(ForeignKey("allocations.id"), index=True)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    cash_micros: Mapped[int] = mapped_column(BigInteger)
+    open_cost_micros: Mapped[int] = mapped_column(BigInteger)
+    open_value_micros: Mapped[int] = mapped_column(BigInteger)
+    equity_micros: Mapped[int] = mapped_column(BigInteger)
+    unmarked_cost_micros: Mapped[int] = mapped_column(BigInteger, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 # ---- append-only enforcement (invariant #3) ---------------------------------
 
-APPEND_ONLY_MODELS = (Fill, Settlement)
+APPEND_ONLY_MODELS = (Fill, Settlement, Signal, MirrorFill, MirrorSettlement)
 
 
 class AppendOnlyViolation(RuntimeError):

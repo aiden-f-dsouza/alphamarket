@@ -68,29 +68,59 @@
 {%- endmacro %}
 
 {# The strategy card on the landing page: a real public page's numbers, a sample page in demo mode, or an honest empty state. #}
+{% macro cat(tag) -%}
+<span class="cat" style="background:{{ tag_color(tag) }}">{{ tag }}</span>
+{%- endmacro %}
+
+{% macro area(points, w, h, good=True, dd=None, draw=False) -%}
+{#- an equity spark: outcome-coloured area under the line, the worst drawdown window shaded, endpoint dot -#}
+{% set c = "var(--good)" if good else "var(--bad)" %}
+<polygon points="{{ points }} {{ w }},{{ h }} 0,{{ h }}" fill="{{ c }}" fill-opacity="0.10"/>
+{% if dd and dd[1] > dd[0] %}<rect x="{{ dd[0] }}" y="0" width="{{ dd[1] - dd[0] }}" height="{{ h }}" fill="var(--bad)" fill-opacity="0.05"/><line x1="{{ dd[0] }}" y1="{{ h }}" x2="{{ dd[1] }}" y2="{{ h }}" stroke="var(--bad)" stroke-width="2" vector-effect="non-scaling-stroke"/>{% endif %}
+<polyline points="{{ points }}" fill="none" stroke="{{ c }}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" {% if draw %}class="draw" pathLength="1"{% endif %}/>
+{%- endmacro %}
+
+{% macro ticker(items) -%}
+{#- settled trades across every visible strategy; shelved 2026-09-06 (looked out of place on the landing), kept for the feed later. The list is doubled so the loop is seamless -#}
+{% if items %}
+<div class="ticker" aria-label="Recently settled trades">
+  <div class="track">{% for it in items + items %}<span class="it" {% if loop.index > items|length %}aria-hidden="true"{% endif %}><span class="n">{{ it.strategy }}</span><span class="side {{ 'good' if it.side == 'yes' else 'bad' }}">{{ it.side }}</span><span class="muted">{{ it.ticker }}</span><span class="{{ 'good' if it.won else 'muted' }}">{{ ("paid " ~ usd(it.payout, 0)) if it.won else "settled at 0" }}</span><span class="muted" style="font-size:11px">{{ it.settled_at[5:] }}</span></span>{% endfor %}</div>
+</div>
+{% endif %}
+{%- endmacro %}
+
 {% macro strategy_card(f) -%}
 <div class="card hero-card">
   {% if f %}
-  <div class="row" style="align-items:flex-start">
-    <div class="stack" style="gap:6px">
-      {% if f.incubating %}<span class="badge warn">incubating · {{ f.track_days }} days</span>{% else %}{{ verified("Verified from venue data", f.track_days) }}{% endif %}
-      <a href="/s/{{ f.slug }}" style="font-size:18px;font-weight:600;letter-spacing:-0.01em;margin-top:4px">{{ f.name }}</a>
-      <span class="small text2" style="display:inline-flex;align-items:center;gap:8px"><span class="avatar" style="width:20px;height:20px"></span>{{ f.display_name }} · Kalshi · prediction markets</span>
+  <div class="row" style="align-items:flex-start;border-bottom:0;padding-bottom:0">
+    <div style="display:flex;gap:14px;align-items:flex-start;min-width:0">
+      {{ sigil(f.slug, 44) }}
+      <div class="stack" style="gap:5px;min-width:0">
+        <a href="/s/{{ f.slug }}" style="font-size:18px;font-weight:600;letter-spacing:-0.01em">{{ f.name }}</a>
+        <span class="small text2" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">{{ f.display_name }} · {{ (f.venue or "kalshi")|capitalize }}{% for t in f.tags[:2] %}{{ cat(t) }}{% endfor %}</span>
+      </div>
     </div>
-    <span class="mono muted" style="font-size:11px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px">{% if f.reconciled %}{{ icon("check", 12, "var(--good)", 2) }}reconciled last night{% elif f.reconciled is none %}first reconciliation pending{% else %}{{ icon("x", 12, "var(--warn)", 2) }}diverged{% endif %}</span>
+    {% if f.incubating %}<span class="badge warn" style="white-space:nowrap">incubating · {{ f.track_days }}d</span>{% else %}<span style="white-space:nowrap">{{ verified("Verified", f.track_days) }}</span>{% endif %}
   </div>
-  <div class="stats three">
-    <div class="stat"><span class="label">Return, net of fees</span><span class="v {{ 'good' if f.total_return >= 0 else 'bad' }}">{{ pct(f.total_return) }}<small>{{ f.track_days }}d</small></span></div>
-    <div class="stat"><span class="label">Worst drawdown</span><span class="v bad">{{ pct(-f.max_drawdown) }}</span></div>
-    <div class="stat"><span class="label">{{ "Sharpe" if f.sharpe is defined else "Risk score" }}</span><span class="v">{% if f.sharpe is defined %}{{ num(f.sharpe) }}{% else %}{{ f.risk_score }}<small>/10</small>{% endif %}</span></div>
+  <div class="body" style="gap:2px;padding:20px 24px 0">
+    <span class="mono {{ 'good' if f.total_return >= 0 else 'bad' }}" style="font-size:40px;font-weight:500;line-height:1;letter-spacing:-.02em">{{ pct(f.total_return) }}</span>
+    <span class="small muted" style="margin-top:8px">net of venue fees over {{ f.track_days }} verified days · worst drawdown <span class="mono bad">{{ pct(-f.max_drawdown) }}</span></span>
   </div>
-  <div class="body" style="gap:10px;padding:18px 24px 16px">
-    <span class="label">Last 60 verified days</span>
-    <svg width="100%" viewBox="0 0 120 32" preserveAspectRatio="none" style="display:block;height:150px"><polyline points="{{ f.spark }}" fill="none" stroke="var(--brand)" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>
+  <div class="body" style="gap:8px;padding:14px 24px 0">
+    <svg width="100%" viewBox="0 0 120 32" preserveAspectRatio="none" style="display:block;height:130px" role="img" aria-label="Last 60 verified days">{{ area(f.spark, 120, 32, f.total_return >= 0, f.spark_dd, draw=True) }}</svg>
+  </div>
+  <div class="row" style="padding:12px 24px 14px;border-bottom:0;font:11px var(--mono);color:var(--muted)">
+    <span>last 60 verified days · shaded: worst drawdown</span>
+    <span class="{{ 'pulse' if f.reconciled else '' }}" style="white-space:nowrap">{% if f.reconciled %}<i></i>reconciled last night{% elif f.reconciled is none %}first reconciliation pending{% else %}{{ icon("x", 12, "var(--warn)", 2) }}under review{% endif %}</span>
   </div>
   {% if f.capacity_k is defined %}
   <div class="stats two" style="border-top:1px solid var(--line)">
     <div class="stat" style="gap:8px"><span class="label">Capacity</span><span class="mono small">${{ f.tailing_k }}k tailing <span class="muted">of ~${{ f.capacity_k }}k</span></span>{{ bar(f.tailing_k * 100 / f.capacity_k) }}</div>
+    <div class="stat" style="flex-direction:row;align-items:center;justify-content:space-between"><span class="label">Risk score</span><span class="mono" style="font-size:16px">{{ f.risk_score }}<span class="muted">/10</span></span></div>
+  </div>
+  {% else %}
+  <div class="stats two" style="border-top:1px solid var(--line)">
+    <div class="stat" style="flex-direction:row;align-items:center;justify-content:space-between"><span class="label">Sharpe</span><span class="mono" style="font-size:16px">{{ num(f.sharpe) if f.sharpe is defined else "—" }}</span></div>
     <div class="stat" style="flex-direction:row;align-items:center;justify-content:space-between"><span class="label">Risk score</span><span class="mono" style="font-size:16px">{{ f.risk_score }}<span class="muted">/10</span></span></div>
   </div>
   {% endif %}

@@ -1,0 +1,55 @@
+{
+  "enable_order_book": false,
+  "active": true,
+  "closed": true,
+  "archived": false,
+  "accepting_orders": false,
+  "accepting_order_timestamp": "2026-09-04T04:30:06Z",
+  "minimum_order_size": 5,
+  "minimum_tick_size": 0.001,
+  "condition_id": "0xb9d5acae183cf50f5efa0e1403d17d9b6c159d67f67afc349a7243a64f0df590",
+  "question_id": "0x0c95f3ba86bd5d03cae5ed6e6c1ee6f894c9a19611cfe29e95de2da6403a6306",
+  "question": "Will the lowest temperature in Shanghai be 26\u00b0C on September 6?",
+  "description": "This market will resolve to the temperature range that contains the lowest temperature recorded by NOAA at the Shanghai ...",
+  "market_slug": "lowest-temperature-in-shanghai-on-september-6-2026-26c",
+  "end_date_iso": "2026-09-06T00:00:00Z",
+  "game_start_time": "2026-09-05T16:00:00Z",
+  "seconds_delay": 0,
+  "fpmm": "",
+  "maker_base_fee": 1000,
+  "taker_base_fee": 1000,
+  "notifications_enabled": true,
+  "neg_risk": true,
+  "neg_risk_market_id": "0x0c95f3ba86bd5d03cae5ed6e6c1ee6f894c9a19611cfe29e95de2da6403a6300",
+  "neg_risk_request_id": "0x70f040ae0ff28da1ffd8a024eff8adf42309ed82e34ab2ff0bee5cacf75021d7",
+  "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/shanghai-98a00e357b.png",
+  "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/shanghai-98a00e357b.png",
+  "rewards": {
+    "rates": null,
+    "min_size": 20,
+    "max_spread": 4.5
+  },
+  "is_50_50_outcome": false,
+  "tokens": [
+    {
+      "token_id": "114556302719902669044297692787227526401708667599928358889001906009154375222149",
+      "outcome": "Yes",
+      "price": 1,
+      "winner": true
+    },
+    {
+      "token_id": "52173606438191752388550067036607606867069818570249337082543175975753481275397",
+      "outcome": "No",
+      "price": 0,
+      "winner": false
+    }
+  ],
+  "tags": [
+    "Weather",
+    "Recurring",
+    "Hide From New",
+    "Shanghai",
+    "Daily Temperature",
+    "Lowest temperature"
+  ]
+}

@@ -12,7 +12,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from sqlalchemy import select
 
 from alphamarket.analytics import compute_strategy_stats
-from alphamarket.models import Strategy
+from alphamarket.models import Settlement, Strategy
+from alphamarket.public import recent_public_settlements
 
 BASE = "https://demo-api.kalshi.co/trade-api/v2"
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -68,7 +69,7 @@ def connected(logged_in, session_factory):
         _mock_venue()
         resp = logged_in.post(
             "/dashboard/connect",
-            data={"key_id": "k", "private_key_pem": _pem(), "strategy_name": "BTC Hourly Fade"},
+            data={"key_id": "k", "secret": _pem(), "strategy_name": "BTC Hourly Fade"},
             follow_redirects=False,
         )
     assert resp.status_code == 303, resp.text
@@ -115,7 +116,7 @@ def test_connect_page_and_rejection(logged_in):
         )
         resp = logged_in.post(
             "/dashboard/connect",
-            data={"key_id": "k", "private_key_pem": _pem(), "strategy_name": "Bad Key"},
+            data={"key_id": "k", "secret": _pem(), "strategy_name": "Bad Key"},
         )
     assert resp.status_code == 200  # re-rendered connect page with the error
     assert "Paste a read-only key" in resp.text
@@ -203,3 +204,25 @@ def test_methodology_and_security_render(client):
     assert "Reconciliation" in html and "Risk score" in html
     html = client.get("/security").text
     assert "read-only" in html and "Disconnecting erases" in html
+
+
+def test_ticker_shows_only_visible_strategies(connected, logged_in, session_factory):
+    with session_factory() as db:
+        db.add(
+            Settlement(
+                strategy_id=connected["id"],
+                venue_settlement_id="S-1",
+                ticker="KXBTC-26SEP-T60",
+                market_result="yes",
+                yes_count_micros=10_000_000,
+                revenue_micros=10_000_000,
+                settled_at=datetime.now(UTC),
+            )
+        )
+        db.commit()
+    with session_factory() as db:  # shelved strip; the query stays visibility-safe
+        (item,) = recent_public_settlements(db)
+        assert item["strategy"] == "BTC Hourly Fade" and item["won"] and item["payout"] == 10.0
+    logged_in.post(f"/dashboard/strategy/{connected['id']}", data={"name": "BTC Hourly Fade"})
+    with session_factory() as db:
+        assert recent_public_settlements(db) == []  # unlisted: trades vanish too

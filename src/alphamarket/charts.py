@@ -44,3 +44,30 @@ def ticks(lo: float, hi: float, n: int = 5) -> list[float]:
         return [hi]
     step = (hi - lo) / (n - 1)
     return [hi - i * step for i in range(n)]
+
+
+def drawdown_window(values: list[float]) -> tuple[int, int]:
+    """Indices (peak, trough) of the worst peak-to-trough drawdown in `values`,
+    so a page can shade the period on the equity curve. Ties keep the earliest
+    window; a series that never falls returns (0, 0)."""
+    if not values:
+        return (0, 0)
+    peak_i, worst, win = 0, 0.0, (0, 0)
+    for i, v in enumerate(values):
+        if v > values[peak_i]:
+            peak_i = i
+        peak = values[peak_i]
+        dd = (peak - v) / peak if peak > 0 else 0.0
+        if dd > worst:
+            worst, win = dd, (peak_i, i)
+    return win
+
+
+def window_x(values: list[float], width: float) -> tuple[float, float]:
+    """`drawdown_window` mapped onto the x axis of a `polyline` of the same
+    series and width, for an SVG shading rect."""
+    n = len(values)
+    if n < 2:
+        return (0.0, 0.0)
+    a, b = drawdown_window(values)
+    return (round(width * a / (n - 1), 1), round(width * b / (n - 1), 1))

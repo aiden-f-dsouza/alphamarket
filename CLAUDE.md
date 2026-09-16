@@ -30,7 +30,14 @@ deliberately out of scope).
   (APScheduler: polling + nightly reconcile + stats + incubation promotion),
   `strategies.py` (listing editor), `public.py` (public page data + JSON API
   + marketplace listing), `charts.py` (SVG polyline geometry, pure),
-  `demo.py` (SAMPLE data for DEMO_MODE; invariant 7), `pages.py`
+  `demo.py` (SAMPLE data for DEMO_MODE; invariant 7), `marks.py`
+  (deterministic strategy sigils + tag colours, pure), `marketdata.py`
+  (public quotes -> `market_prices`, marks), `signals.py` (creator fills ->
+  append-only `signals`), `follows.py` (follow/unfollow + `/api/feed`),
+  `mirror.py` (paper mirroring: sizing, fee model, settlement), `execution.py`
+  (Executor; paper only, live raises), `portfolio.py` (allocation valuation,
+  drawdown stop, snapshots), `tails.py` (allocations API + `/api/portfolio`),
+  `pages.py`
   + `templates/` (Jinja HTML: `/` investor landing, `/creators`,
   `/marketplace` (`/explore` redirects), `/s/{slug}`, `/s/{slug}/tail`,
   `/portfolio`, `/u/{handle}`, `/feed`, `/invite`, `/verification`
@@ -38,9 +45,13 @@ deliberately out of scope).
   share the Learn sub-nav), `/login`, `/signup`, dashboard,
   `/dashboard/connect`; `_macros.html` holds the logo, icons, number
   formatting, the Learn tabs and the landing card; charts are inline SVG.
-  Nav menus are `<details>` elements; the only client JS closes them and
-  copies the invite link. Stubbed controls are disabled buttons, never
-  `href="#"` (pinned by a test).
+  Nav menus are `<details>` elements; the only client JS closes them,
+  copies the invite link, and adds the equity-chart draw-in and crosshair
+  (reads the `data-series` the server rendered; never fetches). Stubbed
+  controls are disabled buttons, never `href="#"` (pinned by a test).
+  Marketplace defaults to browsing cards; `?view=table` is the comparison
+  table. The settled-trades ticker (`public.recent_public_settlements` +
+  the `ticker` macro) is shelved: built and tested, rendered nowhere.
   Brand is **Koine** (package name unchanged); design tokens live in
   `base.html` (warm off-white, Newsreader headlines, IBM Plex body/mono,
   navy from the logo for CTAs, green reserved for "verified").
@@ -48,8 +59,13 @@ deliberately out of scope).
   artboards; canvas linked from BUILD_PLAN). `design/` root holds the older
   AlphaMarket dark mockups. Both excluded from ruff
 - `src/alphamarket/connectors/` — `base.py` defines the venue-agnostic contract
-  (VenueConnector + Normalized* models); one module per venue (`kalshi.py`);
-  `registry.py` is the only import path core code may use
+  (VenueConnector + Normalized* models, MarketDataSource for public quotes,
+  and `VenueProfile`: credential kind, balance observability, tick, step,
+  paper fee rate/precision, ownership proof); one module per venue
+  (`kalshi.py`: RSA key, reconciled tier; `polymarket.py`: wallet address,
+  no secret, fills-only tier, profile-bio claim code); `registry.py`
+  (`PROFILES`, `get_profile`, `build_connector(venue, env, key_id, secret)`,
+  `build_market_data`) is the only import path core code may use
 - `alembic/` — migrations, hand-written for ledger tables
 - `docs/methodology.md` — public methodology page source; every ledger/stats
   formula lands here alongside its unit test. `docs/security.md` (served at
@@ -67,8 +83,12 @@ deliberately out of scope).
 2. All timestamps are timezone-aware UTC.
 3. `fills` and `settlements` are APPEND-ONLY. No UPDATE, no DELETE, ever.
    Corrections are new rows. Idempotency comes from unique venue ids.
+   `signals`, `mirror_fills`, `mirror_settlements` share the rule (ORM guard
+   + Postgres triggers).
 4. Venue credentials must be read-only scoped and are never logged, never
    committed, never returned by any API. PEMs live in `keys/` (gitignored).
+   A venue with no credential (Polymarket) proves ownership with a claim
+   code in the venue profile bio; unclaimed accounts never appear publicly.
 5. Public pages show ONLY platform-computed numbers from venue data.
    Self-reported performance is never displayed (PRD TR-1).
 6. No live API calls in tests. Use respx mocks or recorded fixtures.
@@ -76,12 +96,18 @@ deliberately out of scope).
    Sample pages carry the "Sample data" banner, demo-only routes 404 when it
    is off, and `scripts/preflight.py` refuses to launch with it on. Never
    merge sample and real rows without the `demo` flag on the sample row.
+8. Tailing is PAPER ONLY. No order is ever placed in anyone's account and no
+   write-scoped key is ever accepted: `execution.get_executor("live")`
+   raises, the API returns 403 for live mode. Real mirroring needs a licensed
+   party (regulatory_reference.md); do not add a flag that turns it on.
 
 ## Conventions
 
 - SQLAlchemy 2.0 style (Mapped/mapped_column), Pydantic v2.
-- New venue = new module implementing VenueConnector; core code never imports
-  a venue module directly except through a registry/factory.
+- New venue = new module implementing VenueConnector plus a VenueProfile in
+  `registry.PROFILES`; core code never imports a venue module directly
+  except through the registry. Venue constants (fees, ticks) live in the
+  profile, never in core modules.
 - Every stats/ledger formula gets a unit test with hand-computed expected
   values, and gets documented for the public methodology page.
 - Line length 100, ruff is the only formatter.

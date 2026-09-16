@@ -1,4 +1,6 @@
-"""Ingestion worker (M1.3): poll every connected account on a schedule.
+"""Ingestion worker (M1.3, extended in M6): poll every connected account on a
+schedule, then run the signal and paper-mirroring engine; refresh public
+market prices; nightly reconcile, stats, and follower valuations.
 
 Run as its own process alongside the API:
     uv run python -m alphamarket.worker
@@ -18,8 +20,12 @@ from alphamarket.analytics import compute_strategy_stats, promote_incubating
 from alphamarket.config import get_settings
 from alphamarket.db import SessionLocal
 from alphamarket.ingest import sync_account
-from alphamarket.models import Strategy, VenueAccount, VenueAccountStatus
-from alphamarket.reconcile import reconcile_account
+from alphamarket.marketdata import open_tickers_by_venue, refresh_prices
+from alphamarket.mirror import process_allocation
+from alphamarket.models import Allocation, Strategy, VenueAccount, VenueAccountStatus
+from alphamarket.portfolio import snapshot_allocation
+from alphamarket.reconcile import reconcilable, reconcile_account
+from alphamarket.signals import emit_signals
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +41,58 @@ def sync_all_accounts() -> None:
             except Exception:
                 # Recorded on the account row by sync_account; keep sweeping.
                 logger.exception("sync failed for venue account %s", account.id)
+    emit_all_signals()
+    mirror_all_allocations()
+
+
+def emit_all_signals() -> None:
+    """After every sync (M6): every new post-anchor fill becomes a signal."""
+    with SessionLocal() as db:
+        for strategy in db.scalars(select(Strategy)).all():
+            try:
+                emit_signals(db, strategy)
+            except Exception:
+                logger.exception("signal emission failed for strategy %s", strategy.id)
+
+
+def mirror_all_allocations() -> None:
+    """After signals (M6): apply new signals and resolved markets to every
+    allocation. Stopped allocations still settle so their curves finish."""
+    with SessionLocal() as db:
+        for allocation in db.scalars(select(Allocation)).all():
+            try:
+                mirrored, settled = process_allocation(db, allocation)
+                if mirrored or settled:
+                    logger.info(
+                        "allocation %s: +%d mirror fills, +%d settlements",
+                        allocation.id,
+                        mirrored,
+                        settled,
+                    )
+            except Exception:
+                logger.exception("mirroring failed for allocation %s", allocation.id)
+
+
+def refresh_all_prices() -> None:
+    """Public quotes for every ticker that may still be open (M6)."""
+    with SessionLocal() as db:
+        for (venue, venue_env), tickers in open_tickers_by_venue(db).items():
+            try:
+                n = refresh_prices(db, venue, venue_env, tickers)
+                logger.info("refreshed %d/%d %s %s quotes", n, len(tickers), venue, venue_env)
+            except Exception:
+                logger.exception("price refresh failed for %s %s", venue, venue_env)
+
+
+def value_all_allocations() -> None:
+    """Nightly (M6): one AllocationSnapshot per allocation, drawdown limits
+    enforced."""
+    with SessionLocal() as db:
+        for allocation in db.scalars(select(Allocation)).all():
+            try:
+                snapshot_allocation(db, allocation)
+            except Exception:
+                logger.exception("valuation failed for allocation %s", allocation.id)
 
 
 def reconcile_all_accounts() -> None:
@@ -45,6 +103,8 @@ def reconcile_all_accounts() -> None:
             select(VenueAccount).where(VenueAccount.status != VenueAccountStatus.DISCONNECTED)
         ).all()
         for account in accounts:
+            if not reconcilable(account):
+                continue  # fills-only tier: nothing to compare against
             try:
                 snap = reconcile_account(db, account)
                 logger.info(
@@ -72,7 +132,9 @@ def compute_all_stats() -> None:
 
 def nightly() -> None:
     reconcile_all_accounts()
+    refresh_all_prices()
     compute_all_stats()
+    value_all_allocations()
 
 
 def main() -> None:
@@ -80,6 +142,12 @@ def main() -> None:
     interval = get_settings().ingest_interval_seconds
     scheduler = BlockingScheduler()
     scheduler.add_job(sync_all_accounts, "interval", seconds=interval, max_instances=1)
+    scheduler.add_job(
+        refresh_all_prices,
+        "interval",
+        seconds=get_settings().price_refresh_interval_seconds,
+        max_instances=1,
+    )
     scheduler.add_job(nightly, "cron", hour=4, minute=15, max_instances=1)
     logger.info("ingestion worker started, polling every %ss", interval)
     sync_all_accounts()  # one sweep immediately at startup

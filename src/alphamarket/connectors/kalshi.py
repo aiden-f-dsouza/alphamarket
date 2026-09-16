@@ -37,8 +37,10 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from alphamarket.connectors.base import (
     Action,
+    MarketDataSource,
     NormalizedBalance,
     NormalizedFill,
+    NormalizedMarket,
     NormalizedPosition,
     NormalizedSettlement,
     Side,
@@ -277,4 +279,72 @@ class KalshiConnector(VenueConnector):
             revenue_micros=revenue_micros,
             fee_micros=to_micros(s.get("fee_cost") or "0"),
             settled_at=_ts(s["settled_time"]),
+        )
+
+
+# ---- public market data --------------------------------------------------------
+
+
+class KalshiMarketData(MarketDataSource):
+    """Unauthenticated market reads. `GET /markets/{ticker}` needs no key, so
+    one instance serves every strategy and every paper portfolio.
+
+    VERIFIED against live prod payloads captured 2026-09-06
+    (tests/fixtures/kalshi_market.json, kalshi_market_settled.json): prices
+    are dollar strings (`yes_bid_dollars`, `yes_ask_dollars`,
+    `last_price_dollars`), `status` is "active" while trading and
+    "finalized" once settled, and `result` is "" until then, "yes"/"no" after.
+    An unknown ticker returns 404 with `{"error": {"code": "not_found"}}`.
+    """
+
+    venue = "kalshi"
+    MIN_INTERVAL = KalshiConnector.MIN_INTERVAL
+    RETRY_STATUSES = KalshiConnector.RETRY_STATUSES
+    MAX_ATTEMPTS = KalshiConnector.MAX_ATTEMPTS
+    BACKOFF_BASE = KalshiConnector.BACKOFF_BASE
+
+    def __init__(self, base_url: str, client: httpx.Client | None = None) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.client = client or httpx.Client(timeout=15.0)
+        self._last_request_at = 0.0
+
+    def _get(self, endpoint: str) -> httpx.Response:
+        url = f"{self.base_url}{endpoint}"
+        for attempt in range(self.MAX_ATTEMPTS):
+            wait = self.MIN_INTERVAL - (time.monotonic() - self._last_request_at)
+            if wait > 0:
+                time.sleep(wait)
+            self._last_request_at = time.monotonic()
+            try:
+                resp = self.client.get(url)
+            except httpx.TransportError:
+                if attempt == self.MAX_ATTEMPTS - 1:
+                    raise
+                time.sleep(self.BACKOFF_BASE * 2**attempt)
+                continue
+            if resp.status_code in self.RETRY_STATUSES and attempt < self.MAX_ATTEMPTS - 1:
+                time.sleep(self.BACKOFF_BASE * 2**attempt)
+                continue
+            return resp
+        raise RuntimeError("unreachable")  # pragma: no cover
+
+    def fetch_market(self, ticker: str) -> NormalizedMarket | None:
+        resp = self._get(f"/markets/{ticker}")
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return self._to_market(resp.json()["market"])
+
+    @staticmethod
+    def _to_market(m: dict[str, Any]) -> NormalizedMarket:
+        close_time = m.get("close_time")
+        return NormalizedMarket(
+            ticker=m["ticker"],
+            status=str(m.get("status", "")),
+            yes_bid_micros=to_micros(m.get("yes_bid_dollars") or "0"),
+            yes_ask_micros=to_micros(m.get("yes_ask_dollars") or "0"),
+            last_price_micros=to_micros(m.get("last_price_dollars") or "0"),
+            result=str(m.get("result") or ""),
+            close_time=_ts(close_time) if close_time else None,
+            as_of=datetime.now(UTC),
         )

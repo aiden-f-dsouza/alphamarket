@@ -19,15 +19,15 @@
   <div class="stack" style="gap:14px">
     <div class="badges">
       {% if page.verified_since %}{% if st and page.incubating %}<span class="badge warn">incubating · {{ st.track_days }}/90 days</span>{% else %}{{ m.verified("Verified from venue data", st.track_days if st else None) }}{% endif %}{% endif %}
-      {% if page.reconciled is not none %}<span class="badge {{ 'good' if page.reconciled else 'bad' }}">{{ m.icon("check" if page.reconciled else "x", 12, "currentColor", 2) }}{{ "reconciled last night" if page.reconciled else "reconciliation diverged" }}</span>{% endif %}
+      {% if page.verification_tier == "fills_only" %}<span class="badge">fills verified · balance not reconciled</span>{% elif page.reconciled is not none %}<span class="badge {{ 'good pulse' if page.reconciled else 'bad' }}">{% if page.reconciled %}<i></i>reconciled last night{% else %}{{ m.icon("x", 12, "currentColor", 2) }}reconciliation diverged{% endif %}</span>{% endif %}
       {% if page.venue_env != "prod" %}<span class="badge warn">{{ page.venue_env }} environment</span>{% endif %}
     </div>
     <h1 style="font-size:48px">{{ page.name }}</h1>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <span class="avatar"></span>
+      {{ sigil(page.slug, 36) }}
       {% if page.demo %}<a href="/u/{{ page.display_name }}" style="font-weight:500">by {{ page.display_name }}</a><span class="small muted">· Kalshi · {{ page.creator.strategies }} verified strateg{{ "y" if page.creator.strategies == 1 else "ies" }} · {{ page.creator.followers }} followers</span>
       {% else %}<span style="font-weight:500">by {{ page.display_name }}</span><span class="small muted">· {{ page.venue }}</span>{% endif %}
-      <span style="display:flex;gap:6px;margin-left:6px">{% for t in page.style_tags %}<span class="tag">{{ t }}</span>{% endfor %}</span>
+      <span style="display:flex;gap:6px;margin-left:6px">{% for t in page.style_tags %}{{ m.cat(t) }}{% endfor %}</span>
     </div>
     <span class="mono small muted">platform-verified since {{ page.verified_since[:10] if page.verified_since else "first reconciliation pending" }}</span>
   </div>
@@ -49,7 +49,8 @@
 <div class="card plain"><div class="body"><span class="muted">Statistics are computed nightly; this strategy's first run is pending.</span></div></div>
 {% else %}
 <div class="card"><div class="stats six">
-  <div class="stat"><span class="label">Return, net of fees</span><span class="v {{ 'good' if (st.total_return or 0) >= 0 else 'bad' }}">{{ m.pct(st.total_return) }}<small>{{ st.track_days }}d</small></span></div>
+  {% if st.total_return is none and st.return_on_peak_invested is not none %}<div class="stat"><span class="label">Return on peak invested</span><span class="v {{ 'good' if st.return_on_peak_invested >= 0 else 'bad' }}">{{ m.pct(st.return_on_peak_invested) }}<small>{{ st.track_days }}d</small></span></div>
+  {% else %}<div class="stat"><span class="label">Return, net of fees</span><span class="v {{ 'good' if (st.total_return or 0) >= 0 else 'bad' }}">{{ m.pct(st.total_return) }}<small>{{ st.track_days }}d</small></span></div>{% endif %}
   <div class="stat"><span class="label">Worst drawdown</span><span class="v bad">{{ m.pct(-st.max_drawdown) }}</span></div>
   <div class="stat"><span class="label">Sharpe</span><span class="v">{{ m.num(st.sharpe) }}</span></div>
   <div class="stat"><span class="label">Risk score</span><span class="v">{{ st.risk_score }}<small>/10</small></span></div>
@@ -63,16 +64,19 @@
   <div class="stack" style="gap:24px">
     {% if charts %}
     <div class="card"><div class="body" style="gap:14px">
-      <div class="spread" style="align-items:center"><span class="label">Growth of {{ m.usd(st.equity_curve[0][1], 0) }} · net of venue fees · open positions at cost</span><span class="mono small muted">all {{ st.track_days }} verified days</span></div>
-      {% if charts.benchmarks %}<div class="legend"><span><i style="border-color:var(--brand)"></i>This strategy</span>{% for label, pts, dashed in charts.benchmarks %}<span><i style="border-color:var(--gray);{{ 'border-top-style:dashed' if dashed }}"></i>{{ label }}</span>{% endfor %}</div>{% endif %}
+      <div class="spread" style="align-items:center"><span class="label">Growth of {{ m.usd(st.equity_curve[0][1], 0) }} · net of venue fees · open positions at cost</span><span class="mono small muted">all {{ st.track_days }} verified days · shaded: worst drawdown</span></div>
+      {% if charts.benchmarks %}<div class="legend"><span><i style="border-color:{{ 'var(--good)' if charts.up else 'var(--bad)' }}"></i>This strategy</span>{% for label, pts, dashed in charts.benchmarks %}<span><i style="border-color:var(--gray);{{ 'border-top-style:dashed' if dashed }}"></i>{{ label }}</span>{% endfor %}</div>{% endif %}
       <div class="chart">
         <div class="y" style="padding-bottom:26px">{% for t in charts.equity_ticks %}<span>{{ m.usd(t, 0) }}</span>{% endfor %}</div>
         <div class="stack" style="gap:8px">
-          <svg width="100%" viewBox="0 0 {{ charts.w }} {{ charts.equity_h }}" preserveAspectRatio="none" style="display:block;height:260px;overflow:visible">
+          <div class="chart-wrap"><svg width="100%" viewBox="0 0 {{ charts.w }} {{ charts.equity_h }}" preserveAspectRatio="none" style="display:block;height:280px;overflow:visible" data-series='{{ charts.series|tojson }}' data-lo="{{ charts.equity_ticks[-1] }}" data-hi="{{ charts.equity_ticks[0] }}" role="img" aria-label="Equity curve">
             {% for i in range(5) %}<line x1="0" y1="{{ charts.equity_h * i / 4 }}" x2="{{ charts.w }}" y2="{{ charts.equity_h * i / 4 }}" stroke="var(--line)" vector-effect="non-scaling-stroke"/>{% endfor %}
+            {% if charts.dd_x[1] > charts.dd_x[0] %}<rect x="{{ charts.dd_x[0] }}" y="0" width="{{ charts.dd_x[1] - charts.dd_x[0] }}" height="{{ charts.equity_h }}" fill="var(--bad)" fill-opacity="0.07"/>{% endif %}
             {% for label, pts, dashed in charts.benchmarks or [] %}<polyline points="{{ pts }}" fill="none" stroke="var(--gray)" stroke-width="1.5" {% if dashed %}stroke-dasharray="4 4"{% endif %} stroke-linejoin="round" vector-effect="non-scaling-stroke"/>{% endfor %}
-            <polyline points="{{ charts.equity }}" fill="none" stroke="var(--brand)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
-          </svg>
+            {% set c = "var(--good)" if charts.up else "var(--bad)" %}
+            <polygon points="{{ charts.equity }} {{ charts.w }},{{ charts.equity_h }} 0,{{ charts.equity_h }}" fill="{{ c }}" fill-opacity="0.10"/>
+            <polyline points="{{ charts.equity }}" fill="none" stroke="{{ c }}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" class="draw" pathLength="1"/>
+          </svg></div>
           <div class="x">{% for d in charts.x_labels %}<span>{{ d }}</span>{% endfor %}</div>
         </div>
       </div>

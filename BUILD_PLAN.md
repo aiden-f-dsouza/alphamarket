@@ -225,6 +225,15 @@ Sized for one person working part-time alongside classes. Each milestone is demo
    verification, transparency, research, security; marketplace search
    (`?q=`); no `href="#"` anywhere (stubbed controls are disabled buttons,
    pinned by test_navigation_is_consistent).
+   Visual pass 2026-09-06 ("the site feels static"): data as the hero
+   (big net-return figure, outcome-coloured area fill, worst-drawdown
+   window shaded via `charts.drawdown_window`, endpoint draw-in, crosshair
+   on the strategy chart); deterministic strategy sigils and tag colours
+   (`marks.py`); the marketplace defaults to browsing cards with a Compare toggle to the
+   table. A settled-trades ticker (`public.recent_public_settlements`,
+   visible strategies only) is built and tested but shelved: Aiden found
+   it out of place on the landing. Explorer of the options considered
+   (line illustrations and an ink hero deferred): https://claude.ai/code/artifact/5b0cb71e-3adb-44f8-ae18-6ecfa53786d2
    Deploy: Dockerfile, fly.toml (web + worker), docs/deploy.md,
    SECURE_COOKIES + postgres:// URL rewrite. Actual `fly launch` is Aiden's
    (needs an account and a domain).
@@ -252,6 +261,146 @@ Sized for one person working part-time alongside classes. Each milestone is demo
    AIDEN: (b) `fly launch` per docs/deploy.md; (c) connect your real account
    and let it reconcile three nights; (d) Kalshi ToS check on third-party
    read access; (e) post per docs/launch.md and log objections.
+
+### M6. Investor side: market data, signals, following, paper tailing (built 2026-09-06)
+
+Scope decision: the PRD's "invest in a strategy" becomes PAPER tailing.
+regulatory_reference.md (2026-09-06) is explicit that "signal + automation
+with the user's own write key" is the SignalPush pattern and must not be
+built, and that any real auto-execution needs a licensed party (CTA or a
+regulated partner). So the whole follower pipeline is real, and only the last
+step (placing an order) is modelled. Invariants #4 and #5 are untouched.
+
+Built:
+1. Public market data: `MarketDataSource` contract + `KalshiMarketData`
+   (unauthenticated `GET /markets/{ticker}`; fixtures captured from prod on
+   2026-09-06), `market_prices` table, `marketdata.py` (refresh, latest marks,
+   open-ticker sweep), worker job every 5 min.
+2. Mark-to-market: `stats.mark_positions` values the open book at public
+   quotes (settled -> $1/$0, else mid, else last). Nightly stats now carry
+   open_value / unrealized_pnl / marked_equity / unmarked_cost in `extras`;
+   the daily curve stays at cost (methodology unchanged there).
+3. Signals: `signals.py` turns each post-anchor fill into an append-only
+   `signals` row with the creator's equity before and position after, emitted
+   after every sync. Public `GET /api/strategies/{slug}/signals` shows sizes
+   as fractions of equity, never dollars.
+4. Following and feed: `follows` table, `POST/DELETE /follows/{slug}`,
+   `GET /follows`, `GET /api/feed` (signals + settlements of followed and
+   tailed strategies).
+5. Paper tailing: `allocations` (virtual cash, drawdown limit, high-water
+   mark, cursor into signals), append-only `mirror_fills` and
+   `mirror_settlements`, `allocation_snapshots` (the follower curve).
+   `mirror.py` sizes proportionally (buys by equity ratio, sells by the
+   creator's sold fraction), fees per Kalshi's formula (matches the recorded
+   live fill exactly), settles from the creator's settlement or the public
+   market's result. `portfolio.py` values, snapshots, and enforces the
+   drawdown stop. API: `POST /allocations`, `GET /allocations[/{id}]`,
+   `POST /allocations/{id}/stop|run`, `GET /api/portfolio`.
+6. Execution layer: `execution.py` defines `Executor`; only `PaperExecutor`
+   exists and `get_executor("live")` raises. The API returns 403 for live.
+7. Migration 0007 (append-only triggers on signals/mirror_fills/
+   mirror_settlements; preflight now expects 5 triggers), docs/methodology.md
+   sections "Mark-to-market" and "Paper tailing", tests
+   (test_marketdata, test_mirror, test_tails_api; 127 total).
+
+NOT done, deliberately:
+- No HTML for the investor side yet. `/portfolio`, `/feed`, `/s/{slug}/tail`
+  still serve DEMO_MODE samples; the JSON endpoints above are what those
+  pages should read next. Per regulatory_reference.md Pivot 4, a public
+  "Tail" button is holding out; the paper feature should stay behind login
+  and be labeled a simulation until counsel blesses the boundary.
+- No Polymarket connector. Probed data-api.polymarket.com on 2026-09-06:
+  public, address-keyed, `/trades?user=0x..` and `/positions?user=0x..`;
+  trades are floats with 10-dp prices (`0.5899999597`, finer than 1e-6),
+  keyed only by transactionHash (several trades per tx), no fees on trades
+  (positions carry `entryFeesUsdc`), no balance endpoint (needs on-chain
+  USDC). A connector is feasible for fills; reconciliation needs a chain read.
+- No deposits/withdrawals classification (still the open M2 item).
+- Paper price assumption (creator's price is available) has no slippage model.
+
+### M7. Multi-venue: Polymarket now, brokerages next (7A+7B built 2026-09-06)
+
+Goal: Koine becomes a cross-venue tracking and simulation platform. Every
+venue gets the same treatment: read-only ingestion, platform-computed track
+record, public page, signals, paper tailing. "Backing" stays PAPER on every
+venue (invariant #8); the `Executor` seam is where a licensed party plugs in
+later, and nothing here adds a flag that turns live on.
+
+Venue survey (what an official, read-only, ToS-compliant path looks like):
+
+| Venue | Access | Read-only proof | Balance | Instrument | Verdict |
+|---|---|---|---|---|---|
+| Kalshi | RSA key, `read` scope | `GET /api_keys` scopes | yes | binary | built (M1) |
+| Polymarket | public data-api keyed by wallet address, no credential | ownership via profile-bio claim code | NOT observable (proxy wallets show 0 USDC on-chain for active traders on 2026-09-06; collateral moved, [VERIFY]) | binary | build now (7A/7B) |
+| Alpaca | official REST; OAuth app with read scopes (`account`, `data`; no `trading`) | OAuth scope | yes, plus deposit/withdrawal activities | asset (stocks, ETFs, crypto) | phase 7C |
+| Robinhood / Schwab / Fidelity | no public API; unofficial clients breach ToS. Official route is an aggregator (SnapTrade or Plaid Investments) with OAuth read access to holdings and transactions | aggregator consent | yes (daily) | asset | phase 7D, "daily-verified" tier |
+| Polymarket US (QCX) | [VERIFY] on-chain exposure | | | binary | after 7B |
+
+Phases:
+
+7A. Multi-venue foundation (BUILT 2026-09-06; migration 0008; 145 tests)
+- `VenueProfile` in `connectors/base.py`: display name, environments,
+  credential kind (rsa_pem | address | key_secret), field labels, whether the
+  balance is observable, instrument kind (binary | asset), price tick,
+  contract step, paper fee rate, ownership proof (key | profile_code).
+  `registry.get_profile(venue)`; `build_connector(venue, env, key_id, secret)`
+  where `secret` is None for address-keyed venues.
+- `NormalizedFill.notional_micros` (optional): gross cash the venue reports
+  for the fill. Polymarket prices carry 10 dp (volume-weighted across maker
+  fills) so price x count is not exact in micros; the ledger uses the
+  reported notional when present and price x count (exact, as today)
+  otherwise. Nullable `fills.notional_micros` column.
+- Ownership claim for credential-less venues: `venue_accounts.claim_code` +
+  `claimed_at`; `POST /venues/{id}/claim` checks the venue profile bio for
+  the code. Unclaimed strategies never appear publicly.
+- Verification tiers on the page and the API: `reconciled` (balance
+  observed nightly), `fills_only` (fills verified, balance not observable;
+  reconciliation skipped, never quarantined, returns shown on peak invested
+  capital), `unclaimed`.
+- Stats: `peak_invested_micros` and `return_on_peak_invested` for the
+  fills_only tier; the fills-only curve is shifted by peak invested so
+  every return statistic reads as growth of capital at risk (methodology
+  "Verification tiers").
+- Paper tailing: fee rate and price tick come from the venue profile
+  (Kalshi 7%, Polymarket 5% of count x p x (1-p), verified against live
+  activity rows), so mirror math is venue-agnostic.
+- Connect UI per venue (`/dashboard/connect?venue=`), dashboard claim step,
+  venue badge on strategy and marketplace pages. Migration 0008.
+
+7B. Polymarket connector (BUILT 2026-09-06)
+- `connectors/polymarket.py`: `PolymarketConnector(address)` over
+  data-api.polymarket.com: fills from `/activity?type=TRADE` (usdcSize is
+  net cash, so fee = |size x price - usdcSize| exactly), settlements from
+  `/activity?type=REDEEM` (usdcSize = payout, 0 for the losing side),
+  positions from `/positions` (initialValue = cost basis), balance raises
+  `BalanceUnavailable`. Ticker = conditionId, side = outcomeIndex 0 -> yes,
+  1 -> no (CLOB token lookup when the index is missing). Fill identity =
+  txhash:asset:side:price:size plus an ordinal for identical rows.
+- `PolymarketMarketData`: CLOB `/markets/{conditionId}` (closed + winner
+  token -> result), `/price?side=buy|sell` for bid/ask, `/midpoint`.
+- Fixtures captured 2026-09-06 from public endpoints; respx tests only.
+- Known gaps, listed on the methodology page: losing positions the trader
+  never redeems stay open at cost on the cost curve (marks show the truth);
+  deposits are invisible (same as Kalshi's open M2 item).
+
+7C. Alpaca (stocks, ETFs, crypto): OAuth read-only app; `Side.LONG`
+fills, no settlements, marks from Alpaca's public data feed; `asset`
+instrument kind in stats (`position_value` = mark, no $1 cap); non-trade
+activities give deposits/withdrawals, which closes the M2 item for that
+venue. Short sales rejected at ingest until the ledger models them.
+
+7D. Brokerage aggregation (Robinhood et al.) via SnapTrade or Plaid
+Investments: holdings + transactions with day resolution, a "daily-verified"
+tier, cost per connection [VERIFY]. Do not build an unofficial Robinhood
+client.
+
+7E. Cross-venue product: marketplace venue filter, per-venue methodology
+sections, portfolio page already venue-agnostic.
+
+Backing beyond paper (not in M7, recorded so nobody re-derives it): needs a
+licensed party (CTA for prediction markets, RIA/broker partner for stocks;
+regulatory_reference.md Pivots 1 and 3). The `Executor` protocol is the
+seam; a real executor would be a separate, counsel-reviewed milestone.
 
 Stop-loss points: if M2 reconciliation cannot be made reliable, the "verified" claim is dead and the project should pivot or stop. If M5 recruiting gets zero traction with a working product, the demand assumption is falsified cheaply.
 
@@ -289,3 +438,16 @@ No custody, no mirroring, no allocations, no performance fees, no payment collec
 ---
 
 Sources: Kalshi API auth, scopes, endpoints and demo environment per the vendored Kalshi API reference (github.io mirror) and pm.wiki's 2026 API guide; cross-checked August 22, 2026.
+
+### M8-M13. Platform expansion: multi-venue backend, payments, security (planned 2026-09-16)
+
+Full plan in `docs/platform_plan.md` (research in `docs/research/2026-09-16-*.md`).
+Headline decisions: commit the M6/M7 tree first; Ledger v2 = multi-asset,
+multi-leg `ledger_entries` with per-instrument quantity precision (money stays
+micro-dollars); every venue declares a read-only proof method; credentials move
+to KMS-wrapped envelope encryption with rotation; the worker becomes a
+Postgres-backed job queue with per-venue rate budgets; venue order is Kraken,
+Coinbase (gated on written approval), Hyperliquid, Binance.US for crypto and
+Alpaca OAuth, IBKR Flex, SnapTrade for equities; payments are Stripe Billing +
+Connect with no fee ever tied to trades or P&L; TOTP, sessions, audit log and
+CI scanning land before any new venue. Invariant 8 (paper only) is untouched.

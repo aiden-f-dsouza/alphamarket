@@ -10,8 +10,9 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from alphamarket.marketdata import latest_marks
 from alphamarket.models import Fill, Settlement, Strategy, StrategyStats, VenueAccount
-from alphamarket.stats import compute_stats
+from alphamarket.stats import compute_stats, mark_positions
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,11 @@ def compute_strategy_stats(
         as_of=as_of or datetime.now(UTC),
         anchor_positions=account.anchor_positions,
     )
+    # Mark-to-market of the open book at the latest public quotes (M6). The
+    # daily curve stays at cost (methodology: "Equity curve"); this is the
+    # "what is the open book worth right now" figure shown beside it.
+    marks = latest_marks(db, account.venue, account.venue_env, [p.ticker for p in r.open_positions])
+    marked = mark_positions(r.open_positions, marks)
     row = StrategyStats(
         strategy_id=strategy.id,
         as_of=r.as_of,
@@ -52,6 +58,14 @@ def compute_strategy_stats(
             "top_series_share": r.top_series_share,
             "max_stake_fraction": r.max_stake_fraction,
             "daily_equity": [[d.isoformat(), e] for d, e in r.daily_equity],
+            "peak_invested_micros": r.peak_invested_micros,
+            "return_on_peak_invested": r.return_on_peak_invested,
+            "open_cost_micros": marked.open_cost_micros,
+            "open_value_micros": marked.open_value_micros,
+            "unrealized_pnl_micros": marked.unrealized_pnl_micros,
+            "unmarked_cost_micros": marked.unmarked_cost_micros,
+            "marked_equity_micros": r.cash_micros + marked.open_value_micros,
+            "n_open_positions": len(r.open_positions),
         },
     )
     db.add(row)

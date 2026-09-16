@@ -23,10 +23,12 @@ from sqlalchemy.orm import Session
 
 from alphamarket import auth, demo
 from alphamarket.analytics import latest_stats
-from alphamarket.charts import polyline, ticks
+from alphamarket.charts import drawdown_window, polyline, ticks
 from alphamarket.config import get_settings
+from alphamarket.connectors.registry import PROFILES, get_profile
 from alphamarket.db import get_db
 from alphamarket.ingest import sync_account
+from alphamarket.marks import sigil, tag_color
 from alphamarket.models import (
     EquitySnapshot,
     Strategy,
@@ -42,13 +44,20 @@ from alphamarket.public import (
     page_data,
     visible_strategy_or_404,
 )
-from alphamarket.reconcile import reconcile_account
+from alphamarket.reconcile import reconcilable, reconcile_account
 from alphamarket.strategies import ListingIn, update_listing
-from alphamarket.venues import ConnectIn, _owned_account, connect_account
+from alphamarket.venues import (
+    ConnectIn,
+    _owned_account,
+    claim_account,
+    connect_account,
+    verification_tier,
+)
 
 router = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 DOCS = Path(__file__).resolve().parents[2] / "docs"
+templates.env.globals.update(sigil=sigil, tag_color=tag_color)
 
 
 def _user(request: Request, db: Session) -> User | None:
@@ -141,8 +150,11 @@ def marketplace(
     incubating: str | None = None,
     tag: str | None = None,
     q: str | None = None,
+    view: str = "cards",
     db: Session = Depends(get_db),
 ):
+    """`view=cards` (default) is for browsing; `view=table` is the comparison
+    table with every column. Same rows, same order, either way."""
     rows = _marketplace_rows(db, include_incubating=incubating == "1", tag=tag or None)
     q = (q or "").strip()
     if q:
@@ -158,6 +170,7 @@ def marketplace(
         tags=all_tags(_marketplace_rows(db, include_incubating=True, tag=None)),
         tag=tag or "",
         q=q,
+        view="table" if view == "table" else "cards",
         incubating=incubating == "1",
         demo=any(r.get("demo") for r in rows),
     )
@@ -233,10 +246,13 @@ def _dashboard_ctx(db: Session, user: User) -> dict:
                 "strategy": strategy,
                 "stats": latest_stats(db, strategy.id) if strategy else None,
                 "snapshots": snapshots,
-                "visible": is_visible(strategy) if strategy else False,
+                "visible": is_visible(strategy, account) if strategy else False,
+                "profile": get_profile(account.venue),
+                "tier": verification_tier(account),
+                "reconcilable": reconcilable(account),
             }
         )
-    return {"user": user, "rows": rows}
+    return {"user": user, "rows": rows, "profiles": list(PROFILES.values())}
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
@@ -247,33 +263,46 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     return _render(request, "dashboard.html", error=None, **_dashboard_ctx(db, user))
 
 
+def _connect_ctx(venue: str) -> dict:
+    if venue not in PROFILES:
+        raise HTTPException(status_code=404, detail="Unknown venue")
+    profile = get_profile(venue)
+    return {
+        "profile": profile,
+        "profiles": list(PROFILES.values()),
+        "venue_env": get_settings().venue_env(venue),
+    }
+
+
 @router.get("/dashboard/connect", response_class=HTMLResponse)
-def connect_page(request: Request, db: Session = Depends(get_db)):
+def connect_page(request: Request, venue: str = "kalshi", db: Session = Depends(get_db)):
     user = _user(request, db)
     if user is None:
         return RedirectResponse("/login", status_code=303)
-    return _render(request, "connect.html", user=user, error=None)
+    return _render(request, "connect.html", user=user, error=None, **_connect_ctx(venue))
 
 
 @router.post("/dashboard/connect")
 def connect_form(
     request: Request,
+    venue: str = Form("kalshi"),
     key_id: str = Form(),
-    private_key_pem: str = Form(),
+    secret: str | None = Form(None),
     strategy_name: str = Form(),
     db: Session = Depends(get_db),
 ):
     user = _user(request, db)
     if user is None:
         return RedirectResponse("/login", status_code=303)
+    ctx = _connect_ctx(venue)
     try:
         connect_account(
             db,
             user,
-            ConnectIn(key_id=key_id, private_key_pem=private_key_pem, strategy_name=strategy_name),
+            ConnectIn(venue=venue, key_id=key_id, secret=secret, strategy_name=strategy_name),
         )
     except HTTPException as exc:
-        return _render(request, "connect.html", user=user, error=exc.detail)
+        return _render(request, "connect.html", user=user, error=exc.detail, **ctx)
     return RedirectResponse("/dashboard", status_code=303)
 
 
@@ -313,14 +342,18 @@ def account_action_form(
             sync_account(db, account)
         elif action == "reconcile":
             reconcile_account(db, account)
+        elif action == "claim":
+            claim_account(db, user, account.id)
         elif action == "disconnect":
             account.encrypted_private_key = None
             account.status = VenueAccountStatus.DISCONNECTED
             db.commit()
         else:
             raise HTTPException(status_code=404)
-    except HTTPException:
-        raise
+    except HTTPException as exc:
+        if action != "claim":
+            raise
+        error = str(exc.detail)
     except Exception as exc:  # recorded on the account row by sync/reconcile
         error = f"{action} failed: {type(exc).__name__}"
     if error:
@@ -348,6 +381,7 @@ def _charts(stats: dict | None, benchmarks: list | None = None) -> dict | None:
         lo, hi = min(lo, min(values)), max(hi, max(values))
     n = len(dates)
     x_idx = sorted({0, n // 4, n // 2, 3 * n // 4, n - 1})
+    a, b = drawdown_window(equity)
     return {
         "w": CHART_W,
         "equity_h": EQUITY_H,
@@ -361,6 +395,9 @@ def _charts(stats: dict | None, benchmarks: list | None = None) -> dict | None:
         "drawdown": polyline(dd, CHART_W, DRAWDOWN_H, lo=dd_floor, hi=0.0),
         "drawdown_floor": dd_floor,
         "x_labels": [dates[i] for i in x_idx],
+        "up": equity[-1] >= equity[0],
+        "dd_x": (CHART_W * a / max(n - 1, 1), CHART_W * b / max(n - 1, 1)),
+        "series": [[d, round(e, 2)] for d, e in zip(dates, equity, strict=True)],
     }
 
 

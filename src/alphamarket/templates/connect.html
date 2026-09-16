@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% import "_macros.html" as m %}
-{% block title %}Connect Kalshi · Koine{% endblock %}
+{% block title %}Connect {{ profile.display_name }} · Koine{% endblock %}
 {% block nav_active %}dashboard{% endblock %}
 {% block style %}
   .connect { display:grid; grid-template-columns:220px minmax(0, 560px) minmax(0, 1fr); gap:48px; }
@@ -8,33 +8,52 @@
   .step i { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; font:12px var(--mono); font-style:normal; border-radius:50%; border:1px solid var(--line2); color:var(--muted); }
   .step.on i { background:var(--brand); border-color:var(--brand); color:var(--surface); }
   .step.off { color:var(--muted); }
+  .venues { display:flex; gap:8px; flex-wrap:wrap; }
+  .venues a { padding:6px 12px; border:1px solid var(--line2); border-radius:999px; font-size:13px; color:var(--text2); }
+  .venues a.on { background:var(--text); border-color:var(--text); color:var(--surface); }
   @media (max-width:1000px) { .connect { grid-template-columns:1fr; } }
 {% endblock %}
 {% block content %}
 <div class="connect">
   <div class="stack" style="gap:20px">
-    <span class="label">Connect Kalshi</span>
+    <span class="label">Connect a venue</span>
+    <div class="venues">{% for p in profiles %}<a href="/dashboard/connect?venue={{ p.venue }}" class="{{ 'on' if p.venue == profile.venue else '' }}">{{ p.display_name }}</a>{% endfor %}</div>
     <div class="stack" style="gap:0">
-      <div class="step on"><i>1</i>Create a read-only key at Kalshi</div>
+      {% if profile.needs_secret %}
+      <div class="step on"><i>1</i>Create a read-only key at {{ profile.display_name }}</div>
       <div class="step on"><i>2</i>Paste it here</div>
       <div class="step off"><i>3</i>Scope check</div>
       <div class="step off"><i>4</i>Import and verify</div>
+      {% else %}
+      <div class="step on"><i>1</i>Paste your {{ profile.key_label|lower }}</div>
+      <div class="step off"><i>2</i>Import your public history</div>
+      <div class="step off"><i>3</i>Put the Koine code in your {{ profile.display_name }} bio</div>
+      <div class="step off"><i>4</i>Claim from the dashboard</div>
+      {% endif %}
     </div>
-    <p class="small muted" style="line-height:1.55">In Kalshi: Account → API keys → New key. Choose <span class="text2">read-only</span>. Download the PEM file once; Kalshi won't show it again.</p>
+    <p class="small muted" style="line-height:1.55">{{ profile.key_help }}</p>
   </div>
 
   <div class="stack" style="gap:28px">
+    {% if profile.needs_secret %}
     <div class="stack"><h1 style="font-size:40px">Paste a read-only key.</h1>
       <p class="text2" style="font-size:16px">We check the scope before we store it. A key that can place orders is refused, and you'll be asked to make a read-only one instead.</p></div>
+    {% else %}
+    <div class="stack"><h1 style="font-size:40px">Paste your wallet address.</h1>
+      <p class="text2" style="font-size:16px">{{ profile.display_name }} history is public, so no key is needed. Because anyone could paste any address, your page stays hidden until you prove the account is yours with a code in your profile bio.</p></div>
+    {% endif %}
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
     <form method="post" action="/dashboard/connect" class="card" autocomplete="off">
+      <input type="hidden" name="venue" value="{{ profile.venue }}">
       <div class="body" style="padding:28px;gap:22px">
         <label class="field"><span class="label">Strategy name</span><input name="strategy_name" required minlength="2" maxlength="120" placeholder="Shown on your public page"></label>
-        <label class="field"><span class="label">API key id</span><input class="mono" name="key_id" required autocomplete="off" placeholder="From Kalshi → API keys"></label>
-        <label class="field"><span class="label">Private key (PEM)</span><textarea class="mono" name="private_key_pem" required placeholder="Paste the contents of the .pem file"></textarea><span class="note">Encrypted before it touches the database. Erased when you disconnect.</span></label>
+        <label class="field"><span class="label">{{ profile.key_label }}</span><input class="mono" name="key_id" required autocomplete="off" placeholder="{{ '0x…' if not profile.needs_secret else 'From ' + profile.display_name + ' → API keys' }}"></label>
+        {% if profile.needs_secret %}
+        <label class="field"><span class="label">{{ profile.secret_label }}</span><textarea class="mono" name="secret" required placeholder="Paste the contents of the .pem file"></textarea><span class="note">Encrypted before it touches the database. Erased when you disconnect.</span></label>
+        {% endif %}
         <div class="spread" style="align-items:center;padding-top:4px">
-          <span class="mono small muted" style="display:inline-flex;align-items:center;gap:8px">{{ m.icon("lock", 14, "var(--muted)") }}Environment: {{ "production" if settings.kalshi_env == "prod" else settings.kalshi_env }}</span>
-          <button class="btn" type="submit">Check scope and import</button>
+          <span class="mono small muted" style="display:inline-flex;align-items:center;gap:8px">{{ m.icon("lock", 14, "var(--muted)") }}Environment: {{ "production" if venue_env == "prod" else venue_env }}</span>
+          <button class="btn" type="submit">{{ "Check scope and import" if profile.needs_secret else "Import public history" }}</button>
         </div>
       </div>
     </form>
@@ -43,10 +62,19 @@
   <div class="stack" style="gap:0;padding-top:4px">
     <span class="label" style="padding-bottom:8px;border-bottom:1px solid var(--line2)">What happens next</span>
     <div class="hairline-list">
+      {% if profile.needs_secret %}
       <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Key scope is read-only</span><span class="small muted">A key with trading permission is rejected before anything is stored.</span></div></div>
       <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Key is encrypted with a server-side vault key</span><span class="small muted">Stored ciphertext only. Never logged, never returned by any page or API.</span></div></div>
-      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>First import from Kalshi</span><span class="small muted">Fills and settlements are pulled as far back as the venue returns them. Your verified window starts now, not earlier.</span></div></div>
+      {% else %}
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Nothing secret is stored</span><span class="small muted">The address is public on-chain data. Koine holds no key of any kind for this venue.</span></div></div>
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Ownership claim</span><span class="small muted">You get a code to paste into your {{ profile.display_name }} bio. Until we see it there, your page is hidden.</span></div></div>
+      {% endif %}
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>First import from {{ profile.display_name }}</span><span class="small muted">Fills and settlements are pulled as far back as the venue returns them. Your verified window starts now, not earlier.</span></div></div>
+      {% if profile.balance_observable %}
       <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>First balance reconciliation tonight</span><span class="small muted">The page goes public once the ledger matches your venue balance.</span></div></div>
+      {% else %}
+      <div>{{ m.icon("eye", 18, "var(--text2)") }}<div class="stack" style="gap:4px"><span>Fills-only verification</span><span class="small muted">{{ profile.display_name }} exposes no cash balance, so the page says "fills verified, balance not reconciled" and quotes returns on peak invested capital.</span></div></div>
+      {% endif %}
     </div>
   </div>
 </div>

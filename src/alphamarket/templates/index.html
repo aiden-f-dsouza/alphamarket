@@ -71,7 +71,7 @@
       <div class="lrow" style="border-top:0;padding-top:0"><span class="label">Strategy</span><span class="label r">Return</span><span class="label r hide">Worst DD</span><span class="label r hide">Sharpe</span><span class="label r hide">Record</span></div>
       {% for r in top %}
       <div class="lrow">
-        <div class="stack" style="gap:3px"><a href="/s/{{ r.slug }}" style="font-weight:500">{{ r.name }}</a><span class="mono small muted">{{ r.display_name }}</span></div>
+        <div style="display:flex;align-items:center;gap:12px;min-width:0">{{ sigil(r.slug, 32) }}<div class="stack" style="gap:3px;min-width:0"><a href="/s/{{ r.slug }}" style="font-weight:500">{{ r.name }}</a><span class="mono small muted">{{ r.display_name }}</span></div></div>
         <span class="mono r {{ 'good' if r.total_return >= 0 else 'bad' }}">{{ m.pct(r.total_return) }}</span>
         <span class="mono r bad hide">{{ m.pct(-r.max_drawdown) }}</span>
         <span class="mono r hide">{{ m.num(r.sharpe) if r.sharpe is defined else "—" }}</span>

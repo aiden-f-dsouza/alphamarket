@@ -1,0 +1,60 @@
+{
+  "enable_order_book": true,
+  "active": true,
+  "closed": false,
+  "archived": false,
+  "accepting_orders": true,
+  "accepting_order_timestamp": "2026-09-05T04:30:11Z",
+  "minimum_order_size": 5,
+  "minimum_tick_size": 0.01,
+  "condition_id": "0xe8082eb2691a5d9288440f624241c0dcb9d53730d6b944413207797052efd808",
+  "question_id": "0x46190ccb9e4fd06c159fb633e7adf6e425fbc755bb96329a0e58da2f4dd98605",
+  "question": "Will the lowest temperature in Shanghai be 24\u00b0C on September 7?",
+  "description": "This market will resolve to the temperature range that contains the lowest temperature recorded by NOAA at the Shanghai ...",
+  "market_slug": "lowest-temperature-in-shanghai-on-september-7-2026-24c",
+  "end_date_iso": "2026-09-07T00:00:00Z",
+  "game_start_time": "2026-09-06T16:00:00Z",
+  "seconds_delay": 0,
+  "fpmm": "",
+  "maker_base_fee": 1000,
+  "taker_base_fee": 1000,
+  "notifications_enabled": true,
+  "neg_risk": true,
+  "neg_risk_market_id": "0x46190ccb9e4fd06c159fb633e7adf6e425fbc755bb96329a0e58da2f4dd98600",
+  "neg_risk_request_id": "0xb541bfae4b344eb3529cd7cd14acad48b05b654d075c4ee988a0657668f90658",
+  "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/shanghai-98a00e357b.png",
+  "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/shanghai-98a00e357b.png",
+  "rewards": {
+    "rates": [
+      {
+        "asset_address": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+        "rewards_daily_rate": 208
+      }
+    ],
+    "min_size": 20,
+    "max_spread": 4.5
+  },
+  "is_50_50_outcome": false,
+  "tokens": [
+    {
+      "token_id": "55079419891695304114118911182520483539182972953733839552453611963060062463597",
+      "outcome": "Yes",
+      "price": 0.805,
+      "winner": false
+    },
+    {
+      "token_id": "107108603642696123082120959378493389365238153959470664896511652262529693084315",
+      "outcome": "No",
+      "price": 0.195,
+      "winner": false
+    }
+  ],
+  "tags": [
+    "Weather",
+    "Recurring",
+    "Hide From New",
+    "Shanghai",
+    "Daily Temperature",
+    "Lowest temperature"
+  ]
+}

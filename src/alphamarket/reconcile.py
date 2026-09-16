@@ -18,9 +18,9 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from alphamarket.connectors.base import NormalizedBalance, VenueConnector
-from alphamarket.connectors.registry import build_connector
-from alphamarket.ingest import sync_account
+from alphamarket.connectors.base import BalanceUnavailable, NormalizedBalance, VenueConnector
+from alphamarket.connectors.registry import get_profile
+from alphamarket.ingest import connector_for, sync_account
 from alphamarket.ledger import cash_at
 from alphamarket.models import (
     EquitySnapshot,
@@ -31,7 +31,6 @@ from alphamarket.models import (
     VenueAccount,
     utcnow,
 )
-from alphamarket.vault import decrypt_secret
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +60,7 @@ def take_anchor(
     """
     for attempt in range(attempts):
         t0 = datetime.now(UTC)
-        balance: NormalizedBalance = connector.fetch_balance()
+        balance: NormalizedBalance = _balance_or_zero(connector)
         recent = connector.fetch_fills(since=t0.replace(microsecond=0))
         if not any(abs((f.filled_at - t0).total_seconds()) <= settle_seconds for f in recent):
             return Anchor(balance.balance_micros, t0, _positions_snapshot(connector))
@@ -70,6 +69,16 @@ def take_anchor(
     # Activity is continuous; take the last observation and let the first
     # reconciliation run judge it.
     return Anchor(balance.balance_micros, t0, _positions_snapshot(connector))
+
+
+def _balance_or_zero(connector: VenueConnector) -> NormalizedBalance:
+    """Venues with no observable cash anchor at zero: the curve then measures
+    P&L from connection, and returns are quoted on peak invested capital
+    (stats.return_on_peak_invested). The methodology page says so."""
+    try:
+        return connector.fetch_balance()
+    except BalanceUnavailable:
+        return NormalizedBalance(balance_micros=0, as_of=datetime.now(UTC))
 
 
 def _positions_snapshot(connector: VenueConnector) -> list[dict]:
@@ -84,25 +93,22 @@ def _positions_snapshot(connector: VenueConnector) -> list[dict]:
     ]
 
 
-def _connector_for(account: VenueAccount) -> VenueConnector:
-    if account.encrypted_private_key is None:
-        raise ValueError(f"venue account {account.id} has no stored credential")
-    return build_connector(
-        account.venue,
-        account.venue_env,
-        account.key_id,
-        decrypt_secret(account.encrypted_private_key),
-    )
+def reconcilable(account: VenueAccount) -> bool:
+    """False for venues whose cash balance cannot be observed; those accounts
+    stay in the fills-only tier and are never quarantined by reconciliation."""
+    return get_profile(account.venue).balance_observable
 
 
 def reconcile_account(db: Session, account: VenueAccount) -> EquitySnapshot:
+    if not reconcilable(account):
+        raise BalanceUnavailable(f"{account.venue} exposes no balance to reconcile against")
     if account.anchor_balance_micros is None or account.anchor_at is None:
         raise ValueError(f"venue account {account.id} has no reconciliation anchor")
     strategy = db.scalar(select(Strategy).where(Strategy.venue_account_id == account.id))
     if strategy is None:
         raise ValueError(f"venue account {account.id} has no strategy")
 
-    connector = _connector_for(account)
+    connector = connector_for(account)
 
     # Two passes: a fill landing between the ledger sync and the balance read
     # looks like a divergence. Re-sync once before believing it.

@@ -13,7 +13,8 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from alphamarket.connectors.registry import build_connector
+from alphamarket.connectors.base import VenueConnector
+from alphamarket.connectors.registry import build_connector, get_profile
 from alphamarket.models import Fill, Settlement, Strategy, VenueAccount, VenueAccountStatus, utcnow
 from alphamarket.vault import decrypt_secret
 
@@ -37,15 +38,7 @@ def sync_account(db: Session, account: VenueAccount) -> SyncResult:
     strategy = db.scalar(select(Strategy).where(Strategy.venue_account_id == account.id))
     if strategy is None:
         raise ValueError(f"venue account {account.id} has no strategy")
-    if account.encrypted_private_key is None:
-        raise ValueError(f"venue account {account.id} has no stored credential")
-
-    connector = build_connector(
-        account.venue,
-        account.venue_env,
-        account.key_id,
-        decrypt_secret(account.encrypted_private_key),
-    )
+    connector = connector_for(account)
 
     try:
         result = _sync(db, connector, strategy)
@@ -61,6 +54,18 @@ def sync_account(db: Session, account: VenueAccount) -> SyncResult:
     account.last_synced_at = utcnow()
     db.commit()
     return result
+
+
+def connector_for(account: VenueAccount) -> VenueConnector:
+    """Rebuild the venue client from the stored (encrypted) credential. A
+    venue that takes no secret (Polymarket) is built from the public id."""
+    if get_profile(account.venue).needs_secret:
+        if account.encrypted_private_key is None:
+            raise ValueError(f"venue account {account.id} has no stored credential")
+        secret = decrypt_secret(account.encrypted_private_key)
+    else:
+        secret = None
+    return build_connector(account.venue, account.venue_env, account.key_id, secret)
 
 
 def _sync(db: Session, connector, strategy: Strategy) -> SyncResult:
@@ -88,6 +93,7 @@ def _sync(db: Session, connector, strategy: Strategy) -> SyncResult:
                     count_micros=f.count_micros,
                     price_micros=f.price_micros,
                     fee_micros=f.fee_micros,
+                    notional_micros=f.notional_micros,
                     filled_at=f.filled_at,
                 )
             )
