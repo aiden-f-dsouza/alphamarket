@@ -64,8 +64,10 @@ class Settings(BaseSettings):
     polymarket_env: str = "prod"
 
     def venue_env(self, venue: str) -> str:
-        """Environment new connections of `venue` are made in."""
-        return {"kalshi": self.kalshi_env, "polymarket": self.polymarket_env}[venue]
+        """Environment new connections of `venue` are made in. Venues without
+        their own setting connect to "prod" (the connector's profile.envs
+        still has to list it)."""
+        return {"kalshi": self.kalshi_env, "polymarket": self.polymarket_env}.get(venue, "prod")
 
 
 @lru_cache

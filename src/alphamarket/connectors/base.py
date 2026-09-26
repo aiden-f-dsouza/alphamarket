@@ -12,12 +12,12 @@ Rules:
 """
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from enum import StrEnum
+from typing import Protocol
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class BalanceUnavailable(Exception):
@@ -190,12 +190,38 @@ class NormalizedBalance(BaseModel):
 #
 # Asset codes: spot/equity/cash use the canonical upper-case code ("BTC",
 # "USDC", "USD", "AAPL"; map venue aliases like Kraken "XXBT"/"ZUSD").
-# Perp positions are "<COIN>-PERP"; binary contracts are "<ticker>:<yes|no>".
+# Perp positions are "<COIN>-PERP". Binary contracts depend on the venue:
+#   - netting venues (Kalshi): ONE asset per market, "<ticker>", signed like
+#     NormalizedPosition.position_micros (+yes / -no). Buy YES = +count, sell
+#     YES = -count, buy NO = -count, sell NO = +count; settlement leg =
+#     -(yes_count - no_count). The replayed vector then equals the venue's.
+#   - tokenised venues (Polymarket): a wallet can hold both outcome tokens, so
+#     "<conditionId>:yes" and "<conditionId>:no", unsigned; REDEEM burns each.
 # Ledger rows are per venue account, so codes need no venue prefix.
 #
-# Precision: a connector uses ONE fixed `decimals` per asset for the life of
-# an account (the finest the venue ever reports for it), and parses every
-# quantity with money.to_atoms(value_string, decimals). Never a float.
+# Precision: a connector should use one `decimals` per asset (the finest the
+# venue reports for it) and parses every quantity with
+# money.to_atoms(value_string, decimals), never a float. The LEDGER must not
+# rely on that: venues change precision, and one venue can report the same
+# asset at different scales (Kraken fills 8 dp, Ledgers 10 dp, ZUSD 4 dp).
+# Consumers never sum raw atoms across rows; they rescale each value to the
+# max decimals seen for that (account, asset) first (scaling up is exact).
+# NormalizedAssetFill.qty_atoms (instrument.qty_decimals) and its FILL_BASE
+# leg (asset decimals) can legitimately differ in scale for the same reason.
+# Suggested scales: crypto as the venue reports (<= 10), equities 9 (Alpaca
+# fractional shares), cash <= 8.
+#
+# Identity: venue_fill_id / venue_ref are unique PER VENUE ACCOUNT. Prefix
+# ids that are only unique per symbol (Binance myTrades.id -> f"{symbol}:{id}"),
+# and include the instrument when a venue emits one row per instrument at the
+# same timestamp (Hyperliquid funding -> f"{time}:{coin}").
+#
+# Timestamps: date-only venue rows (IBKR Flex cash transactions, SnapTrade
+# daily activities) use 23:59:59 UTC of the reported date, so every consumer
+# assigns them to the same day.
+#
+# Zero-delta legs (a losing settlement's $0 revenue) are allowed here; the
+# ledger drops them on write.
 
 
 class LegKind(StrEnum):
@@ -205,12 +231,16 @@ class LegKind(StrEnum):
     SETTLEMENT = "settlement"  # binary payout / contract removal
     DEPOSIT = "deposit"
     WITHDRAWAL = "withdrawal"
-    TRANSFER_IN = "transfer_in"  # between the user's own accounts/sub-accounts
+    # TRANSFER_* only when value leaves or enters THIS venue account (e.g. to a
+    # sub-account); same-account conversions are CONVERT legs of one event.
+    TRANSFER_IN = "transfer_in"
     TRANSFER_OUT = "transfer_out"
     DIVIDEND = "dividend"
     INTEREST = "interest"  # incl. margin interest (negative)
     STAKING = "staking"
-    FUNDING = "funding"  # perp funding payment (+/-)
+    FUNDING = "funding"  # perp funding payment (+/-); instrument_symbol = the coin
+    TAX = "tax"  # withholding (Alpaca DIVNRA, IBKR); not a trading cost, never counted as fee
+    CONVERT = "convert"  # same-account conversion (Binance convert/dust, staking wrappers)
     REALIZED_PNL = "realized_pnl"  # perp close: cash P&L credited to margin
     LIQUIDATION = "liquidation"
     SPLIT = "split"  # quantity change with no cash
@@ -230,6 +260,23 @@ class NormalizedLeg(BaseModel):
     decimals: int = Field(ge=0, le=12)
     kind: LegKind
     instrument_symbol: str | None = None  # venue symbol the leg belongs to, if any
+    # Venue-reported running balance of `asset` right after this leg, at the
+    # same decimals (Kraken Ledgers `balance`). Reconciliation checks it
+    # exactly, in ingestion order, on legs where it is not None.
+    balance_after_atoms: int | None = None
+
+
+def _no_duplicate_legs(legs: list[NormalizedLeg]) -> list[NormalizedLeg]:
+    """The ledger's identity is (account, venue_ref, kind, asset): two legs of
+    one fill/event with the same (kind, asset) would collide and one would be
+    lost. Connectors must merge (sum) them before returning."""
+    seen: set[tuple[str, str]] = set()
+    for leg in legs:
+        key = (leg.kind, leg.asset)
+        if key in seen:
+            raise ValueError(f"duplicate leg {key}: merge legs with the same kind and asset")
+        seen.add(key)
+    return legs
 
 
 class NormalizedInstrument(BaseModel):
@@ -263,6 +310,11 @@ class NormalizedAssetFill(BaseModel):
     filled_at: datetime
     liquidity: str | None = None  # "maker" | "taker" | None
 
+    @model_validator(mode="after")
+    def _legs_unique(self) -> "NormalizedAssetFill":
+        _no_duplicate_legs(self.legs)
+        return self
+
 
 class NormalizedEvent(BaseModel):
     """Any non-fill ledger activity: deposits, withdrawals, dividends,
@@ -274,20 +326,35 @@ class NormalizedEvent(BaseModel):
     occurred_at: datetime
     description: str | None = None
     # True when venue_ref is a content hash because the venue's ids are not
-    # stable (SnapTrade reprocessing); dedupe then relies on the hash.
+    # stable (SnapTrade reprocessing); dedupe then relies on the hash. Two
+    # identical same-day activities collapse into one: acceptable only on the
+    # daily_verified tier, and stated there.
     ref_is_content_hash: bool = False
+
+    @model_validator(mode="after")
+    def _legs_unique(self) -> "NormalizedEvent":
+        _no_duplicate_legs(self.legs)
+        return self
 
 
 class AssetAmount(BaseModel):
     asset: str
     atoms: int
     decimals: int = Field(ge=0, le=12)
+    # Quote asset per base unit, as reported. Needed to value positions the
+    # ledger never saw open (anchors; Hyperliquid serves only 10k fills):
+    # a perp is worth qty x (mark - entry). Alpaca avg_entry_price, IBKR
+    # costBasisPrice and Hyperliquid entryPx all land in entry_price.
+    entry_price: str | None = None
+    mark_price: str | None = None
 
 
 class NormalizedBalances(BaseModel):
     """The venue's own view of the account as a vector. Reconciliation v2
     compares it per asset with the replayed ledger. Perp positions appear as
-    "<COIN>-PERP" entries next to the margin asset."""
+    "<COIN>-PERP" entries (with entry_price) next to the margin asset, and the
+    margin asset is cash EXCLUDING unrealized P&L (Hyperliquid: accountValue
+    minus the sum of unrealizedPnl), with equity_usd_micros = accountValue."""
 
     as_of: datetime
     assets: list[AssetAmount]
@@ -308,12 +375,26 @@ class ReadOnlyEvidence(BaseModel):
 
 @dataclass
 class Page[T]:
-    """One page of a resumable backfill. `next_cursor` None means done. The
-    cursor is opaque venue state (Kraken ofs, Binance symbol+fromId+window,
-    a Coinbase cursor) that the job queue persists between runs."""
+    """One page of a resumable backfill.
+
+    Rules for every *_page method:
+    - one venue HTTP request per page, so BudgetExhausted/RateLimited never
+      lose fetched work (the job persists `next_cursor` and retries);
+    - items oldest-first within the page (reverse venues that return newest
+      first, like Kraken);
+    - when `cursor` is not None, `since` is ignored;
+    - a backfill pins its upper bound (e.g. Kraken `end`) in the first cursor,
+      because offset pagination shifts as new rows arrive.
+
+    `next_cursor` None means this pass is done. `resume_cursor`, set only on
+    that final page, is opaque state the job stores on the account and passes
+    back as `cursor` on the NEXT incremental sync (Binance: discovered symbol
+    set + per-symbol fromId; Kraken: last seen time/refid). None means "use
+    `since`"."""
 
     items: list[T] = field(default_factory=list)
     next_cursor: str | None = None
+    resume_cursor: str | None = None
 
 
 class RateLimited(Exception):
@@ -342,15 +423,47 @@ class CredentialExpired(Exception):
     user must reconnect) before the next call."""
 
 
-Throttle = Callable[[str], None]
-"""Called with the endpoint name before every venue request. Raises
-BudgetExhausted to stop the request. Default: no-op (tests, scripts)."""
+class Throttle(Protocol):
+    """The outbound limiter (P2) as connectors see it. Default: none (tests,
+    scripts)."""
+
+    def before(self, endpoint: str) -> None:
+        """Charge the endpoint's cost; raise BudgetExhausted to stop the request."""
+
+    def after(self, endpoint: str, extra_cost: int = 0, used: int | None = None) -> None:
+        """Charge response-dependent cost (Hyperliquid +1 per 20 items) and/or
+        sync to the venue's reported usage (Binance X-MBX-USED-WEIGHT-1M)."""
 
 
-class VenueConnector(ABC):
+class _Throttled:
+    """Mixin: the throttle hook shared by connectors and market data sources.
+    Call throttle() before EVERY HTTP request, with an endpoint name matching
+    the profile's RateBudget.costs keys, and throttle_after() once the
+    response is in when cost depends on it."""
+
+    _throttle: Throttle | None = None
+
+    def set_throttle(self, throttle: Throttle | None) -> None:
+        self._throttle = throttle
+
+    def throttle(self, endpoint: str) -> None:
+        if self._throttle is not None:
+            self._throttle.before(endpoint)
+
+    def throttle_after(self, endpoint: str, extra_cost: int = 0, used: int | None = None) -> None:
+        if self._throttle is not None:
+            self._throttle.after(endpoint, extra_cost, used)
+
+
+class VenueConnector(_Throttled, ABC):
     """One instance per connected venue account."""
 
     venue: str
+    # Which venue account this instance reads when one credential spans several
+    # (SnapTrade user -> many brokerage accounts, IBKR Flex query -> several
+    # accountIds, Coinbase portfolio uuid). None when key and account are 1:1.
+    # Also how a second connect of the same venue account is detected.
+    account_ref: str | None = None
 
     @abstractmethod
     def check_connection(self) -> NormalizedBalance:
@@ -383,17 +496,6 @@ class VenueConnector(ABC):
         return None
 
     # ---- v2 (platform_plan 2.3): additive, with defaults for M7 venues ----
-
-    _throttle: Throttle | None = None
-
-    def set_throttle(self, throttle: Throttle | None) -> None:
-        self._throttle = throttle
-
-    def throttle(self, endpoint: str) -> None:
-        """Connectors call this before EVERY HTTP request, with an endpoint
-        name that matches the keys in their profile's RateBudget.costs."""
-        if self._throttle is not None:
-            self._throttle(endpoint)
 
     def fetch_asset_fills_page(
         self, cursor: str | None = None, since: datetime | None = None
@@ -521,9 +623,10 @@ class NormalizedMarket(BaseModel):
         return None
 
 
-class MarketDataSource(ABC):
+class MarketDataSource(_Throttled, ABC):
     """Public market data for one venue. Needs no credentials, so one
-    instance serves every account and every follower."""
+    instance serves every account and every follower. Public endpoints count
+    against the venue's IP bucket, so they call throttle() like connectors."""
 
     venue: str
 
@@ -544,6 +647,31 @@ class MarketDataSource(ABC):
     def fetch_instruments(self) -> list[NormalizedInstrument]:
         """Every instrument the venue lists (symbols, decimals, lot sizes)."""
         return []
+
+    PRICING_QUOTES: tuple[str, ...] = ("USD", "USDC", "USDT")
+    STABLECOINS_AT_PAR: frozenset[str] = frozenset({"USD", "USDC", "USDT"})
+
+    def pricing_symbol(
+        self, asset: str, instruments: list[NormalizedInstrument] | None = None
+    ) -> str | None:
+        """The venue symbol whose daily close values one unit of `asset` in
+        USD terms: the first spot/equity instrument with base_asset == asset
+        and quote in PRICING_QUOTES order. None for cash/stablecoins (valued
+        at 1.00, see STABLECOINS_AT_PAR) and for assets the venue cannot
+        price (fall back to CoinGecko). One rule so every consumer values the
+        same way."""
+        if asset in self.STABLECOINS_AT_PAR:
+            return None
+        listed = instruments if instruments is not None else self.fetch_instruments()
+        for quote in self.PRICING_QUOTES:
+            for inst in listed:
+                if (
+                    inst.base_asset == asset
+                    and inst.quote_asset == quote
+                    and inst.type in (InstrumentType.SPOT, InstrumentType.EQUITY)
+                ):
+                    return inst.symbol
+        return None
 
     def fetch_daily_closes(self, symbol: str, start: date, end: date) -> list["DailyClose"]:
         """UTC daily closes for [start, end], oldest first. Fills prices_daily."""

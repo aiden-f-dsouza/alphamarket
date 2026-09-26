@@ -95,17 +95,25 @@ _BUILDERS: dict[str, Callable[[str, str, str | None], VenueConnector]] = {
 
 
 def build_connector(
-    venue: str, venue_env: str, key_id: str, secret: str | None = None
+    venue: str,
+    venue_env: str,
+    key_id: str,
+    secret: str | None = None,
+    account_ref: str | None = None,
 ) -> VenueConnector:
     """`key_id` is the public identifier (Kalshi key id, Polymarket wallet
-    address); `secret` is the credential, None for address-keyed venues."""
+    address); `secret` is the credential, None for address-keyed venues
+    (CredentialKind documents both per kind). `account_ref` picks one venue
+    account when a credential spans several (VenueConnector.account_ref)."""
     try:
         builder = _BUILDERS[venue]
     except KeyError:
         raise ValueError(f"Unsupported venue: {venue!r}") from None
     if venue_env not in get_profile(venue).envs:
         raise ValueError(f"{venue} has no {venue_env!r} environment")
-    return builder(venue_env, key_id, secret)
+    connector = builder(venue_env, key_id, secret)
+    connector.account_ref = account_ref
+    return connector
 
 
 _MARKET_DATA_BUILDERS: dict[str, Callable[[str], MarketDataSource]] = {

@@ -7,10 +7,12 @@ import pytest
 
 from alphamarket.connectors.base import (
     AssetAmount,
+    AssetMarketData,
     AssetVenueConnector,
     BalanceUnavailable,
     NormalizedBalances,
     NormalizedEvent,
+    NormalizedInstrument,
     Page,
     RateBudget,
     RateScope,
@@ -71,14 +73,64 @@ def test_asset_venue_without_cash_raises_balance_unavailable():
         _Fake([AssetAmount(asset="BTC", atoms=1, decimals=8)]).fetch_balance()
 
 
+class _Recorder:
+    def __init__(self):
+        self.seen: list[str] = []
+
+    def before(self, endpoint):
+        self.seen.append(endpoint)
+
+    def after(self, endpoint, extra_cost=0, used=None):
+        self.seen.append(f"after:{endpoint}:{extra_cost}")
+
+
 def test_throttle_is_called_before_requests_and_can_be_unset():
-    seen: list[str] = []
+    rec = _Recorder()
     conn = _Fake([AssetAmount(asset="USD", atoms=0, decimals=2)])
-    conn.set_throttle(seen.append)
+    conn.set_throttle(rec)
     conn.fetch_balances()
+    conn.throttle_after("Balance", extra_cost=3)
     conn.set_throttle(None)
     conn.fetch_balances()
-    assert seen == ["Balance"]
+    assert rec.seen == ["Balance", "after:Balance:3"]
+
+
+def test_legs_with_same_kind_and_asset_are_rejected():
+    leg = {"asset": "USDC", "delta_atoms": -1, "decimals": 6, "kind": "funding"}
+    with pytest.raises(ValueError, match="duplicate leg"):
+        NormalizedEvent(venue_ref="t", kind="funding", legs=[leg, leg], occurred_at=NOW)
+    # Same asset, different kinds (Kraken quote + fee in USD) is fine.
+    NormalizedEvent(
+        venue_ref="t", kind="funding", legs=[leg, {**leg, "kind": "fee"}], occurred_at=NOW
+    )
+
+
+def test_pricing_symbol_prefers_usd_then_usdc_and_skips_stablecoins():
+    class _Md(AssetMarketData):
+        venue = "fake"
+
+    def inst(symbol, base, quote):
+        return NormalizedInstrument(
+            symbol=symbol, type="spot", base_asset=base, quote_asset=quote, qty_decimals=8
+        )
+
+    listed = [
+        inst("ETHBTC", "ETH", "BTC"),
+        inst("ETHUSDC", "ETH", "USDC"),
+        inst("ETHUSD", "ETH", "USD"),
+    ]
+    md = _Md()
+    assert md.pricing_symbol("ETH", listed) == "ETHUSD"
+    assert md.pricing_symbol("ETH", listed[:2]) == "ETHUSDC"
+    assert md.pricing_symbol("ETH", listed[:1]) is None
+    assert md.pricing_symbol("USDC", listed) is None
+
+
+def test_build_connector_sets_account_ref():
+    from alphamarket.connectors.registry import build_connector
+
+    conn = build_connector("polymarket", "prod", "0x" + "ab" * 20, account_ref="main")
+    assert conn.account_ref == "main"
 
 
 def test_rate_budget_cost_lookup():
