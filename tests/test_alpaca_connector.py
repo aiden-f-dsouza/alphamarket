@@ -629,3 +629,38 @@ def test_market_data_is_built_from_koines_own_key():
     assert isinstance(md, AlpacaMarketData)
     with pytest.raises(RuntimeError):  # no key configured in tests
         md.fetch_quote("AAPL")
+
+
+@respx.mock
+def test_daily_closes_ask_one_day_past_end_and_keep_only_the_range():
+    # A date-only `end` may be read as 00:00Z, before the end day's 05:00Z bar,
+    # so the request asks through end + 1 day; the New York date filter drops
+    # the extra day. end 2022-01-04 -> request end "2022-01-05".
+    route = respx.get(f"{ALPACA_DATA_URL}/v2/stocks/bars")
+    route.side_effect = [
+        httpx.Response(200, json=_fx("bars_daily.json")),
+        httpx.Response(200, json=_fx("bars_daily_page2.json")),
+    ]
+    closes = _md().fetch_daily_closes("AAPL", date(2022, 1, 3), date(2022, 1, 4))
+    assert route.calls[0].request.url.params["start"] == "2022-01-03"
+    assert route.calls[0].request.url.params["end"] == "2022-01-05"
+    # The 2022-01-05 bar (page 2) is outside [01-03, 01-04] and is dropped.
+    assert [(c.day, c.close) for c in closes] == [
+        (date(2022, 1, 3), "182.01"),
+        (date(2022, 1, 4), "179.7"),
+    ]
+
+
+def test_token_without_a_scope_field_is_unknown_not_read_only():
+    # scope None in the stored grant = the venue never said what it granted.
+    secret = json.dumps({"access_token": TOKEN, "scope": None, "expires_at": None})
+    assert build_connector("alpaca", "live", "acct-9", secret).granted_scopes is None
+
+
+@respx.mock
+def test_live_grant_with_unknown_scope_is_undetermined():
+    _mock_account(base=LIVE)
+    secret = json.dumps({"access_token": TOKEN, "scope": None, "expires_at": None})
+    ev = build_connector("alpaca", "live", "acct-9", secret).prove_read_only()
+    assert ev.read_only is None
+    assert not any(c.request.method == "POST" for c in respx.calls)

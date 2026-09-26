@@ -42,7 +42,7 @@ import logging
 import re
 import secrets
 import time
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from datetime import time as dtime
 from decimal import ROUND_HALF_EVEN, Decimal
 from email.utils import parsedate_to_datetime
@@ -787,7 +787,11 @@ class AlpacaMarketData(AssetMarketData):
                 "symbols": symbol,
                 "timeframe": "1Day",
                 "start": start.isoformat(),
-                "end": end.isoformat(),
+                # One day past `end`: a date-only `end` may be read as 00:00Z,
+                # which is before the end day's bar (stamped 04:00/05:00Z) and
+                # would drop it [VERIFY]. The New York date filter below keeps
+                # the result to [start, end] either way.
+                "end": (end + timedelta(days=1)).isoformat(),
                 "adjustment": "raw",
                 "feed": self.bars_feed,
                 "limit": 10000,

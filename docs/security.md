@@ -84,4 +84,6 @@ and paper accounts hold no real money. A grant without trading permission is
 refused before the order is even validated; a grant with it gets a
 validation error, and the connection is rejected. Live accounts are never
 sent this request: there the permission list Alpaca returns with the grant
-is the proof.
+is the proof, and a grant that comes back without one is marked unverified
+rather than read-only. A grant refused at any step is revoked where the
+venue allows it.

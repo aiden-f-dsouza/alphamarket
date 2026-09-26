@@ -323,3 +323,48 @@ def test_connect_page_offers_the_oauth_button_not_a_secret_field(client, user):
     html = client.get("/dashboard/connect?venue=alpaca").text
     assert 'action="/oauth/alpaca/start"' in html
     assert 'name="secret"' not in html
+
+
+def test_token_record_keeps_a_missing_scope_unknown():
+    now = datetime(2026, 9, 26, 12, 0, tzinfo=UTC)
+    # Venue omitted `scope`: recorded as None ("unknown"), never "" ("none granted").
+    assert oauth.token_record({"access_token": "at"}, now)["scope"] is None
+    assert oauth.token_record({"access_token": "at", "scope": ""}, now)["scope"] == ""
+    # A refresh that omits scope keeps the original grant's (RFC 6749 section 6).
+    prev = {"access_token": "old", "scope": "read", "refresh_token": "rt"}
+    assert oauth.token_record({"access_token": "at2"}, now, previous=prev)["scope"] == "read"
+    assert oauth.granted_scopes({"scope": None}) == set()
+
+
+def _record_revokes(monkeypatch) -> list[str]:
+    revoked: list[str] = []
+
+    def fake_revoke(provider, secret, client=None):
+        revoked.append(secret)
+        return False
+
+    monkeypatch.setattr(oauth, "revoke", fake_revoke)
+    return revoked
+
+
+@respx.mock
+def test_callback_revokes_a_grant_the_connect_step_refused(client, user, monkeypatch):
+    revoked = _record_revokes(monkeypatch)
+    _mock_alpaca(probe_status=422)  # the probe shows write access: 422, nothing stored
+    state = _start(client)
+    resp = client.get(f"/oauth/alpaca/callback?code=c&state={state}", follow_redirects=False)
+    assert resp.status_code == 422
+    assert len(revoked) == 1
+    assert json.loads(revoked[0])["access_token"] == "user-token-not-real"
+
+
+@respx.mock
+def test_callback_revokes_when_the_account_cannot_be_read(client, user, monkeypatch):
+    revoked = _record_revokes(monkeypatch)
+    token = {"access_token": "user-token-not-real", "token_type": "bearer", "scope": ""}
+    respx.post(TOKEN_URL).mock(return_value=httpx.Response(200, json=token))
+    respx.get(f"{PAPER}/v2/account").mock(return_value=httpx.Response(500, json={}))
+    state = _start(client)
+    resp = client.get(f"/oauth/alpaca/callback?code=c&state={state}", follow_redirects=False)
+    assert resp.status_code == 502
+    assert len(revoked) == 1

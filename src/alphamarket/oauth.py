@@ -160,11 +160,19 @@ def _token_request(
 
 def token_record(body: dict[str, Any], now: datetime, previous: dict | None = None) -> dict:
     """What the vault stores. expires_at is absolute UTC so refresh timing
-    does not depend on when the record is read."""
+    does not depend on when the record is read.
+
+    `scope` is None when the venue did not say what it granted: "unknown" is
+    not "nothing", and the read-only proof must not read it as an empty grant.
+    A refresh that omits it keeps the original grant's (RFC 6749 6)."""
+    if body.get("scope") is not None:
+        scope: str | None = str(body["scope"])
+    else:
+        scope = (previous or {}).get("scope")
     record: dict[str, Any] = {
         "access_token": str(body["access_token"]),
         "token_type": str(body.get("token_type") or "bearer"),
-        "scope": str(body.get("scope") or ""),
+        "scope": scope,
     }
     refresh = body.get("refresh_token") or (previous or {}).get("refresh_token")
     if refresh:
@@ -363,14 +371,21 @@ def callback(
     try:
         account_id = resolve_oauth_account_id(venue, venue_env, secret)
     except Exception:
+        revoke(provider, secret)
         raise HTTPException(status_code=502, detail="Could not read the venue account.") from None
 
-    connect_account(
-        db,
-        user,
-        ConnectIn(venue=venue, key_id=account_id, secret=secret, strategy_name=saved["n"]),
-        oauth_grant=True,
-    )
+    try:
+        connect_account(
+            db,
+            user,
+            ConnectIn(venue=venue, key_id=account_id, secret=secret, strategy_name=saved["n"]),
+            oauth_grant=True,
+        )
+    except HTTPException:
+        # Refused (e.g. the probe showed write access): nothing was stored,
+        # so the grant must not stay alive at the venue either.
+        revoke(provider, secret)
+        raise
     resp = RedirectResponse("/dashboard", status_code=303)
     resp.delete_cookie(cookie_name(venue), path=f"/oauth/{venue}")
     return resp
