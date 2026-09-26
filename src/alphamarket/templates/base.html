@@ -245,39 +245,6 @@
   <div class="col"><span class="label">Account</span>{% if user %}<a href="/dashboard">Dashboard</a>{% else %}<a href="/login">Log in</a><a href="/signup">Create account</a>{% endif %}<a href="/invite">Invite</a></div>
 </footer>
 </div>
-<script>
-  // Close any open menu on an outside click or Escape. Menus work without this; it only tidies them.
-  document.addEventListener("click", function (e) {
-    document.querySelectorAll("details.menu[open]").forEach(function (d) { if (!d.contains(e.target)) d.removeAttribute("open"); });
-  });
-  document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") document.querySelectorAll("details.menu[open]").forEach(function (d) { d.removeAttribute("open"); });
-  });
-  // Equity curves draw themselves in once, and the strategy chart gets a crosshair. Display only:
-  // the values shown are the same platform-computed series the SVG was rendered from.
-  requestAnimationFrame(function () { requestAnimationFrame(function () {
-    document.querySelectorAll(".draw").forEach(function (el) { el.classList.add("done"); });
-  }); });
-  document.querySelectorAll("[data-series]").forEach(function (svg) {
-    var series = JSON.parse(svg.getAttribute("data-series")), wrap = svg.parentNode;
-    var tip = document.createElement("div"); tip.className = "chart-tip"; wrap.appendChild(tip);
-    var ns = "http://www.w3.org/2000/svg", vb = svg.viewBox.baseVal;
-    var line = document.createElementNS(ns, "line"), dot = document.createElementNS(ns, "circle");
-    line.setAttribute("y1", 0); line.setAttribute("y2", vb.height); line.setAttribute("stroke", "var(--text2)"); line.setAttribute("vector-effect", "non-scaling-stroke"); line.setAttribute("opacity", 0);
-    dot.setAttribute("r", 4); dot.setAttribute("fill", "var(--text)"); dot.setAttribute("opacity", 0);
-    svg.appendChild(line); svg.appendChild(dot);
-    var lo = +svg.dataset.lo, hi = +svg.dataset.hi, span = hi - lo || 1;
-    svg.addEventListener("mousemove", function (e) {
-      var r = svg.getBoundingClientRect(), n = series.length;
-      var i = Math.max(0, Math.min(n - 1, Math.round((e.clientX - r.left) / r.width * (n - 1))));
-      var x = vb.width * i / Math.max(n - 1, 1), y = vb.height * (1 - (series[i][1] - lo) / span);
-      line.setAttribute("x1", x); line.setAttribute("x2", x); line.setAttribute("opacity", 1);
-      dot.setAttribute("cx", x); dot.setAttribute("cy", y); dot.setAttribute("opacity", 1);
-      tip.textContent = series[i][0] + " \u00b7 $" + series[i][1].toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      tip.style.left = (x / vb.width * r.width) + "px"; tip.style.top = (y / vb.height * r.height - 8) + "px"; tip.classList.add("on");
-    });
-    svg.addEventListener("mouseleave", function () { line.setAttribute("opacity", 0); dot.setAttribute("opacity", 0); tip.classList.remove("on"); });
-  });
-</script>
+<script src="/static/app.js"></script>
 </body>
 </html>

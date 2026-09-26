@@ -69,6 +69,21 @@ class Settings(BaseSettings):
         still has to list it)."""
         return {"kalshi": self.kalshi_env, "polymarket": self.polymarket_env}.get(venue, "prod")
 
+    # ---- p3-web ----
+    # CSRF (csrf.py): the auth agent is renaming the session cookie away from
+    # starlette SessionMiddleware's default "session"; csrf.py checks BOTH
+    # names, so neither the old nor the new cookie ever skips the check.
+    # Set this once auth.py's cookie name is final.
+    session_cookie_name: str = "session"
+    # Extra origins (scheme://host[:port]) allowed to make an unsafe request
+    # that carries a session cookie, beyond `public_base_url` (e.g. a staging
+    # domain fronted by a different host). Comma-separated; empty by default.
+    csrf_allowed_origins: str = ""
+
+    @property
+    def csrf_allowed_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.csrf_allowed_origins.split(",") if o.strip()]
+
 
 @lru_cache
 def get_settings() -> Settings:
