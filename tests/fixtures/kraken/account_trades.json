@@ -1,0 +1,59 @@
+{
+  "error": [],
+  "result": {
+    "count": 3,
+    "trades": {
+      "T3SELL-AAAAA-AAAAAA": {
+        "ordertxid": "O3SELL-AAAAA-AAAAAA",
+        "postxid": "TKH2SE-M7IF5-CFI7LT",
+        "pair": "XXBTZUSD",
+        "time": 1788090000.75,
+        "type": "sell",
+        "ordertype": "limit",
+        "price": "31000.00000",
+        "cost": "310.00000",
+        "fee": "0.80600",
+        "vol": "0.01000000",
+        "margin": "0.00000",
+        "misc": "",
+        "trade_id": 40274903,
+        "maker": true,
+        "ledgers": ["L09T3B-AAAAA-AAAAAA", "L10T3Q-AAAAA-AAAAAA"]
+      },
+      "T2BUYE-AAAAA-AAAAAA": {
+        "ordertxid": "O2BUYE-AAAAA-AAAAAA",
+        "postxid": "TKH2SE-M7IF5-CFI7LT",
+        "pair": "XETHZUSD",
+        "time": 1788000200.25,
+        "type": "buy",
+        "ordertype": "market",
+        "price": "2000.00000",
+        "cost": "1000.00000",
+        "fee": "2.60000",
+        "vol": "0.50000000",
+        "margin": "0.00000",
+        "misc": "",
+        "trade_id": 11874101,
+        "maker": false,
+        "ledgers": ["L04T2B-AAAAA-AAAAAA", "L05T2Q-AAAAA-AAAAAA"]
+      },
+      "T1BUYB-AAAAA-AAAAAA": {
+        "ordertxid": "O1BUYB-AAAAA-AAAAAA",
+        "postxid": "TKH2SE-M7IF5-CFI7LT",
+        "pair": "XXBTZUSD",
+        "time": 1788000100.5,
+        "type": "buy",
+        "ordertype": "market",
+        "price": "30010.00000",
+        "cost": "600.20000",
+        "fee": "1.56052",
+        "vol": "0.02000000",
+        "margin": "0.00000",
+        "misc": "",
+        "trade_id": 40274859,
+        "maker": false,
+        "ledgers": ["L02T1B-AAAAA-AAAAAA", "L03T1Q-AAAAA-AAAAAA"]
+      }
+    }
+  }
+}

@@ -13,10 +13,15 @@ from alphamarket.connectors.base import (
     InstrumentKind,
     MarketDataSource,
     OwnershipProof,
+    PaperFeeModel,
+    RateBudget,
+    RateScope,
+    ReadOnlyProof,
     VenueConnector,
     VenueProfile,
 )
 from alphamarket.connectors.kalshi import KalshiConnector, KalshiMarketData, load_private_key_pem
+from alphamarket.connectors.kraken import KRAKEN_API_URL, KrakenConnector, KrakenMarketData
 from alphamarket.connectors.polymarket import PolymarketConnector, PolymarketMarketData
 
 PROFILES: dict[str, VenueProfile] = {
@@ -59,6 +64,57 @@ PROFILES: dict[str, VenueProfile] = {
         fee_rounding_micros=1,  # usdcSize carries six decimals
         ownership=OwnershipProof.PROFILE_CODE,
     ),
+    # ---- venue-kraken ----
+    "kraken": VenueProfile(
+        venue="kraken",
+        display_name="Kraken",
+        envs=("prod",),  # Kraken has no spot sandbox
+        credential=CredentialKind.KEY_SECRET,
+        key_label="API key",
+        secret_label="Private key",
+        key_help=(
+            "In Kraken: Settings → Connections & API → Create API key. Tick ONLY "
+            "Query Funds, Query Closed Orders & Trades and Query Ledger Entries. "
+            "Leave every trading, deposit, withdraw and Earn permission off: Koine "
+            "checks, and refuses keys that can trade or withdraw."
+        ),
+        balance_observable=True,
+        instrument=InstrumentKind.ASSET,
+        # Binary-era fields. For an ASSET venue the paper mirror sizes and
+        # rounds per instrument (NormalizedInstrument.qty_decimals, lot_decimals
+        # from AssetPairs), so these only say "no extra rounding here".
+        tick_micros=1,
+        contract_step_micros=1,
+        fee_rate_bps=80,  # Kraken Pro spot taker, tier 1 ($0+ 30-day volume), 2026-09-26
+        fee_rounding_micros=100,  # ZUSD ledger fees carry four decimals
+        ownership=OwnershipProof.KEY,
+        readonly_proof=ReadOnlyProof.ORDER_PROBE,
+        transfers_observable=True,  # Ledgers: deposit, withdrawal, transfer, staking
+        history_depth="all",  # TradesHistory and Ledgers are all-time
+        quote_asset="USD",
+        tos_doc="docs/venues/kraken.md",
+        # docs/venues/kraken.md status needs_approval: the 2026-09-14 Terms
+        # restrict third-party applications without written consent. Flip to
+        # False once Kraken's written OK is on file.
+        requires_partner_approval=True,
+        daily_resolution=False,
+        rate_budgets=(
+            # Per API key. Starter: max counter 15, decay 0.33/s = 20/min
+            # (docs.kraken.com spot-rest-ratelimits). History calls: the docs
+            # page says +2, support.kraken.com (2026-08-10) says +4; the
+            # higher is charged until verified. [VERIFY]
+            RateBudget(
+                scope=RateScope.CREDENTIAL,
+                capacity=15,
+                refill_per_minute=20,
+                costs=(("TradesHistory", 4), ("Ledgers", 4)),
+            ),
+            # Public endpoints, per caller IP: "1 per second (or less) would
+            # remain within the rate limits" (support.kraken.com). [VERIFY]
+            RateBudget(scope=RateScope.IP, capacity=1, refill_per_minute=60),
+        ),
+        paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
+    ),
 }
 
 SUPPORTED_VENUES = tuple(PROFILES)
@@ -88,9 +144,16 @@ def _build_polymarket(venue_env: str, key_id: str, secret: str | None) -> VenueC
     )
 
 
+def _build_kraken(venue_env: str, key_id: str, secret: str | None) -> VenueConnector:
+    if not secret:
+        raise ValueError("Kraken needs the API private key")
+    return KrakenConnector(api_key=key_id, api_secret=secret, base_url=KRAKEN_API_URL)
+
+
 _BUILDERS: dict[str, Callable[[str, str, str | None], VenueConnector]] = {
     "kalshi": _build_kalshi,
     "polymarket": _build_polymarket,
+    "kraken": _build_kraken,  # venue-kraken
 }
 
 
@@ -121,6 +184,7 @@ _MARKET_DATA_BUILDERS: dict[str, Callable[[str], MarketDataSource]] = {
     "polymarket": lambda venue_env: PolymarketMarketData(
         clob_url=POLYMARKET_BASE_URLS[venue_env]["clob"]
     ),
+    "kraken": lambda venue_env: KrakenMarketData(base_url=KRAKEN_API_URL),  # venue-kraken
 }
 
 
