@@ -50,11 +50,27 @@ class LoginOut(UserOut):
     mfa_required: bool = False
 
 
+# bcrypt only reads 72 bytes, and bcrypt>=5 raises ValueError past that. A
+# 128-character limit is not enough: 80 ASCII chars, or 25 three-byte chars,
+# already exceed it.
+MAX_PASSWORD_BYTES = 72
+PASSWORD_TOO_LONG = f"Use a password of at most {MAX_PASSWORD_BYTES} bytes."
+
+
+def ensure_password_fits(password: str) -> None:
+    """422 before any token is spent or hash computed on a password bcrypt refuses."""
+    if len(password.encode()) > MAX_PASSWORD_BYTES:
+        raise HTTPException(status_code=422, detail=PASSWORD_TOO_LONG)
+
+
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(password: str, password_hash: str) -> bool:
+    # No stored hash can come from a longer password (hash_password refuses it).
+    if len(password.encode()) > MAX_PASSWORD_BYTES:
+        return False
     return bcrypt.checkpw(password.encode(), password_hash.encode())
 
 
@@ -122,6 +138,7 @@ def signup(payload: SignupIn, request: Request, db: Session = Depends(get_db)) -
     exists = db.scalar(select(User).where(User.email == email))
     if exists:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+    ensure_password_fits(payload.password)
     ensure_not_breached(payload.password)
     user = User(
         email=email,

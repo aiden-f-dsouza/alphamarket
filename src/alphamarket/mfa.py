@@ -202,7 +202,10 @@ def check_code(
     the replay guard). False on a wrong code; raises 429 while locked or when
     this failure trips the lock."""
     now = now or datetime.now(UTC)
-    row = _record(db, user)
+    # Lock the row (Postgres; SQLite ignores FOR UPDATE and serialises writes
+    # anyway) so two concurrent requests carrying the same code cannot both
+    # pass the replay guard, and one recovery code cannot be spent twice.
+    row = db.get(UserTotp, user.id, with_for_update=True, populate_existing=True)
     if row is None or (row.enabled_at is None) != enrolling:
         return False
     locked_until = sessions.aware(row.locked_until)

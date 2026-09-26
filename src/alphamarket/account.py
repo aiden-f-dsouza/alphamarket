@@ -21,7 +21,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from alphamarket import ratelimit, sessions
-from alphamarket.auth import current_user, hash_password, verify_password
+from alphamarket.auth import current_user, ensure_password_fits, hash_password, verify_password
 from alphamarket.config import get_settings
 from alphamarket.db import get_db
 from alphamarket.email import send_email, send_security_alert
@@ -65,7 +65,16 @@ def consume_token(db: Session, token: str, kind: str, now: datetime | None = Non
     )
     if row is None or row.used_at is not None or now >= sessions.aware(row.expires_at):
         return None
-    row.used_at = now
+    # Conditional UPDATE, not a read-then-write: two concurrent requests with
+    # the same token cannot both see used_at IS NULL and both succeed.
+    claimed = db.execute(
+        update(AuthToken)
+        .where(AuthToken.id == row.id, AuthToken.used_at.is_(None))
+        .values(used_at=now)
+    ).rowcount
+    if claimed != 1:
+        db.rollback()
+        return None
     db.commit()
     return db.get(User, row.user_id)
 
@@ -134,6 +143,7 @@ def request_password_reset(request: Request, db: Session, email: str) -> None:
 
 
 def reset_password(db: Session, token: str, new_password: str) -> User:
+    ensure_password_fits(new_password)  # before the token is spent
     ensure_not_breached(new_password)
     user = consume_token(db, token, AuthTokenKind.PASSWORD_RESET)
     if user is None:
@@ -165,6 +175,7 @@ def change_password(
     ratelimit.check(request, "login_email", user.email)  # before bcrypt, like login
     if not verify_password(current_password, user.password_hash):
         raise HTTPException(status_code=401, detail="Current password is wrong.")
+    ensure_password_fits(new_password)
     ensure_not_breached(new_password)
     user.password_hash = hash_password(new_password)
     db.commit()

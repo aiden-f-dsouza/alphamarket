@@ -21,8 +21,16 @@ router = APIRouter(include_in_schema=False)
 
 
 def _safe_next(next_url: str | None, default: str = "/dashboard/security") -> str:
-    """Only same-site paths: never an open redirect."""
-    if next_url and next_url.startswith("/") and not next_url.startswith("//"):
+    """Only same-site paths: never an open redirect. Browsers read a
+    backslash as a slash (`/\\evil.com` goes to evil.com) and drop tabs and
+    newlines, so those are refused too."""
+    if (
+        next_url
+        and next_url.startswith("/")
+        and not next_url.startswith("//")
+        and "\\" not in next_url
+        and not any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in next_url)
+    ):
         return next_url
     return default
 
