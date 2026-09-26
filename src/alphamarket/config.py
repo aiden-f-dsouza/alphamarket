@@ -69,6 +69,11 @@ class Settings(BaseSettings):
         still has to list it)."""
         return {"kalshi": self.kalshi_env, "polymarket": self.polymarket_env}.get(venue, "prod")
 
+    # ---- venue-ibkr ----
+    # Flex Web Service credentials for scripts/ibkr_smoke.py; never logged.
+    ibkr_flex_query_id: str = ""
+    ibkr_flex_token: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
