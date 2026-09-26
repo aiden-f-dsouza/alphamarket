@@ -350,11 +350,19 @@ class BinanceUSConnector(AssetVenueConnector):
                 "symbols": self._discover_symbols(),
                 "from_ids": {},
                 "queue": [],
-                "window_start_ms": None,
+                # Per-symbol window-scan position ({symbol: next window start
+                # ms}); a bare scalar here would be shared across every symbol
+                # in the queue and, once one symbol's scan advanced partway
+                # through discovering its first trade id, would make the NEXT
+                # symbol's scan resume from that leftover position instead of
+                # `since_ms` -- silently skipping that symbol's earlier fills.
+                "window_start_ms": {},
             }
             state["queue"] = list(state["symbols"])
         else:
             state = json.loads(cursor)
+            if not isinstance(state.get("window_start_ms"), dict):
+                state["window_start_ms"] = {}  # tolerate a pre-fix scalar cursor
 
         if not state["queue"]:
             # Previous pass finished (resume_cursor was returned); start a
@@ -364,7 +372,7 @@ class BinanceUSConnector(AssetVenueConnector):
             discovered = self._discover_symbols()
             state["symbols"] = sorted(set(state["symbols"]) | set(discovered))
             state["queue"] = list(state["symbols"])
-            state["window_start_ms"] = None
+            state["window_start_ms"] = {}
             if not state["queue"]:
                 return Page(items=[], next_cursor=None, resume_cursor=json.dumps(state))
 
@@ -381,8 +389,9 @@ class BinanceUSConnector(AssetVenueConnector):
                 state["from_ids"][symbol] = raw[-1]["id"]
             if len(raw) < MY_TRADES_PAGE_LIMIT:
                 state["queue"].pop(0)
+                state["window_start_ms"].pop(symbol, None)
         else:
-            window_start = state["window_start_ms"]
+            window_start = state["window_start_ms"].get(symbol)
             if window_start is None:
                 window_start = since_ms
             window_end = min(window_start + DAY_MS - 1, _now_ms())
@@ -398,9 +407,9 @@ class BinanceUSConnector(AssetVenueConnector):
                 state["from_ids"][symbol] = raw[-1]["id"]
             if window_end >= _now_ms() - 1:
                 state["queue"].pop(0)
-                state["window_start_ms"] = None
+                state["window_start_ms"].pop(symbol, None)
             else:
-                state["window_start_ms"] = window_end + 1
+                state["window_start_ms"][symbol] = window_end + 1
 
         items = [_to_asset_fill(symbol, inst, t) for t in raw] if inst else []
 

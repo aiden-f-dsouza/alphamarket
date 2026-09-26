@@ -406,6 +406,59 @@ def test_fetch_asset_fills_page_from_id_full_page_keeps_symbol_queued():
     assert state["queue"] == ["BTCUSD"]  # still queued: page was full
 
 
+@respx.mock
+def test_fetch_asset_fills_page_window_scan_is_per_symbol_not_shared(monkeypatch):
+    """Regression: `window_start_ms` must be tracked per symbol. BTCUSD (first
+    in the queue) has its earliest trade on day 5 and quickly switches to
+    fromId pagination; ETHUSD (next in the queue) has its EARLIER first trade
+    on day 1. A shared (non-per-symbol) window-scan cursor would carry
+    BTCUSD's day-5+ scan position over to ETHUSD and silently skip ETHUSD's
+    day-1 fill -- it must instead scan ETHUSD from `since` like any first-ever
+    backfill."""
+    frozen_now_ms = m.VENUE_EPOCH_MS + 20 * m.DAY_MS
+    monkeypatch.setattr(m, "_now_ms", lambda: frozen_now_ms)
+    since = m._ms_to_dt(m.VENUE_EPOCH_MS)
+
+    respx.get(f"{m.BASE_URL}{m.EP_EXCHANGE_INFO}").mock(
+        return_value=httpx.Response(200, json=_load("exchangeinfo.json"))
+    )
+
+    btc_trade_ms = m.VENUE_EPOCH_MS + 5 * m.DAY_MS + 1000
+    eth_trade_ms = m.VENUE_EPOCH_MS + 1 * m.DAY_MS + 1000
+    base_trade = _load("mytrades_btcusd.json")[0]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(httpx.QueryParams(request.url.query))
+        symbol = params["symbol"]
+        if "fromId" in params:
+            return httpx.Response(200, json=[])
+        start, end = int(params["startTime"]), int(params["endTime"])
+        trade_ms = btc_trade_ms if symbol == "BTCUSD" else eth_trade_ms
+        if start <= trade_ms <= end:
+            trade = dict(base_trade, id=100 if symbol == "BTCUSD" else 200, time=trade_ms)
+            return httpx.Response(200, json=[trade])
+        return httpx.Response(200, json=[])
+
+    respx.get(f"{m.BASE_URL}{m.EP_MY_TRADES}").mock(side_effect=handler)
+
+    connector = _connector()
+    connector._discover_symbols = lambda: ["BTCUSD", "ETHUSD"]
+
+    fill_ids: set[str] = set()
+    cursor = None
+    for _ in range(60):  # generous bound; a real pass finishes well before this
+        page = connector.fetch_asset_fills_page(cursor=cursor, since=since)
+        fill_ids.update(f.venue_fill_id for f in page.items)
+        if page.next_cursor is None:
+            break
+        cursor = page.next_cursor
+    else:
+        pytest.fail("pagination did not terminate")
+
+    assert "BTCUSD:100" in fill_ids
+    assert "ETHUSD:200" in fill_ids  # the earlier fill must not be skipped
+
+
 # ---- market data ---------------------------------------------------------
 
 
