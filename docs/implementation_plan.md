@@ -17,7 +17,7 @@ the two disagree, fix one of them; do not leave both.
 | Security | TOTP, DB sessions, CSRF, headers, KMS envelope vault, audit log, CI scanning, backups, consent screens | SOC 2 audit, pen test (evidence collection starts now) |
 | Rate limiting | Inbound (protect Koine) and outbound (respect venue budgets, per key and per egress IP) | |
 | Payments | none | M12 (Stripe) and M13 (compliance surface) stay as written in platform_plan.md |
-| Hosting | **open**, see section 2 | |
+| Hosting | **Fly.io** + Fly Managed Postgres, AWS KMS for the vault, Cloudflare in front (decided 2026-09-26; no accelerator credits) | Revisit GCP/AWS on the triggers in section 2.2 |
 
 Regulatory and pricing questions are parked on purpose. Nothing in this
 pass moves money or places orders, so parking them costs nothing later.
@@ -51,7 +51,7 @@ for ordering, not for promising dates.
 
 ---
 
-## 2. Hosting: comparison and recommendation (decision open)
+## 2. Hosting: comparison and recommendation (decided: Fly.io, 2026-09-26)
 
 ### What this app needs from a host
 
@@ -460,11 +460,47 @@ secret store; `scripts/preflight.py` passing.
 - **Not needed**: Datadog, PagerDuty, Atlassian at this size; Supabase only
   if Supabase hosts Postgres.
 
-## 7. Open questions
+## 7. Decisions on the open questions (2026-09-26)
 
-1. Hosting: Fly now, or GCP/AWS from the start? This hinges on accelerator credits.
-2. Paper fill price for assets (E5): OK to diverge from the M6 "creator's
-   price" rule for non-binary venues?
-3. Which venue accounts can you open and fund this month (Kraken, Alpaca and
-   IBKR block the exit tests)?
-4. Do you use a ticket tracker you want the phases loaded into?
+1. Hosting: **Fly.io** now (no accelerator credits). The code stays portable.
+2. Paper fill price for assets (E5): **accepted** for non-binary venues;
+   binary venues keep the M6 creator-price rule.
+3. Accounts Aiden will open: **Kraken, Alpaca, IBKR**. Until they exist,
+   private-endpoint fixtures come from the venues' documented examples
+   (marked "docs example" in `tests/fixtures/<venue>/README.md`) and are
+   re-recorded from the real accounts later. Hyperliquid needs no account.
+4. Ticket tracker: **none**. Status lives in section 8 below.
+
+## 8. Status
+
+Branch `platform-v2` (from `main` at 97a1e25). Contract v2 scaffold
+committed at a7cbd6e after a design review; parallel workstreams build on
+`wip/<label>` branches and are merged here by the integrator.
+
+Wave 1 (parallel, started 2026-09-26):
+
+- [x] Contract v2 scaffold: `money.to_atoms`, legs/events/balances, `Page`
+      cursors, `Throttle`, `account_ref`, pg test fixture (a7cbd6e)
+- [ ] p0-infra: CI Postgres job, gitleaks, pip-audit, Dependabot, fixture
+      recorder, non-root Docker, backups + restore drill, Fly deploy doc
+- [ ] p1-ledger: instruments, `ledger_entries`, `asset_fills`, anchors,
+      `prices_daily`, binary legs with parity, ingest v2, reconcile v2
+- [ ] p1-valuation: `valuation.py` (holdings, perp entry, daily equity,
+      flow-adjusted TWR, exposure)
+- [ ] p2-jobs: job queue, outbound token buckets, circuit breaker, worker
+      claim loop, resumable backfills
+- [ ] p3-auth: inbound rate limits, TOTP + step-up, DB sessions, email
+      (verify, reset, alerts), breached-password check
+- [ ] p3-web: CSRF origin check, CSP + security headers, inline JS moved out
+- [ ] p3-vault: envelope vault + KMS wrapper, `venue_credentials`,
+      `audit_log`, nightly read-only re-check, log redaction
+- [ ] Connectors: Kraken, Hyperliquid, Coinbase, Binance.US, Alpaca (+ OAuth),
+      IBKR Flex, SnapTrade
+
+Integration (after wave 1): re-chain migrations 0009-0012, re-lock
+`uv.lock`, register routers and alert hooks, move credentials onto
+`venue_credentials`, wire connectors into `ingest` and the job runner,
+apply the CLAUDE.md invariant amendments (platform_plan section 7).
+
+Wave 2 (after integration): P6 paper copy v2, valuation wired into
+`stats`/`analytics`, P8 product surface, P7 streaming.
