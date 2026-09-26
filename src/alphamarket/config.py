@@ -69,6 +69,32 @@ class Settings(BaseSettings):
         still has to list it)."""
         return {"kalshi": self.kalshi_env, "polymarket": self.polymarket_env}.get(venue, "prod")
 
+    # ---- p3-auth ----
+    # Inbound rate limiting (ratelimit.py). "memory" is per process and resets
+    # on restart (tests/dev); "postgres" is shared by every web process.
+    # Preflight refuses "memory".
+    rate_limiter: str = "memory"
+    # Read the client IP from CF-Connecting-IP / Fly-Client-IP. Only true when
+    # the app is reachable solely through that proxy; otherwise a client could
+    # forge the header and dodge per-IP limits.
+    trust_proxy_headers: bool = False
+    # Transactional email (email.py): "console" keeps an in-memory outbox and
+    # logs; "smtp" sends through any SMTP relay (Postmark, SES, Resend).
+    # Preflight refuses "console".
+    email_backend: str = "console"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_starttls: bool = True
+    email_from: str = "Koine <no-reply@localhost>"
+    # HIBP Pwned Passwords range check on signup and reset. Off by default so
+    # no test or dev run calls the network (invariant 6); preflight requires it.
+    hibp_enabled: bool = False
+    # DB sessions (sessions.py).
+    session_idle_hours: int = 24
+    session_absolute_days: int = 30
+
 
 @lru_cache
 def get_settings() -> Settings:

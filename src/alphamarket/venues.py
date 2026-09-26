@@ -30,8 +30,11 @@ from alphamarket.config import get_settings
 from alphamarket.connectors.base import OwnershipProof
 from alphamarket.connectors.registry import SUPPORTED_VENUES, build_connector, get_profile
 from alphamarket.db import get_db
+from alphamarket.email import send_security_alert
 from alphamarket.ingest import sync_account
+from alphamarket.mfa import require_connect_ready, require_step_up
 from alphamarket.models import Strategy, User, VenueAccount, VenueAccountStatus, utcnow
+from alphamarket.ratelimit import rate_limit
 from alphamarket.reconcile import reconcilable, reconcile_account, take_anchor
 from alphamarket.vault import encrypt_secret
 
@@ -182,6 +185,8 @@ def connect_account(db: Session, user: User, payload: ConnectIn) -> dict:
     db.flush()
     strategy.slug = f"{slugify(payload.strategy_name)}-{strategy.id}"
     db.commit()
+    if secret:  # p3-auth: tell the owner whenever a key is added (never the key itself)
+        send_security_alert(user, "key_connected", {"Venue": profile.display_name})
 
     result = sync_account(db, account)
     return {
@@ -191,7 +196,13 @@ def connect_account(db: Session, user: User, payload: ConnectIn) -> dict:
     }
 
 
-@router.post("", response_model=ConnectOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=ConnectOut,
+    status_code=status.HTTP_201_CREATED,
+    # p3-auth: TOTP on + email verified + step-up within 10 min, then 10/hour.
+    dependencies=[Depends(require_connect_ready), Depends(rate_limit("venues_user", by="user"))],
+)
 def connect(payload: ConnectIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return connect_account(db, user, payload)
 
@@ -232,7 +243,11 @@ def claim_account(db: Session, user: User, account_id: int) -> dict:
     return _to_out(account, strategy)
 
 
-@router.post("/{account_id}/claim", response_model=VenueAccountOut)
+@router.post(
+    "/{account_id}/claim",
+    response_model=VenueAccountOut,
+    dependencies=[Depends(rate_limit("venues_user", by="user"))],  # p3-auth
+)
 def claim(account_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return claim_account(db, user, account_id)
 
@@ -286,7 +301,11 @@ def manual_reconcile(
         raise HTTPException(status_code=502, detail="Reconcile failed; see status.") from None
 
 
-@router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{account_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_step_up)],  # p3-auth
+)
 def disconnect(account_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
     """Disconnect erases the encrypted key immediately (invariant #4). The
     already-ingested ledger stays: it is append-only history the track record

@@ -17,6 +17,7 @@ from alphamarket.auth import current_user
 from alphamarket.db import get_db
 from alphamarket.models import Allocation, Follow, Settlement, Signal, Strategy, User
 from alphamarket.public import is_visible, visible_strategy_or_404
+from alphamarket.ratelimit import rate_limit
 from alphamarket.stats import micros_to_float
 
 router = APIRouter(tags=["follows"])
@@ -38,7 +39,12 @@ def _follow_out(strategy: Strategy, follow: Follow) -> dict:
     }
 
 
-@router.post("/follows/{slug}", response_model=FollowOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/follows/{slug}",
+    response_model=FollowOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit("follow_user", by="user"))],  # p3-auth
+)
 def follow(slug: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     strategy = visible_strategy_or_404(db, slug)
     existing = db.scalar(

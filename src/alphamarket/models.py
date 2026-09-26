@@ -45,6 +45,11 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     display_name: Mapped[str] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # p3-auth: set when the user follows the emailed link (account.py). An
+    # unverified user can browse but cannot connect a venue.
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
 
 
 class VenueAccountStatus(StrEnum):
@@ -382,3 +387,90 @@ def _enforce_append_only(session: Session, flush_context, instances) -> None:
     for obj in session.deleted:
         if isinstance(obj, APPEND_ONLY_MODELS):
             raise AppendOnlyViolation(f"{type(obj).__name__} rows are append-only; cannot delete")
+
+
+# ---- p3-auth ----------------------------------------------------------------
+# Account security (P3): DB sessions, TOTP, recovery codes, single-use email
+# tokens and inbound rate-limit counters. None of these is a ledger, so none
+# is append-only; secrets are only ever stored hashed or vault-encrypted.
+
+
+class UserSession(Base):
+    """A login. The cookie holds a random opaque id; only its SHA-256 is
+    stored, so a database read cannot be replayed as a cookie. A session in
+    `mfa_pending` state has passed the password step only and authenticates
+    nothing but the TOTP step (sessions.py)."""
+
+    __tablename__ = "sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ip: Mapped[str | None] = mapped_column(String(64), default=None)
+    user_agent: Mapped[str | None] = mapped_column(String(300), default=None)
+    mfa_pending: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Last TOTP (or recovery code) check on this session: the step-up window.
+    step_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class UserTotp(Base):
+    """TOTP second factor. The shared secret is vault-encrypted (vault.py);
+    `enabled_at` is NULL while enrolment awaits its first valid code."""
+
+    __tablename__ = "user_totp"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    secret_encrypted: Mapped[bytes] = mapped_column(LargeBinary)
+    enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # Highest 30-second time step accepted so far: a code is never accepted twice.
+    last_used_step: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class RecoveryCode(Base):
+    """Single-use TOTP recovery code, stored as SHA-256 of the normalized code
+    (80 random bits each, so a fast hash is enough)."""
+
+    __tablename__ = "totp_recovery_codes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    code_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class AuthTokenKind(StrEnum):
+    VERIFY_EMAIL = "verify_email"
+    PASSWORD_RESET = "password_reset"
+
+
+class AuthToken(Base):
+    """Single-use emailed token (email verification, password reset). Only the
+    SHA-256 of the token is stored; `used_at` makes it single-use."""
+
+    __tablename__ = "auth_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class RateLimitCounter(Base):
+    """One fixed window of one inbound rate-limit key (ratelimit.py). Rows
+    past `expires_at` are dead weight and pruned."""
+
+    __tablename__ = "rate_limit_counters"
+
+    key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    window_start: Mapped[int] = mapped_column(BigInteger, primary_key=True)  # unix seconds
+    count: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

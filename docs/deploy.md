@@ -55,3 +55,20 @@ only recent rows, which the worker re-ingests on its next tick.
 - Never put keys in the image: `keys/` and `.env` are in .dockerignore. Users'
   keys live only in the database, Fernet-encrypted with VAULT_KEY. Losing
   VAULT_KEY means every user reconnects; store it in a password manager too.
+
+## Account security settings (P3)
+
+Preflight refuses to pass until these are set for the production app:
+
+```
+fly secrets set \
+  RATE_LIMITER=postgres TRUST_PROXY_HEADERS=true HIBP_ENABLED=true \
+  EMAIL_BACKEND=smtp SMTP_HOST=smtp.postmarkapp.com SMTP_PORT=587 \
+  SMTP_USER=<server token> SMTP_PASSWORD=<server token> \
+  EMAIL_FROM="Koine <no-reply@your-domain>"
+```
+
+`TRUST_PROXY_HEADERS=true` only once Cloudflare (or the Fly edge) is the sole
+way in; otherwise a client could forge `CF-Connecting-IP` and dodge the per-IP
+limits. The worker should prune `rate_limit_counters` rows past `expires_at`
+(`ratelimit.prune_counters`) periodically.

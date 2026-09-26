@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Two-factor code · Koine{% endblock %}
+{% block nav_active %}login{% endblock %}
+{% block style %}
+  .auth { width:100%; max-width:440px; margin:24px auto 0; }
+{% endblock %}
+{% block content %}
+<div class="auth stack" style="gap:24px">
+  <div class="stack" style="gap:8px">
+    <h1 style="font-size:36px">One more step.</h1>
+    <p class="text2">Enter the 6-digit code from your authenticator app. Lost your phone? Use one of your recovery codes instead.</p>
+  </div>
+  {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+  <form method="post" action="/login/2fa" class="card">
+    <div class="body" style="padding:28px;gap:18px">
+      <label class="field"><span class="label">Code</span><input class="mono" name="code" required minlength="6" maxlength="40" autocomplete="one-time-code" autofocus placeholder="123456"><span class="note">Recovery codes look like abcd-efgh-ijkl-mnop and work once.</span></label>
+      <div style="padding-top:4px"><button class="btn" type="submit" style="width:100%">Verify and log in</button></div>
+    </div>
+  </form>
+  <p class="small text2" style="text-align:center"><a href="/login" style="text-decoration:underline">Start over</a></p>
+</div>
+{% endblock %}

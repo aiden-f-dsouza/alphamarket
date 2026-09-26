@@ -11,6 +11,7 @@
   <div style="display:flex;gap:8px;flex-wrap:wrap">{% for p in profiles %}<a class="btn {{ 'secondary' if not loop.first else '' }}" href="/dashboard/connect?venue={{ p.venue }}">{{ m.icon("plus", 14, "currentColor", 2) }}Connect {{ p.display_name }}</a>{% endfor %}</div>
 </div>
 {% if error %}<div class="error">{{ error }}</div>{% endif %}
+{% if not totp_on or not email_verified %}<div class="notice" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap"><span style="display:inline-flex;align-items:center;gap:10px">{{ m.icon("lock", 14, "var(--text2)") }}{% if not email_verified and not totp_on %}Confirm your email and turn on two-factor authentication before connecting a venue.{% elif not email_verified %}Confirm your email before connecting a venue.{% else %}Turn on two-factor authentication before connecting a venue.{% endif %}</span><a class="btn secondary sm" href="/dashboard/security">Security settings</a></div>{% endif %}
 
 {% for row in rows %}
 {% set a = row.account %}{% set s = row.strategy %}{% set st = row.stats %}

@@ -1,8 +1,21 @@
 from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
-from alphamarket import auth, follows, pages, public, strategies, tails, venues
+from alphamarket import (
+    account,
+    auth,
+    follows,
+    mfa,
+    pages,
+    public,
+    security_pages,
+    strategies,
+    tails,
+    venues,
+)
 from alphamarket.config import get_settings
+from alphamarket.ratelimit import ApiRateLimitMiddleware, build_limiter
+from alphamarket.sessions import SessionCookieMiddleware
 
 
 def create_app() -> FastAPI:
@@ -14,7 +27,15 @@ def create_app() -> FastAPI:
         https_only=settings.secure_cookies,
         same_site="lax",
     )
+    # p3-auth: login identity lives in DB sessions (sessions.py), not in the
+    # signed cookie above; /api/* is rate limited per client IP.
+    app.state.rate_limiter = build_limiter()
+    app.add_middleware(SessionCookieMiddleware)
+    app.add_middleware(ApiRateLimitMiddleware)
     app.include_router(auth.router)
+    app.include_router(mfa.router)
+    app.include_router(account.router)
+    app.include_router(security_pages.router)
     app.include_router(venues.router)
     app.include_router(strategies.router)
     app.include_router(public.router)

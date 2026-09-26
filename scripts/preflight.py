@@ -12,9 +12,24 @@ from alphamarket.config import get_settings
 from alphamarket.db import engine
 
 
+def security_problems(s) -> list[str]:
+    """P3 account-security settings (p3-auth)."""
+    problems: list[str] = []
+    if s.rate_limiter != "postgres":
+        problems.append(f"RATE_LIMITER={s.rate_limiter} (per-process limits; use postgres in prod)")
+    if s.email_backend != "smtp":
+        problems.append(f"EMAIL_BACKEND={s.email_backend} (no email would reach users)")
+    elif not s.smtp_host or s.email_from.endswith("@localhost>"):
+        problems.append("SMTP_HOST / EMAIL_FROM not configured")
+    if not s.hibp_enabled:
+        problems.append("HIBP_ENABLED is false (breached passwords accepted)")
+    return problems
+
+
 def main() -> int:
     s = get_settings()
     problems: list[str] = []
+    problems += security_problems(s)
 
     if s.secret_key == "dev-only-change-me" or len(s.secret_key) < 32:
         problems.append("SECRET_KEY is the dev default or too short")

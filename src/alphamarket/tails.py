@@ -28,6 +28,7 @@ from alphamarket.portfolio import (
     stop_allocation,
 )
 from alphamarket.public import visible_strategy_or_404
+from alphamarket.ratelimit import rate_limit
 
 router = APIRouter(tags=["tails"])
 
@@ -92,7 +93,11 @@ def create_allocation(db: Session, user: User, payload: AllocationIn) -> Allocat
     return row
 
 
-@router.post("/allocations", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/allocations",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit("follow_user", by="user"))],  # p3-auth
+)
 def create(
     payload: AllocationIn, db: Session = Depends(get_db), user: User = Depends(current_user)
 ):
