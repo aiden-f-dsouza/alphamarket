@@ -1,0 +1,67 @@
+{
+  "corporate_actions": {
+    "forward_splits": [
+      {
+        "cusip": "816851109",
+        "due_bill_redemption_date": "2023-08-23",
+        "ex_date": "2023-08-22",
+        "id": "189bd849-ab9f-4b4d-aaaa-a6d415fd976d",
+        "new_rate": 2,
+        "old_rate": 1,
+        "payable_date": "2023-08-21",
+        "process_date": "2023-08-22",
+        "record_date": "2023-08-14",
+        "symbol": "SRE"
+      }
+    ],
+    "reverse_splits": [
+      {
+        "ex_date": "2023-08-24",
+        "id": "913de862-c02c-46dc-a89c-fc8779a50d30",
+        "new_cusip": "60879E200",
+        "new_rate": 1,
+        "old_cusip": "60879E101",
+        "old_rate": 50,
+        "process_date": "2023-08-24",
+        "record_date": "2023-08-24",
+        "symbol": "MNTS"
+      }
+    ],
+    "cash_dividends": [
+      {
+        "cusip": "319829107",
+        "ex_date": "2023-05-04",
+        "foreign": false,
+        "id": "11cfd108-292e-4cc6-bfbf-5999cdbc4029",
+        "payable_date": "2023-05-19",
+        "process_date": "2023-05-19",
+        "rate": 0.125,
+        "record_date": "2023-05-05",
+        "special": false,
+        "symbol": "FCF"
+      }
+    ],
+    "name_changes": [
+      {
+        "id": "5a774c35-edec-4532-a812-a56d0bbb623a",
+        "new_cusip": "Y9390M103",
+        "new_symbol": "VFS",
+        "old_cusip": "G11537100",
+        "old_symbol": "BSAQ",
+        "process_date": "2023-08-15"
+      }
+    ],
+    "cash_mergers": [
+      {
+        "acquiree_cusip": "Y2687W108",
+        "acquiree_symbol": "GLOP",
+        "effective_date": "2023-07-17",
+        "id": "3772bbd7-4ad5-44d4-9cc0-f69156a2f8f5",
+        "payable_date": "2023-07-17",
+        "process_date": "2023-07-17",
+        "rate": 5.37
+      }
+    ]
+  },
+  "next_page_token": null
+}

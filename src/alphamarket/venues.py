@@ -27,13 +27,13 @@ from sqlalchemy.orm import Session
 
 from alphamarket.auth import current_user
 from alphamarket.config import get_settings
-from alphamarket.connectors.base import OwnershipProof
+from alphamarket.connectors.base import CredentialKind, OwnershipProof
 from alphamarket.connectors.registry import SUPPORTED_VENUES, build_connector, get_profile
 from alphamarket.db import get_db
 from alphamarket.ingest import sync_account
 from alphamarket.models import Strategy, User, VenueAccount, VenueAccountStatus, utcnow
 from alphamarket.reconcile import reconcilable, reconcile_account, take_anchor
-from alphamarket.vault import encrypt_secret
+from alphamarket.vault import decrypt_secret, encrypt_secret
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/venues", tags=["venues"])
@@ -115,12 +115,21 @@ def slugify(name: str) -> str:
     return base[:100] or "strategy"
 
 
-def connect_account(db: Session, user: User, payload: ConnectIn) -> dict:
+def connect_account(
+    db: Session, user: User, payload: ConnectIn, *, oauth_grant: bool = False
+) -> dict:
     """Validate, scope-check, encrypt, anchor, create the strategy, first
-    import. Raises HTTPException with user-safe detail on any failure."""
+    import. Raises HTTPException with user-safe detail on any failure.
+    `oauth_grant` is set only by oauth.callback: OAuth venues never accept a
+    pasted token."""
     if payload.venue not in SUPPORTED_VENUES:
         raise HTTPException(status_code=422, detail=f"Unsupported venue: {payload.venue}")
     profile = get_profile(payload.venue)
+    if profile.credential is CredentialKind.OAUTH2 and not oauth_grant:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Connect {profile.display_name} with its Connect button (OAuth).",
+        )
     if profile.needs_secret and not payload.secret:
         raise HTTPException(status_code=422, detail=f"{profile.secret_label} is required.")
     secret = payload.secret if profile.needs_secret else None
@@ -292,6 +301,16 @@ def disconnect(account_id: int, db: Session = Depends(get_db), user: User = Depe
     already-ingested ledger stays: it is append-only history the track record
     was built on, and the methodology page says exactly that."""
     account = _owned_account(db, account_id, user)
+    if (
+        account.encrypted_private_key is not None
+        and get_profile(account.venue).credential is CredentialKind.OAUTH2
+    ):
+        from alphamarket.oauth import revoke_quietly  # oauth imports this module
+
+        try:
+            revoke_quietly(account.venue, decrypt_secret(account.encrypted_private_key))
+        except Exception:  # noqa: BLE001 - erasing the credential must still happen
+            logger.warning("oauth revoke failed for account %s", account.id)
     account.encrypted_private_key = None
     account.status = VenueAccountStatus.DISCONNECTED
     db.commit()

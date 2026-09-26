@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
-from alphamarket import auth, follows, pages, public, strategies, tails, venues
+from alphamarket import auth, follows, oauth, pages, public, strategies, tails, venues
 from alphamarket.config import get_settings
 
 
@@ -16,6 +16,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(auth.router)
     app.include_router(venues.router)
+    app.include_router(oauth.router)
     app.include_router(strategies.router)
     app.include_router(public.router)
     app.include_router(follows.router)

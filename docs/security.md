@@ -66,3 +66,22 @@ compare it with the balance Kalshi reports. If they disagree by more than
 ## Reporting a problem
 
 Email the address on the landing page. Security reports are answered first.
+
+## Alpaca: connecting by OAuth, and the one request that is not a read
+
+Alpaca accounts connect through Alpaca's own sign-in and approval screen.
+Koine never sees your Alpaca password and asks for **no permissions** beyond
+Alpaca's read-only default (not `trading`, not `account:write`, not `data`).
+A grant that includes a trading or account-write permission is refused
+before anything is stored. The access token is encrypted like every other
+credential and erased when you disconnect; Alpaca offers no programmatic
+revoke, so you can also remove Koine in the Alpaca dashboard.
+
+To prove the grant cannot trade, on a **paper** account only, Koine sends one
+order request that is invalid on purpose: zero shares of `KOINEPROBE0`, a
+symbol that does not exist. It cannot execute even with trading permission,
+and paper accounts hold no real money. A grant without trading permission is
+refused before the order is even validated; a grant with it gets a
+validation error, and the connection is rejected. Live accounts are never
+sent this request: there the permission list Alpaca returns with the grant
+is the proof.
