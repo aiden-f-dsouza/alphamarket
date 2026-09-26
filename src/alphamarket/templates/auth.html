@@ -21,6 +21,7 @@
       <div style="padding-top:4px"><button class="btn" type="submit" style="width:100%">{{ "Log in" if login else "Create account" }}</button></div>
     </div>
   </form>
+  {% if login %}<p class="small text2" style="text-align:center"><a href="/forgot-password" style="text-decoration:underline">Forgot your password?</a></p>{% endif %}
   <p class="small text2" style="text-align:center">{% if login %}New to Koine? <a href="/signup" style="text-decoration:underline">Create an account</a>.{% else %}Already have an account? <a href="/login" style="text-decoration:underline">Log in</a>.{% endif %}</p>
 </div>
 {% endblock %}

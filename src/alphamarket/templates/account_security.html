@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Security settings · Koine{% endblock %}
+{% block nav_active %}dashboard{% endblock %}
+{% block style %}
+  .sec { display:flex; flex-direction:column; gap:24px; max-width:880px; }
+  .sec .card > .row h3 { font-size:20px; }
+  .sec form.row-form { display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap; }
+  .sec form.row-form .field { flex:1 1 200px; }
+  .sec td.agent { font-family:var(--sans); max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sec .table-wrap { overflow-x:auto; padding:8px 28px 20px; }
+{% endblock %}
+{% block content %}
+<div class="stack" style="gap:8px"><span class="label">Security</span><h1 style="font-size:40px">Account security.</h1>
+  <p class="text2" style="max-width:640px">Connecting a venue needs a confirmed email, two-factor authentication, and a code confirmed in the last 10 minutes.</p></div>
+{% if notice %}<div class="notice" role="status">{{ notice }}</div>{% endif %}
+{% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+
+<div class="sec">
+  <div class="card">
+    <div class="row">
+      <div class="stack" style="gap:6px"><h3>Email</h3><span class="mono small text2">{{ user.email }}</span></div>
+      {% if email_verified %}<span class="badge good">{{ m.icon("check", 12, "currentColor", 2) }}confirmed</span>{% else %}<span class="badge warn">not confirmed</span>{% endif %}
+    </div>
+    {% if not email_verified %}
+    <div class="body" style="gap:14px">
+      <span class="small text2">We sent a confirmation link when you signed up. It lasts 48 hours.</span>
+      <form method="post" action="/dashboard/security/verify-email/resend"><button class="btn secondary sm" type="submit">Send a new link</button></form>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div class="stack" style="gap:6px"><h3>Two-factor authentication</h3><span class="small text2">A code from an authenticator app at sign-in and before any key change.</span></div>
+      {% if totp_on %}<span class="badge good">{{ m.icon("lock", 12, "currentColor", 2) }}on</span>{% else %}<span class="badge warn">off</span>{% endif %}
+    </div>
+    <div class="body" style="gap:18px">
+      {% if not totp_on %}
+      <form method="post" action="/dashboard/security/totp/enroll"><button class="btn" type="submit">Turn on two-factor</button></form>
+      {% else %}
+      <div class="kv">
+        <div><span>Recovery codes left</span><span>{{ recovery_left }} of 10</span></div>
+        <div><span>Code confirmed on this device</span><span>{{ "within 10 minutes" if stepped_up else "no" }}</span></div>
+      </div>
+      {% if not stepped_up %}
+      <form method="post" action="/dashboard/security/step-up" class="row-form">
+        <input type="hidden" name="next" value="{{ next or '/dashboard/security' }}">
+        <label class="field"><span class="label">Confirm a code</span><input class="mono" name="code" required minlength="6" maxlength="40" autocomplete="one-time-code" placeholder="123456"></label>
+        <button class="btn sm" type="submit">Confirm</button>
+      </form>
+      {% endif %}
+      <form method="post" action="/dashboard/security/recovery-codes" class="row-form">
+        {% if not stepped_up %}<label class="field"><span class="label">Code (for new recovery codes)</span><input class="mono" name="code" required minlength="6" maxlength="40" autocomplete="one-time-code" placeholder="123456"></label>{% endif %}
+        <button class="btn secondary sm" type="submit">Make new recovery codes</button>
+      </form>
+      <form method="post" action="/dashboard/security/totp/disable" class="row-form">
+        {% if not stepped_up %}<label class="field"><span class="label">Code (to turn off)</span><input class="mono" name="code" required minlength="6" maxlength="40" autocomplete="one-time-code" placeholder="123456"></label>{% endif %}
+        <button class="btn danger sm" type="submit">Turn off two-factor</button>
+      </form>
+      <span class="small muted">Turning it off stops you connecting or changing venue keys until you turn it back on.</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div class="stack" style="gap:6px"><h3>Where you're signed in</h3><span class="small text2">Sessions end after 24 hours idle or 30 days, whichever comes first.</span></div>
+      <form method="post" action="/dashboard/security/sessions/revoke-all"><button class="btn danger sm" type="submit">Sign out everywhere</button></form>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Device</th><th>IP address</th><th>Signed in</th><th>Last active</th><th></th></tr></thead>
+        <tbody>
+        {% for s in sessions %}
+          <tr>
+            <td class="agent" title="{{ s.agent }}">{{ s.agent }}</td>
+            <td>{{ s.ip }}</td>
+            <td>{{ s.created.strftime("%Y-%m-%d %H:%M") }}</td>
+            <td>{{ s.seen.strftime("%Y-%m-%d %H:%M") }}</td>
+            <td class="num">{% if s.current %}<span class="badge">this device</span>{% else %}<form method="post" action="/dashboard/security/sessions/{{ s.id }}/revoke" class="inline"><button class="btn secondary sm" type="submit">Sign out</button></form>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row"><div class="stack" style="gap:6px"><h3>Password</h3><span class="small text2">Changing it signs out every other session.</span></div></div>
+    <form method="post" action="/dashboard/security/password" class="body" style="gap:16px">
+      <label class="field"><span class="label">Current password</span><input name="current_password" type="password" required autocomplete="current-password"></label>
+      <label class="field"><span class="label">New password (10+ characters)</span><input name="new_password" type="password" required minlength="10" maxlength="128" autocomplete="new-password"></label>
+      <div><button class="btn secondary" type="submit">Change password</button></div>
+    </form>
+  </div>
+</div>
+{% endblock %}

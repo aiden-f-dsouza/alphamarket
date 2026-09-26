@@ -25,6 +25,7 @@ from alphamarket.models import (
     VenueAccountStatus,
     VenueCredential,
 )
+from authutil import secure_account
 
 BASE = "https://demo-api.kalshi.co/trade-api/v2"
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -70,6 +71,7 @@ def user(client):
         json={"email": "c@example.com", "password": "hunter2hunter2", "display_name": "Cred"},
     )
     assert resp.status_code == 201
+    secure_account(client, "c@example.com")  # connecting a key needs email + TOTP (P3)
     return resp.json()
 
 

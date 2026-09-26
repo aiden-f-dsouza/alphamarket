@@ -202,6 +202,7 @@
           <hr>
           <a href="/dashboard">Dashboard</a>
           <a href="/dashboard/connect">Connect a key</a>
+          <a href="/dashboard/security">Security</a>
           <a href="/invite">Invite</a>
           <hr>
           <form method="post" action="/logout-form"><button type="submit">Log out</button></form>
@@ -223,6 +224,7 @@
         {% if user %}
           {% if settings.demo_mode %}<a href="/portfolio">Portfolio</a>{% endif %}
           <a href="/dashboard">Dashboard</a>
+          <a href="/dashboard/security">Security</a>
           <form method="post" action="/logout-form"><button type="submit">Log out</button></form>
         {% else %}
           <a href="/login">Log in</a>

@@ -14,6 +14,7 @@ from sqlalchemy import select
 from alphamarket.analytics import compute_strategy_stats
 from alphamarket.models import Settlement, Strategy
 from alphamarket.public import recent_public_settlements
+from authutil import secure_account
 
 BASE = "https://demo-api.kalshi.co/trade-api/v2"
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -60,6 +61,7 @@ def logged_in(client):
         follow_redirects=False,
     )
     assert resp.status_code == 303 and resp.headers["location"] == "/dashboard"
+    secure_account(client, "t@example.com")  # P3: email + TOTP + step-up before connect
     return client
 
 

@@ -16,6 +16,7 @@ from alphamarket import ingest, redaction
 from alphamarket.main import create_app
 from alphamarket.models import Strategy, User, VenueAccount
 from alphamarket.redaction import REDACTED, redact
+from authutil import secure_account
 
 KALSHI_PEM = (
     rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -229,6 +230,7 @@ def test_validation_errors_never_echo_the_body(client):
         "/auth/signup",
         json={"email": "v@example.com", "password": "hunter2hunter2", "display_name": "Vee"},
     )
+    secure_account(client, "v@example.com")  # past the P3 connect gate, so the 422 is reached
     # Missing strategy_name: FastAPI's default 422 would echo the whole body
     # (PEM included) as `input`.
     resp = client.post(

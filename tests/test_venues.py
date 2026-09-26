@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from alphamarket.models import Fill, Strategy, VenueAccount, VenueCredential
 from alphamarket.money import to_micros
+from authutil import secure_account
 
 BASE = "https://demo-api.kalshi.co/trade-api/v2"
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -37,6 +38,7 @@ def user(client):
         json={"email": "t@example.com", "password": "hunter2hunter2", "display_name": "Trader"},
     )
     assert resp.status_code == 201
+    secure_account(client, "t@example.com")  # P3: email + TOTP + step-up before connect
     return resp.json()
 
 
@@ -167,6 +169,7 @@ def test_accounts_are_scoped_to_their_owner(client, user, session_factory):
         "/auth/signup",
         json={"email": "other@example.com", "password": "hunter2hunter2", "display_name": "Other"},
     )
+    secure_account(client, "other@example.com")  # P3: DELETE needs a step-up first
     assert client.get("/venues").json() == []
     assert client.delete(f"/venues/{account_id}").status_code == 404
     assert client.post(f"/venues/{account_id}/sync").status_code == 404
