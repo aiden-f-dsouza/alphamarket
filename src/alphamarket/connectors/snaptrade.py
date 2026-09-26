@@ -404,7 +404,11 @@ class SnapTradeConnector(AssetVenueConnector):
         gross = units * price
         action = Action.BUY if r["type"] == "BUY" else Action.SELL
         qty_atoms = _atoms(units, QTY_DECIMALS)
-        cash_delta = -(gross + fee) if action is Action.BUY else (gross - fee)
+        # FILL_QUOTE is the gross trade value only (base.py: "FILL_QUOTE
+        # -(qty x price) quote, FEE -fee in the fee asset" -- two separate
+        # legs). Folding the fee into cash_delta here as well as adding the
+        # FEE leg below would charge every fee twice.
+        cash_delta = -gross if action is Action.BUY else gross
         legs = [
             NormalizedLeg(
                 asset=symbol,

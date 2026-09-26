@@ -105,12 +105,18 @@ PROFILES: dict[str, VenueProfile] = {
         rate_budgets=(
             RateBudget(
                 # Customer-level (commercial partner) limit: 250 req/min shared
-                # across every connected user. Per-account 10 req/min limits are
-                # documented as personal-tier only, per
+                # across every connected user, not per credential -- RateScope.IP
+                # is the one shared bucket "across every account we poll"
+                # (base.py), which is what this limit actually is even though the
+                # reason is a commercial plan cap rather than network IP.
+                # RateScope.CREDENTIAL would give every connected user their own
+                # 250/min bucket and blow through SnapTrade's real limit by up to
+                # Nx once N users are connected. Per-account 10 req/min limits
+                # are documented as personal-tier only, per
                 # https://docs.snaptrade.com/docs/ratelimiting , checked
                 # 2026-09-26. [VERIFY] against the live commercial dashboard once
                 # an account exists.
-                scope=RateScope.CREDENTIAL,
+                scope=RateScope.IP,
                 capacity=250,
                 refill_per_minute=250,
             ),

@@ -14,6 +14,7 @@ Run:  uv run python scripts/snaptrade_smoke.py [user_id] [user_secret]
 Prints prove_read_only() evidence, balances, and the first page of fills and
 events -- never the userSecret or consumer key (invariant 4)."""
 
+import os
 import sys
 
 from alphamarket.config import get_settings
@@ -27,10 +28,12 @@ def main() -> int:
         print("SNAPTRADE_CLIENT_ID / SNAPTRADE_CONSUMER_KEY are empty. Fill in .env first.")
         return 1
 
-    user_id = sys.argv[1] if len(sys.argv) > 1 else getattr(settings, "snaptrade_user_id", "")
-    user_secret = (
-        sys.argv[2] if len(sys.argv) > 2 else getattr(settings, "snaptrade_user_secret", "")
-    )
+    # SNAPTRADE_USER_ID/SNAPTRADE_USER_SECRET are per-connected-account
+    # credentials (vault-held, not global config), so they are not Settings
+    # fields; read them from the environment directly, per the module
+    # docstring, with argv as an override.
+    user_id = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("SNAPTRADE_USER_ID", "")
+    user_secret = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("SNAPTRADE_USER_SECRET", "")
     if not user_id or not user_secret:
         print("Need a registered SnapTrade user_id and user_secret (see module docstring).")
         return 1

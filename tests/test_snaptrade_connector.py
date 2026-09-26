@@ -244,19 +244,24 @@ def test_buy_fill_legs_hand_computed():
     base, quote, fee = buy.legs
     assert base.kind is LegKind.FILL_BASE and base.asset == "AAPL"
     assert base.delta_atoms == 10_000_000
-    # 10 x $150.25 = $1502.50 gross, + $1.00 fee = $1503.50 paid out.
+    # 10 x $150.25 = $1502.50 gross (FILL_QUOTE) and -$1.00 fee (FEE), two
+    # separate legs per base.py's NormalizedAssetFill docstring; together
+    # they net to the $1503.50 actually paid out.
     assert quote.kind is LegKind.FILL_QUOTE and quote.asset == "USD"
-    assert quote.delta_atoms == -1_503_500_000
+    assert quote.delta_atoms == -1_502_500_000
     assert fee.kind is LegKind.FEE and fee.delta_atoms == -1_000_000
+    assert quote.delta_atoms + fee.delta_atoms == -1_503_500_000
     assert page.next_cursor is None and page.resume_cursor is None
 
     assert sell.instrument.symbol == "MSFT" and sell.action is Action.SELL
     assert sell.qty_atoms == 4_500_000  # 4.5 shares
     base, quote, fee = sell.legs
     assert base.delta_atoms == -4_500_000  # selling reduces the holding
-    # 4.5 x $300.10 = $1350.45 gross, - $0.50 fee = $1349.95 received.
-    assert quote.delta_atoms == 1_349_950_000
+    # 4.5 x $300.10 = $1350.45 gross (FILL_QUOTE) and -$0.50 fee (FEE);
+    # together they net to the $1349.95 actually received.
+    assert quote.delta_atoms == 1_350_450_000
     assert fee.delta_atoms == -500_000
+    assert quote.delta_atoms + fee.delta_atoms == 1_349_950_000
 
 
 @respx.mock
