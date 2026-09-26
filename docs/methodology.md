@@ -245,3 +245,148 @@ Each valuation is stored, and the series of valuations is the follower's
 curve. Live mirroring into a real account is not offered: it requires a
 licensed party in the loop, and the platform refuses it structurally rather
 than behind a setting.
+
+## Asset valuation
+
+Crypto and equity accounts hold more than one asset, so their equity is a sum
+of positions, each valued in US dollars at a daily close. Pinned by
+`tests/test_valuation.py`; the code is `alphamarket/valuation.py`.
+
+**Holdings.** An account's holding of an asset at time `t` is the venue's own
+balance at connect time (the anchor) plus every ledger leg in that asset up
+to and including `t`. Quantities are exact integers at the precision the
+venue reported. When a venue reports one asset at different precisions (Kraken
+reports USD at 4 decimals in one place and 6 in another), every amount is
+first rescaled to the finest precision seen before anything is added. Example:
+12.3456 USD at 4 decimals plus 0.000001 USD at 6 decimals is 12.345601 USD.
+
+**Equity at the end of each UTC day `d`:**
+
+```
+E_d = Σ cash assets (USD, USDC, USDT)   qty × 1.00
+    + Σ coins and shares                qty × close_d
+    + Σ open perpetual positions        qty × (close_d − entry)
+```
+
+- Stablecoins are valued at exactly 1.00. Every other asset uses its UTC daily
+  close in US dollars. A perp uses its own contract's close when Koine has
+  one, and otherwise the underlying coin's close.
+- Closes are as-traded prices, not split-adjusted ones. A 2-for-1 split adds
+  shares on the split day, the day the close halves, so equity does not move:
+  10 shares × $200 = $2,000 before the split, 20 × $100 = $2,000 after it.
+- Fees, funding, dividends, interest and tax withholding are ledger legs in
+  whatever asset the venue booked them in, so they are already in the
+  holdings. A fee paid in BNB is valued at BNB's close: an account holding
+  1,000 USDT and 1 BNB (close $600) buys 0.01 BTC for 600 USDT with a fee of
+  0.0075 BNB, and at closes BTC $60,000 and BNB $600 its equity is
+  400 + 0.01 × 60,000 + 0.9925 × 600 = **$1,595.50** (it was $1,600; the fee
+  cost 0.0075 × 600 = $4.50).
+- A cross pair is valued through both closes: buying 10 ETH for 0.5 BTC
+  leaves 0.5 BTC and 10 ETH, which is 0.5 × 60,000 + 10 × 3,100 = $61,000
+  and, the next day, 0.5 × 62,000 + 10 × 3,050 = $61,500.
+- A dividend is a return, not a deposit: 20 shares paying $0.25, with $0.75
+  withheld, add $4.25 to equity ($2,000 → $2,004.25, a 0.2125% day).
+
+**Missing prices.** If an asset has no close for day `d`, the last known close
+before `d` is used and the day is flagged "carried forward". An asset with no
+close on or before `d` is left out of that day's equity and flagged
+"unpriced". Nothing is ever valued at a price Koine does not have. Example: 10
+SOL and $50 cash with SOL closes of $150 on day 1 and $160 on day 3 give
+$1,550, $1,550 (day 1's close carried forward, flagged) and $1,650.
+
+**Rounding.** Every figure is computed exactly. Rounding happens once per
+position per day: its dollar value is truncated toward zero to whole
+micro-dollars (1 satoshi at $50,000.123456 is 500.00123456 micro-dollars,
+counted as 500; a short of 1 satoshi counts −500, not −501). Equity is the
+exact sum of those positions, so a day's equity is off by less than one
+micro-dollar per position, and no position is ever shown larger than it is.
+
+**Perpetual positions: average entry.** A perp position is valued as
+`qty × (close − entry)`, where `entry` is the average-cost entry price:
+
+```
+opening from flat           entry = fill price
+adding in the same direction entry = (|q| × entry + |fill| × price) / (|q| + |fill|)
+reducing                    entry unchanged
+closing exactly             no position
+flipping through zero       entry = the flip fill's price
+```
+
+A position already open at connect time starts at the entry price the venue
+reports. If the venue reports none, the position is left out of equity and
+flagged until it closes or flips. Realized P&L is not recomputed. The
+venue's own realized P&L, funding and fees are cash legs, and the formula
+above values only what is still open. Worked example (BTC perp, $10,000 USDC
+margin):
+
+| Day | Fill | Position, entry | Cash legs | Close | Unrealized | Equity |
+|---|---|---|---|---|---|---|
+| 1 | buy 0.1 @ 60,000 | +0.1 @ 60,000 | fee −2.40 | 61,000 | 0.1 × 1,000 = 100 | 10,097.60 |
+| 2 | buy 0.1 @ 62,000 | +0.2 @ 61,000 | funding −1.50 | 61,500 | 0.2 × 500 = 100 | 10,096.10 |
+| 3 | sell 0.15 @ 63,000 | +0.05 @ 61,000 | realized +300 | 62,000 | 0.05 × 1,000 = 50 | 10,346.10 |
+| 4 | sell 0.15 @ 60,000 | −0.1 @ 60,000 | realized −50, funding +0.80 | 59,000 | −0.1 × −1,000 = 100 | 10,346.90 |
+
+Rounding applies the same way: after buying 1 @ $10 and 2 @ $11 and selling 1
+@ $12, the entry is 32/3. At $10.50 two units are worth 2 × (10.5 − 32/3) =
+−$1/3, counted as −333,333 micro-dollars.
+
+**Exposure.** For each day: gross exposure is the sum of `|qty × close|` over
+coins, shares and perps (cash is not exposure). Each underlying's share is
+its part of gross exposure, with spot BTC and the BTC perp counted together.
+Concentration is the largest share. Perp leverage is the sum of
+`|perp qty × close|` divided by equity. Example: $10,000 USDC, 0.1 BTC and
+1 ETH at $50,000 / $3,000, short 0.2 BTC perp entered at $51,000. Equity is
+10,000 + 5,000 + 3,000 + 200 = $18,200. Gross exposure is 5,000 + 3,000 +
+10,000 = $18,000. BTC is 5/6 of it and ETH 1/6. Perp leverage is
+10,000 / 18,200 = 0.55×.
+
+## External flows (time-weighted return)
+
+Deposits, withdrawals and transfers in or out of the account move capital.
+They do not earn anything, so they must not show up as gains or losses.
+Koine uses a time-weighted return that takes them out.
+
+Each day's external flow `F_d` is the dollar value of that day's deposit,
+withdrawal and transfer legs at that day's closes, with the same pricing,
+missing-price and rounding rules as equity (in `+`, out `−`). Flows are
+assumed to arrive at the **end** of the day, so they never count as that
+day's performance:
+
+```
+r_d = (E_d − F_d) / E_(d−1) − 1
+TWR = Π (1 + r_d) − 1        over the days of the window after its first
+```
+
+A day whose previous equity is zero or negative has no return: the first
+funded day starts the series, and an account that is emptied and refunded
+resumes chaining on the next day. When the series skips calendar days, a
+flow on a skipped day counts toward the next listed day.
+
+Worked example: an account holds 1 BTC, BTC closes at $50,000, $55,000 and
+$49,500, and the trader deposits 0.5 BTC on day 2.
+
+| Day | Equity | Flow | Daily return |
+|---|---|---|---|
+| 1 | 50,000 | | |
+| 2 | 1.5 × 55,000 = 82,500 | 0.5 × 55,000 = 27,500 | (82,500 − 27,500) / 50,000 − 1 = +10% |
+| 3 | 1.5 × 49,500 = 74,250 | | 74,250 / 82,500 − 1 = −10% |
+
+TWR = 1.10 × 0.90 − 1 = **−1%**, exactly the return of simply holding 1 BTC
+(49,500 / 50,000 − 1). A cash deposit works the same way: $1,000 plus a $500
+deposit and later a $200 withdrawal, with no trading, is a 0% return every
+day.
+
+For comparison Koine can also compute the **Modified Dietz** money-weighted
+return. It answers a different question ("how did the dollars actually
+invested do?") and is shown only beside the TWR, never in its place:
+
+```
+MD = (E_end − E_start − Σ F_d) / (E_start + Σ w_d × F_d),   w_d = (end − d) / (end − start)
+```
+
+In the example: (74,250 − 50,000 − 27,500) / (50,000 + ½ × 27,500) =
+−3,250 / 63,750 = **−5.1%**. Adding capital just before a loss makes the
+money-weighted figure worse, while the time-weighted figure, which measures
+the trader's decisions, stays at −1%.
+
+Returns are computed exactly (as fractions) and are only rounded for display.
