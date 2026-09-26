@@ -22,3 +22,6 @@ keys/
 # Generated design artifacts (compiled from build.py)
 design/*-screens.html
 design/koine/*-design-pack.html
+
+# graphify knowledge graph (local, rebuilt by git hooks)
+graphify-out/

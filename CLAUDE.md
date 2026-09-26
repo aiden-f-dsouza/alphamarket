@@ -17,6 +17,7 @@ deliberately out of scope).
 - Kalshi smoke test: `uv run python scripts/kalshi_smoke.py` (needs .env + demo key)
 - Ingestion worker: `uv run python -m alphamarket.worker` (polls connected accounts)
 - Prod preflight: `uv run python scripts/preflight.py` (must pass before real users)
+- Code graph: `graphify update .` (see "Code graph" below)
 
 ## Layout
 
@@ -113,3 +114,21 @@ deliberately out of scope).
 - Line length 100, ruff is the only formatter.
 - Plans and milestone tracking live in BUILD_PLAN.md; keep it updated when
   scope changes.
+
+## Code graph (graphify)
+
+`graphify-out/graph.json` is a tree-sitter call/import graph of the repo
+(local, no LLM; gitignored). Git post-commit/post-checkout hooks rebuild it;
+run `graphify update .` after `git pull` or before querying uncommitted work.
+`.graphifyignore` excludes `design/` and PDFs. Use it for navigation and
+blast radius, then read the files it points to:
+
+- `graphify affected "<symbol>"`: every caller/importer with file:line. Run
+  before changing a shared function, model or connector method.
+- `graphify explain "<symbol>"`: a node's in/out edges (calls, imports, tests).
+- `graphify path "<A>" "<B>"`: how two symbols connect (`--undirected` if none).
+- `graphify god-nodes`: the hubs (Strategy, to_micros, VenueAccount, ...).
+
+Free-text `graphify query "<question>"` is keyword-matched and noisy here;
+prefer the exact-symbol commands above, or grep. Decisions and rationale live
+in BUILD_PLAN.md and this file, not the graph.

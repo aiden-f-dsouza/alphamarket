@@ -451,3 +451,10 @@ Coinbase (gated on written approval), Hyperliquid, Binance.US for crypto and
 Alpaca OAuth, IBKR Flex, SnapTrade for equities; payments are Stripe Billing +
 Connect with no fee ever tied to trades or P&L; TOTP, sessions, audit log and
 CI scanning land before any new venue. Invariant 8 (paper only) is untouched.
+
+Execution order (2026-09-26): `docs/implementation_plan.md` sequences M8-M11
+as phases P0-P8 (hygiene/CI, Ledger v2, jobs + outbound rate limits, security
++ inbound rate limits, crypto, equities, paper copy v2 for all assets,
+streaming), compares hosting options, and lists outside setup. Scope confirmed:
+paper copying only; crypto = Kraken, Hyperliquid, Coinbase, Binance.US;
+equities long-only via Alpaca, IBKR Flex, SnapTrade. M12/M13 deferred.
