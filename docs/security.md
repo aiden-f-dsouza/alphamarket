@@ -66,3 +66,14 @@ compare it with the balance Kalshi reports. If they disagree by more than
 ## Reporting a problem
 
 Email the address on the landing page. Security reports are answered first.
+
+## Hyperliquid: no key, signed ownership
+
+Connecting a Hyperliquid account stores only its public 0x address; there is
+no key of any kind to leak, and Hyperliquid's API cannot trade on behalf of a
+reader. To stop someone claiming another trader's record, the page stays
+hidden until the owner signs a Koine message with the wallet (EIP-191
+`personal_sign`). The message names the address and a one-time Koine code
+and says it is not a transaction; Koine only verifies the signature and never
+asks for a seed phrase, private key or API wallet. API (agent) wallets are
+refused because they are not the account.

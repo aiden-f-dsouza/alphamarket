@@ -245,3 +245,53 @@ Each valuation is stored, and the series of valuations is the follower's
 curve. Live mirroring into a real account is not offered: it requires a
 licensed party in the loop, and the platform refuses it structurally rather
 than behind a setting.
+
+## Hyperliquid accounts
+
+Hyperliquid is an on-chain exchange: every account is a public address, and
+we read it through Hyperliquid's public API without any key. Terms, consent
+and limits: `docs/venues/hyperliquid.md`.
+
+**Ownership.** Anyone can paste an address, so the page stays hidden until
+the trader signs a Koine message with the wallet (EIP-191 `personal_sign`)
+and the signature recovers that address, the master of a sub-account, or
+the leader of a vault. Signing is not a transaction.
+
+**What becomes a ledger row.** Quantities are stored exactly, in the
+venue's own decimals (perp sizes at the coin's `szDecimals`, spot tokens at
+their `weiDecimals`, USDC at 8 places).
+
+```
+perp fill      position  "<COIN>-PERP"  +size (buy) / -size (sell)
+               cash      +closedPnl                 (realized P&L, USDC)
+               fee       -fee in feeToken           (includes any builder fee;
+                                                     a maker rebate is positive)
+spot fill      base      +size / -size
+               quote     -size x price / +size x price   (exact product)
+               fee       -fee in feeToken
+funding        cash      +usdc (negative when paid), one row per hour and coin
+transfers      deposits, withdrawals (+ the $1 fee), sends to or from other
+               addresses, vault and staking moves: external flows, so the
+               time-weighted return is chained across them, never a gain
+own moves      spot <-> perp between your own balances: no change at all
+liquidation    recorded as an event; the cash moves in the liquidation fills
+```
+
+Worked example (recorded fill, 2026-09-25): closing 73,874 XPL long at
+0.11013 with `closedPnl` -286.852742 and fee 1.220361 books the position
+-73,874 XPL-PERP and cash -286.852742 - 1.220361 = -288.073103 USDC.
+
+**Balance check.** The venue's own view is rebuilt as a vector: spot token
+totals, plus (for accounts in standard mode) each perp venue's account value
+minus the unrealized P&L of its open positions, plus the open positions
+themselves with their entry prices. Accounts in Hyperliquid's unified or
+portfolio-margin mode keep all cash in the spot balances, so the perp account
+value is not used for them. The USDC account value we compare equity with is
+USDC cash plus the unrealized P&L of USDC-margined positions.
+
+**Limits.** Hyperliquid serves only the 10,000 most recent fills of an
+address. Older history is represented by the balance we record when the
+account connects (the anchor), and the page says from which date fills are
+individually verified. Staking rewards and borrow/lend interest are treated
+as flows, not returns (a small understatement), until they are verified
+against a real account.

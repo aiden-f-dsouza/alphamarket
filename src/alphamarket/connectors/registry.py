@@ -8,11 +8,14 @@ Nothing outside connectors/ may import kalshi.py or polymarket.py directly.
 from collections.abc import Callable
 
 from alphamarket.config import KALSHI_BASE_URLS, POLYMARKET_BASE_URLS
+from alphamarket.connectors import hyperliquid
 from alphamarket.connectors.base import (
     CredentialKind,
     InstrumentKind,
     MarketDataSource,
     OwnershipProof,
+    PaperFeeModel,
+    ReadOnlyProof,
     VenueConnector,
     VenueProfile,
 )
@@ -59,6 +62,47 @@ PROFILES: dict[str, VenueProfile] = {
         fee_rounding_micros=1,  # usdcSize carries six decimals
         ownership=OwnershipProof.PROFILE_CODE,
     ),
+    # ---- venue-hyperliquid ----
+    "hyperliquid": VenueProfile(
+        venue="hyperliquid",
+        display_name="Hyperliquid",
+        envs=("prod",),
+        credential=CredentialKind.ADDRESS,
+        key_label="Wallet address",
+        secret_label=None,
+        key_help=(
+            "The 0x address of your Hyperliquid account (the master account, not an "
+            "API wallet). Nothing secret is involved: Hyperliquid history is public. "
+            "You prove the address is yours by signing a Koine message with the "
+            "wallet; signing is not a transaction and cannot move funds."
+        ),
+        balance_observable=True,
+        instrument=InstrumentKind.ASSET,
+        # Binary-era fields, meaningless for an asset venue beyond these notes:
+        # prices have 5 significant figures and at most 6 dp on perps, so the
+        # finest possible tick is 1 micro; quantity steps are per instrument
+        # (qty_step_atoms at szDecimals), so the global step is 1 micro.
+        tick_micros=1,
+        contract_step_micros=1,
+        # Taker rate, base tier: perps 0.045% (spot 0.070%), docs "Fees",
+        # checked 2026-09-26. The field is whole bps, so 4.5 rounds UP to 5
+        # (paper followers are charged slightly more, never less).
+        fee_rate_bps=5,
+        fee_rounding_micros=1,  # fees print 6 dp in USDC
+        # No OwnershipProof value fits a signed message yet (contract request):
+        # PROFILE_CODE routes the account through the claim flow, where
+        # verify_claim checks an EIP-191 signature instead of a bio.
+        ownership=OwnershipProof.PROFILE_CODE,
+        readonly_proof=ReadOnlyProof.NONE,
+        transfers_observable=True,
+        history_depth="10k_fills",
+        quote_asset="USDC",
+        tos_doc="docs/venues/hyperliquid.md",
+        requires_partner_approval=False,
+        daily_resolution=False,
+        rate_budgets=(hyperliquid.RATE_BUDGET,),
+        paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
+    ),
 }
 
 SUPPORTED_VENUES = tuple(PROFILES)
@@ -88,9 +132,16 @@ def _build_polymarket(venue_env: str, key_id: str, secret: str | None) -> VenueC
     )
 
 
+def _build_hyperliquid(venue_env: str, key_id: str, secret: str | None) -> VenueConnector:
+    return hyperliquid.HyperliquidConnector(
+        address=key_id, info_url=hyperliquid.INFO_URLS[venue_env]
+    )
+
+
 _BUILDERS: dict[str, Callable[[str, str, str | None], VenueConnector]] = {
     "kalshi": _build_kalshi,
     "polymarket": _build_polymarket,
+    "hyperliquid": _build_hyperliquid,
 }
 
 
@@ -120,6 +171,9 @@ _MARKET_DATA_BUILDERS: dict[str, Callable[[str], MarketDataSource]] = {
     "kalshi": lambda venue_env: KalshiMarketData(base_url=KALSHI_BASE_URLS[venue_env]),
     "polymarket": lambda venue_env: PolymarketMarketData(
         clob_url=POLYMARKET_BASE_URLS[venue_env]["clob"]
+    ),
+    "hyperliquid": lambda venue_env: hyperliquid.HyperliquidMarketData(
+        info_url=hyperliquid.INFO_URLS[venue_env]
     ),
 }
 

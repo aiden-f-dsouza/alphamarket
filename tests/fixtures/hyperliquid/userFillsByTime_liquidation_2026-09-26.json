@@ -1,0 +1,46 @@
+[
+ {
+  "coin": "ETH",
+  "px": "2283.1",
+  "sz": "0.0135",
+  "side": "B",
+  "time": 1787172669235,
+  "startPosition": "-0.0517",
+  "dir": "Close Short",
+  "closedPnl": "-2.79585",
+  "hash": "0xfa8988a3fbad1729fc03044288b402011800a08996a035fc9e5233f6baa0f114",
+  "oid": 520155998004,
+  "crossed": true,
+  "fee": "0.013315",
+  "tid": 375321782115141,
+  "liquidation": {
+   "liquidatedUser": "0xf649b3c03a43dc9bf4562cd0a3bfe6b1aa03422f",
+   "markPx": "2214.3",
+   "method": "market"
+  },
+  "feeToken": "USDC",
+  "twapId": null
+ },
+ {
+  "coin": "ETH",
+  "px": "2243.92",
+  "sz": "0.0382",
+  "side": "B",
+  "time": 1787172675479,
+  "startPosition": "-0.0382",
+  "dir": "Liquidated Cross Short",
+  "closedPnl": "-6.414544",
+  "hash": "0xac77640a3dad44f0adf1044288b45d0131007befd8a063c250400f5cfca11edb",
+  "oid": 520156285510,
+  "crossed": false,
+  "fee": "0.0",
+  "tid": 565664572210766,
+  "liquidation": {
+   "liquidatedUser": "0xf649b3c03a43dc9bf4562cd0a3bfe6b1aa03422f",
+   "markPx": "2236.9",
+   "method": "backstop"
+  },
+  "feeToken": "USDC",
+  "twapId": null
+ }
+]
