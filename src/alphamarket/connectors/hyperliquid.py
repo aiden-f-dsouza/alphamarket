@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
@@ -59,6 +60,7 @@ from alphamarket.connectors.base import (
     AssetAmount,
     AssetMarketData,
     AssetVenueConnector,
+    BudgetExhausted,
     DailyClose,
     FundingRate,
     InstrumentType,
@@ -116,11 +118,15 @@ RATE_BUDGET = RateBudget(
 )
 # Extra weight per N items returned. The docs say "an additional rate limit
 # weight per 20 items"; whether a partial block of items counts is not
-# stated, so we charge whole blocks (floor) [VERIFY].
+# stated, so we charge whole blocks (floor) [VERIFY]. The docs' list names
+# "nonUserFundingUpdates", which is no info type; the only list-returning
+# type it can mean is userNonFundingLedgerUpdates, so that is charged too
+# (over-charging costs a little throughput, under-charging earns real 429s).
 PER_ITEM_WEIGHT = {
     "userFills": 20,
     "userFillsByTime": 20,
     "userFunding": 20,
+    "userNonFundingLedgerUpdates": 20,
     "fundingHistory": 20,
     "historicalOrders": 20,
     "recentTrades": 20,
@@ -137,14 +143,13 @@ def extra_weight(endpoint: str, items: int) -> int:
 # ---- small helpers ------------------------------------------------------------
 
 
+_ADDRESS_RE = re.compile(r"0x[0-9a-fA-F]{40}")
+
+
 def is_address(value: str) -> bool:
-    if len(value) != 42 or not value.startswith("0x"):
-        return False
-    try:
-        int(value[2:], 16)
-    except ValueError:
-        return False
-    return True
+    """Exactly "0x" + 40 hex digits. (int(..., 16) would also accept "_",
+    "+", "-" and whitespace, so this is a regex, not a parse.)"""
+    return _ADDRESS_RE.fullmatch(value) is not None
 
 
 def _s(value: Any) -> str:
@@ -536,13 +541,19 @@ class HyperliquidConnector(_Info, AssetVenueConnector):
     def verify_claim(self, code: str) -> bool | None:
         """`code` is encode_claim_proof(claim_code, signature). A bare code
         (no signature yet) is False; None only when the venue could not be
-        asked about a vault/sub-account controller."""
+        asked about a vault/sub-account controller (HTTP error, venue rate
+        limit or Koine's own budget).
+
+        The claim code inside `code` is the nonce and is NOT checked here:
+        the caller must build `code` from the account's STORED claim code,
+        never from a code the user submits, or an old signature over another
+        code could be replayed."""
         claim, sep, signature = code.rpartition(CLAIM_SEPARATOR)
         if not sep or not claim or not signature:
             return False
         try:
             return self.verify_signed_claim(claim, signature)
-        except httpx.HTTPError:
+        except (httpx.HTTPError, RateLimited, BudgetExhausted):
             return None
 
     # ---- fills -----------------------------------------------------------------

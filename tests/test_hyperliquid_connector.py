@@ -134,10 +134,36 @@ def test_rate_budget_matches_the_documented_weights():
     assert extra_weight("userFillsByTime", 60) == 3
     assert extra_weight("userFunding", 19) == 0
     assert extra_weight("userFillsByTime", 2000) == 100
-    # candleSnapshot +1 per 60: 120 -> 2, 7 -> 0; ledger updates have none.
+    # candleSnapshot +1 per 60: 120 -> 2, 7 -> 0.
     assert extra_weight("candleSnapshot", 120) == 2
     assert extra_weight("candleSnapshot", 7) == 0
-    assert extra_weight("userNonFundingLedgerUpdates", 500) == 0
+    # Ledger updates are the docs' "nonUserFundingUpdates": 500 // 20 = 25.
+    assert extra_weight("userNonFundingLedgerUpdates", 500) == 25
+    # Endpoints outside the list carry none.
+    assert extra_weight("clearinghouseState", 500) == 0
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "0x" + "_" * 40,  # int(..., 16) accepts underscores between digits
+        "0x" + "a_" * 20,
+        "0x" + " " + "a" * 39,  # and surrounding whitespace
+        "0x+" + "a" * 39,  # and a sign
+        "0x-" + "a" * 39,
+        "0X" + "a" * 40,
+        "0x" + "a" * 41,
+        "0x" + "g" * 40,
+    ],
+)
+def test_malformed_addresses_are_refused(value):
+    assert not hl.is_address(value)
+    with pytest.raises(ValueError):
+        HyperliquidConnector(value)
+
+
+def test_well_formed_address_is_accepted():
+    assert hl.is_address("0x" + "aB09" * 10)
 
 
 class Recorder:
@@ -781,6 +807,10 @@ def test_verify_claim_for_another_address_checks_master_and_vault_leader():
         assert fake.of("vaultDetails")[0]["vaultAddress"] == ADDRESS
     with respx.mock:
         mock(FakeInfo(userRole=httpx.Response(502)))
+        assert HyperliquidConnector(ADDRESS).verify_claim(proof) is None
+    # A rate limit means "could not ask" (retry), not "not yours".
+    with respx.mock:
+        mock(FakeInfo(userRole=httpx.Response(429, headers={"Retry-After": "3"})))
         assert HyperliquidConnector(ADDRESS).verify_claim(proof) is None
 
 

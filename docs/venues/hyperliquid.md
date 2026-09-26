@@ -63,7 +63,8 @@ What that means here:
    that the creator was allowed to do it.
 3. **Followers are never pointed at Hyperliquid.** Copying is paper only
    (invariant 8), there is no "trade this on Hyperliquid" button or referral
-   link, and a Hyperliquid strategy page carries the line: "Hyperliquid's app
+   link, and a Hyperliquid strategy page must carry (integration item, not
+   yet in the templates) the line: "Hyperliquid's app
    is not available to US persons; Koine shows this record for information
    and paper copying only." Koine never suggests a VPN or any other way
    around §1.6/§3.1.5.
