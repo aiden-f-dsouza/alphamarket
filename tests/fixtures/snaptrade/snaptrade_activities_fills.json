@@ -1,0 +1,49 @@
+{
+  "data": [
+    {
+      "id": "b1111111-0000-0000-0000-000000000001",
+      "symbol": {
+        "id": "pos-aapl",
+        "symbol": { "symbol": "AAPL", "description": "Apple Inc.", "currency": { "code": "USD" } }
+      },
+      "option_symbol": null,
+      "currency_universal_symbol": null,
+      "price": 150.25,
+      "units": 10,
+      "amount": -1503.5,
+      "currency": { "id": "cur-usd", "code": "USD", "name": "US Dollar" },
+      "type": "BUY",
+      "option_type": null,
+      "description": "Buy 10 AAPL",
+      "trade_date": "2026-09-10T00:00:00.000Z",
+      "settlement_date": "2026-09-12T00:00:00.000Z",
+      "fee": 1.0,
+      "fx_rate": null,
+      "institution": "Robinhood",
+      "external_reference_id": "ext-1"
+    },
+    {
+      "id": "b2222222-0000-0000-0000-000000000002",
+      "symbol": {
+        "id": "pos-msft",
+        "symbol": { "symbol": "MSFT", "description": "Microsoft Corporation", "currency": { "code": "USD" } }
+      },
+      "option_symbol": null,
+      "currency_universal_symbol": null,
+      "price": 300.1,
+      "units": 4.5,
+      "amount": 1349.95,
+      "currency": { "id": "cur-usd", "code": "USD", "name": "US Dollar" },
+      "type": "SELL",
+      "option_type": null,
+      "description": "Sell 4.5 MSFT",
+      "trade_date": "2026-09-11T00:00:00.000Z",
+      "settlement_date": "2026-09-13T00:00:00.000Z",
+      "fee": 0.5,
+      "fx_rate": null,
+      "institution": "Robinhood",
+      "external_reference_id": "ext-2"
+    }
+  ],
+  "pagination": { "offset": 0, "limit": 1000, "total": 2 }
+}

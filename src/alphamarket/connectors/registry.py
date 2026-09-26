@@ -7,17 +7,22 @@ Nothing outside connectors/ may import kalshi.py or polymarket.py directly.
 
 from collections.abc import Callable
 
-from alphamarket.config import KALSHI_BASE_URLS, POLYMARKET_BASE_URLS
+from alphamarket.config import KALSHI_BASE_URLS, POLYMARKET_BASE_URLS, get_settings
 from alphamarket.connectors.base import (
     CredentialKind,
     InstrumentKind,
     MarketDataSource,
     OwnershipProof,
+    PaperFeeModel,
+    RateBudget,
+    RateScope,
+    ReadOnlyProof,
     VenueConnector,
     VenueProfile,
 )
 from alphamarket.connectors.kalshi import KalshiConnector, KalshiMarketData, load_private_key_pem
 from alphamarket.connectors.polymarket import PolymarketConnector, PolymarketMarketData
+from alphamarket.connectors.snaptrade import SnapTradeConnector, SnapTradeMarketData
 
 PROFILES: dict[str, VenueProfile] = {
     "kalshi": VenueProfile(
@@ -59,6 +64,59 @@ PROFILES: dict[str, VenueProfile] = {
         fee_rounding_micros=1,  # usdcSize carries six decimals
         ownership=OwnershipProof.PROFILE_CODE,
     ),
+    # ---- venue-snaptrade ----
+    "snaptrade": VenueProfile(
+        venue="snaptrade",
+        display_name="SnapTrade",
+        envs=("prod",),
+        credential=CredentialKind.AGGREGATOR,
+        key_label="SnapTrade user id",
+        secret_label="SnapTrade user secret",
+        key_help=(
+            "Chosen automatically when you connect a brokerage through SnapTrade's "
+            "Connection Portal (Robinhood, Schwab, Fidelity, Webull and more). You "
+            "never type this in; it is generated when you click Connect."
+        ),
+        balance_observable=True,  # daily snapshot, not real-time (history_depth)
+        instrument=InstrumentKind.ASSET,
+        # The binary-era tick/step/fee fields do not describe an aggregated
+        # equities account (no fixed tick, no per-share paper fee here);
+        # kept at harmless minimums so nothing downstream divides by zero.
+        tick_micros=1,
+        contract_step_micros=1,
+        fee_rate_bps=0,
+        fee_rounding_micros=1,
+        ownership=OwnershipProof.KEY,  # holding a valid userId+userSecret proves it
+        readonly_proof=ReadOnlyProof.AGGREGATOR_FLAG,
+        transfers_observable=True,  # CONTRIBUTION/WITHDRAWAL/TRANSFER activities
+        history_depth="all",  # SnapTrade backfills full broker history on connect
+        quote_asset="USD",
+        tos_doc="docs/venues/snaptrade.md",
+        # Connecting an account and computing a PRIVATE track record needs no
+        # approval (self-serve developer account). PUBLIC display is a
+        # different question: the Developer Terms bar re-packaging End User
+        # data to third parties "without the express written consent of both
+        # the End User and SnapTrade" -- see docs/venues/snaptrade.md, checked
+        # 2026-09-26. True here gates public strategy pages/marketplace
+        # listings until that written consent exists; flip to False once it
+        # does (contract_request, not a code change).
+        requires_partner_approval=True,
+        daily_resolution=True,  # "cached and refreshed once a day" per SnapTrade docs
+        rate_budgets=(
+            RateBudget(
+                # Customer-level (commercial partner) limit: 250 req/min shared
+                # across every connected user. Per-account 10 req/min limits are
+                # documented as personal-tier only, per
+                # https://docs.snaptrade.com/docs/ratelimiting , checked
+                # 2026-09-26. [VERIFY] against the live commercial dashboard once
+                # an account exists.
+                scope=RateScope.CREDENTIAL,
+                capacity=250,
+                refill_per_minute=250,
+            ),
+        ),
+        paper_fee_model=PaperFeeModel.US_EQUITY_REGULATORY,
+    ),
 }
 
 SUPPORTED_VENUES = tuple(PROFILES)
@@ -88,9 +146,23 @@ def _build_polymarket(venue_env: str, key_id: str, secret: str | None) -> VenueC
     )
 
 
+def _build_snaptrade(venue_env: str, key_id: str, secret: str | None) -> VenueConnector:
+    # ---- venue-snaptrade ----
+    settings = get_settings()
+    if not settings.snaptrade_client_id or not settings.snaptrade_consumer_key:
+        raise ValueError("SnapTrade needs snaptrade_client_id/snaptrade_consumer_key configured")
+    return SnapTradeConnector(
+        client_id=settings.snaptrade_client_id,
+        consumer_key=settings.snaptrade_consumer_key,
+        user_id=key_id,
+        user_secret=secret,
+    )
+
+
 _BUILDERS: dict[str, Callable[[str, str, str | None], VenueConnector]] = {
     "kalshi": _build_kalshi,
     "polymarket": _build_polymarket,
+    "snaptrade": _build_snaptrade,  # ---- venue-snaptrade ----
 }
 
 
@@ -121,6 +193,7 @@ _MARKET_DATA_BUILDERS: dict[str, Callable[[str], MarketDataSource]] = {
     "polymarket": lambda venue_env: PolymarketMarketData(
         clob_url=POLYMARKET_BASE_URLS[venue_env]["clob"]
     ),
+    "snaptrade": lambda venue_env: SnapTradeMarketData(),  # ---- venue-snaptrade ----
 }
 
 

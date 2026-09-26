@@ -69,6 +69,13 @@ class Settings(BaseSettings):
         still has to list it)."""
         return {"kalshi": self.kalshi_env, "polymarket": self.polymarket_env}.get(venue, "prod")
 
+    # ---- venue-snaptrade ----
+    # Koine's own SnapTrade partner credentials (identify Koine to SnapTrade;
+    # the same pair is used for every connected trader's userId/userSecret).
+    # https://docs.snaptrade.com/docs/register-a-developer-account
+    snaptrade_client_id: str = ""
+    snaptrade_consumer_key: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
