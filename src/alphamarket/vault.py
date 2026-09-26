@@ -166,10 +166,21 @@ class AwsKmsKeyWrapper:
 
             client = boto3.client("kms", region_name=region or None)
         self._client = client
+        self._resolved: str | None = None
 
     @property
     def version(self) -> str:
-        return f"aws_kms:{self.key_id}"
+        """aws_kms:<key ARN>. An alias is resolved (DescribeKey, once): the
+        stored version must name the key that actually wrapped the DEK, or
+        re-pointing the alias would leave rows that Decrypt(KeyId=alias)
+        refuses (IncorrectKeyException) and that rotate_all thinks are current."""
+        if self._resolved is None:
+            if "alias/" in self.key_id:
+                meta = self._client.describe_key(KeyId=self.key_id)["KeyMetadata"]
+                self._resolved = meta["Arn"]
+            else:
+                self._resolved = self.key_id
+        return f"aws_kms:{self._resolved}"
 
     def handles(self, key_version: str) -> bool:
         return key_version.startswith("aws_kms:")

@@ -15,7 +15,7 @@ from sqlalchemy import select
 from alphamarket import ingest, redaction
 from alphamarket.main import create_app
 from alphamarket.models import Strategy, User, VenueAccount
-from alphamarket.redaction import redact
+from alphamarket.redaction import REDACTED, redact
 
 KALSHI_PEM = (
     rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -102,6 +102,20 @@ def test_leaves_public_identifiers_alone():
         "key_id=demo-key-id",
     ):
         assert redact(public) == public, public
+
+
+def test_base64_secrets_with_slashes_are_not_mistaken_for_paths():
+    # 1 in 64 standard-base64 secrets starts with "/", and a 44-char secret
+    # (32 bytes, e.g. an exchange API secret) often has several slashes.
+    leading_slash = "/" + KRAKEN_SECRET[1:]
+    three_slashes = "q3/Zr8+Lk2/Wm4Tn7/Vx1Pc9Hb6Jd0Fs5Gy2Ra8Ke4U="
+    assert len(three_slashes) == 44 and three_slashes.count("/") == 3
+    for secret in (leading_slash, three_slashes):
+        assert secret not in redact(f"venue said {secret}")
+        assert redact(secret) == REDACTED
+    # Real paths with mixed-case, digit-bearing segments still pass through.
+    path = "/Users/AidenDsouza2/Projects/koine/site-packages/Starlette/routing"
+    assert redact(path) == path
 
 
 def test_extra_patterns_can_be_registered():

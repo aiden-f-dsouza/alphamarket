@@ -120,6 +120,15 @@ def test_unknown_key_wrapper_setting_refuses():
 
 RAW_DEK = bytes(range(32))  # what KMS would hand back as Plaintext
 WRAPPED = b"kms-wrapped-dek-blob"
+KMS_ARN_2 = "arn:aws:kms:us-east-1:111122223333:key/5678efgh-56ef-78gh-90ij-567890abcdef"
+
+
+def _describe(stub, key_id, arn):
+    stub.add_response(
+        "describe_key",
+        {"KeyMetadata": {"KeyId": arn.rsplit("/", 1)[1], "Arn": arn}},
+        {"KeyId": key_id},
+    )
 
 
 def test_kms_wrapper_generate_and_decrypt():
@@ -130,16 +139,18 @@ def test_kms_wrapper_generate_and_decrypt():
         {"CiphertextBlob": WRAPPED, "Plaintext": RAW_DEK, "KeyId": KMS_ARN},
         {"KeyId": KMS_KEY, "KeySpec": "AES_256"},
     )
+    _describe(stub, KMS_KEY, KMS_ARN)
     stub.add_response(
         "decrypt",
         {"Plaintext": RAW_DEK, "KeyId": KMS_ARN, "EncryptionAlgorithm": "SYMMETRIC_DEFAULT"},
-        {"CiphertextBlob": WRAPPED, "KeyId": KMS_KEY},
+        {"CiphertextBlob": WRAPPED, "KeyId": KMS_ARN},
     )
     with stub:
         wrapper = AwsKmsKeyWrapper(KMS_KEY, client=client)
         sealed = vault.seal("kraken-secret", wrapper=wrapper)
         assert sealed.wrapped_dek == WRAPPED
-        assert sealed.key_version == f"aws_kms:{KMS_KEY}"
+        # The alias is resolved: the version names the key that wrapped the DEK.
+        assert sealed.key_version == f"aws_kms:{KMS_ARN}"
         # The Fernet DEK is urlsafe-base64 of the 32 KMS bytes.
         assert Fernet(base64.urlsafe_b64encode(RAW_DEK)).decrypt(sealed.ciphertext) == (
             b"kraken-secret"
@@ -157,13 +168,14 @@ def test_kms_rewrap_uses_reencrypt_and_never_sees_plaintext():
     new_key = "alias/koine-vault-2026"
     stub.add_response(
         "re_encrypt",
-        {"CiphertextBlob": b"rewrapped", "SourceKeyId": KMS_ARN, "KeyId": KMS_ARN + "-2"},
-        {"CiphertextBlob": WRAPPED, "SourceKeyId": KMS_KEY, "DestinationKeyId": new_key},
+        {"CiphertextBlob": b"rewrapped", "SourceKeyId": KMS_ARN, "KeyId": KMS_ARN_2},
+        {"CiphertextBlob": WRAPPED, "SourceKeyId": KMS_ARN, "DestinationKeyId": new_key},
     )
+    _describe(stub, new_key, KMS_ARN_2)
     with stub:
         vault.use_key_wrapper(AwsKmsKeyWrapper(new_key, client=client))
-        wrapped, version = vault.rewrap(WRAPPED, f"aws_kms:{KMS_KEY}")
-        assert (wrapped, version) == (b"rewrapped", f"aws_kms:{new_key}")
+        wrapped, version = vault.rewrap(WRAPPED, f"aws_kms:{KMS_ARN}")
+        assert (wrapped, version) == (b"rewrapped", f"aws_kms:{KMS_ARN_2}")
         stub.assert_no_pending_responses()
 
 
@@ -177,6 +189,7 @@ def test_local_to_kms_migration_rewraps_across_wrappers():
         {"CiphertextBlob": b"kms-wrap-of-local-dek", "KeyId": KMS_ARN},
         {"KeyId": KMS_KEY, "Plaintext": base64.urlsafe_b64decode(dek)},
     )
+    _describe(stub, KMS_KEY, KMS_ARN)
     stub.add_response(
         "decrypt",
         {
@@ -184,14 +197,42 @@ def test_local_to_kms_migration_rewraps_across_wrappers():
             "KeyId": KMS_ARN,
             "EncryptionAlgorithm": "SYMMETRIC_DEFAULT",
         },
-        {"CiphertextBlob": b"kms-wrap-of-local-dek", "KeyId": KMS_KEY},
+        {"CiphertextBlob": b"kms-wrap-of-local-dek", "KeyId": KMS_ARN},
     )
     with stub:
         vault.use_key_wrapper(AwsKmsKeyWrapper(KMS_KEY, client=client))
         wrapped, version = vault.rewrap(local_sealed.wrapped_dek, local_sealed.key_version)
-        assert version == f"aws_kms:{KMS_KEY}"
+        assert version == f"aws_kms:{KMS_ARN}"
         # Same record ciphertext, now opened through KMS.
         assert vault.open_sealed(local_sealed.ciphertext, wrapped, version) == "pem"
+
+
+def test_repointed_alias_keeps_old_rows_readable_and_due_for_rotation():
+    """Rows sealed while alias/koine-vault named key A must still decrypt, with
+    KeyId = key A, after the alias is re-pointed to key B (Decrypt with the
+    alias would now fail with IncorrectKeyException), and must count as due
+    for rotation."""
+    client = _kms_client()
+    stub = Stubber(client)
+    stub.add_response(
+        "generate_data_key",
+        {"CiphertextBlob": WRAPPED, "Plaintext": RAW_DEK, "KeyId": KMS_ARN},
+        {"KeyId": KMS_KEY, "KeySpec": "AES_256"},
+    )
+    _describe(stub, KMS_KEY, KMS_ARN)  # before: alias -> key A
+    _describe(stub, KMS_KEY, KMS_ARN_2)  # after the re-point (new process): key B
+    stub.add_response(
+        "decrypt",
+        {"Plaintext": RAW_DEK, "KeyId": KMS_ARN, "EncryptionAlgorithm": "SYMMETRIC_DEFAULT"},
+        {"CiphertextBlob": WRAPPED, "KeyId": KMS_ARN},
+    )
+    with stub:
+        sealed = vault.seal("pem", wrapper=AwsKmsKeyWrapper(KMS_KEY, client=client))
+        after = AwsKmsKeyWrapper(KMS_KEY, client=client)
+        assert after.version == f"aws_kms:{KMS_ARN_2}" != sealed.key_version
+        vault.use_key_wrapper(after)
+        assert vault.open_sealed(sealed.ciphertext, WRAPPED, sealed.key_version) == "pem"
+        stub.assert_no_pending_responses()
 
 
 def test_kms_errors_surface_as_vault_error_without_detail():

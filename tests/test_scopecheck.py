@@ -206,3 +206,42 @@ def test_connect_evidence_json_is_plain_json():
     assert json.loads(json.dumps(out)) == out
     assert out["checked_at"] == "2026-09-26T04:15:00Z"
     assert out["details"] == {"validate_order": "refused", "api_secret": "[REDACTED]"}
+
+
+@respx.mock
+def test_suspension_during_an_inflight_sync_is_not_overwritten(session_factory, monkeypatch):
+    """The nightly re-check and the interval poller run on separate scheduler
+    threads. If the key is suspended while a sync of the same account is in
+    flight, the sync's success path must not flip the account back to active."""
+    from alphamarket import ingest
+    from alphamarket.connectors.base import ReadOnlyEvidence
+
+    with session_factory() as db:
+        account = _account(db)
+        account.status = "error"  # the last poll failed; this one succeeds
+        account.last_sync_error = "ConnectError: timeout"
+        db.commit()
+        account_id = account.id
+
+    def suspend_meanwhile(db, connector, strategy):
+        with session_factory() as other:
+            acct = other.get(VenueAccount, account_id)
+            scopecheck.suspend(
+                other,
+                acct,
+                ReadOnlyEvidence(
+                    method=ReadOnlyProof.SCOPE_ENDPOINT,
+                    read_only=False,
+                    checked_at=datetime.now(UTC),
+                ),
+            )
+        return ingest.SyncResult(new_fills=0, new_settlements=0)
+
+    monkeypatch.setattr(ingest, "_sync", suspend_meanwhile)
+    with session_factory() as db:
+        account = db.get(VenueAccount, account_id)
+        ingest.sync_account(db, account)
+    with session_factory() as db:
+        account = db.get(VenueAccount, account_id)
+        assert account.status == "suspended"
+        assert "Suspended" in account.last_sync_error

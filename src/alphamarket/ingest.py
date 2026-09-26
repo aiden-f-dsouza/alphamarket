@@ -50,6 +50,12 @@ def sync_account(db: Session, account: VenueAccount) -> SyncResult:
         db.commit()
         raise
 
+    # A suspension (nightly scope re-check) or disconnect committed while this
+    # sync ran must stick: re-read the status instead of overwriting it.
+    db.refresh(account, attribute_names=["status"])
+    if account.status in (VenueAccountStatus.SUSPENDED, VenueAccountStatus.DISCONNECTED):
+        db.commit()
+        return result
     account.status = VenueAccountStatus.ACTIVE
     account.last_sync_error = None
     account.last_synced_at = utcnow()

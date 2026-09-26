@@ -60,10 +60,26 @@ def _field_sub(m: re.Match[str]) -> str:
     return f"{m.group(1)}{m.group(2)}{m.group(3) or ''}{REDACTED}"
 
 
+def _plain_segment(seg: str) -> bool:
+    """A word-like path segment ("koine", "Users"): letters only, at most a
+    leading capital. Random base64 almost never yields one of 3+ chars."""
+    return len(seg) >= 3 and seg.isalpha() and seg[1:].islower()
+
+
+def _looks_like_path(body: str) -> bool:
+    """File or URL path, not a key. Judged by its segments, not by a leading
+    "/" or a slash count alone: 1 in 64 base64 secrets starts with "/", and
+    short ones often hold several slashes."""
+    segments = [s for s in body.split("/") if s]
+    if body.count("/") < 2 or any(len(s) > 24 for s in segments):
+        return False
+    return 2 * sum(_plain_segment(s) for s in segments) >= len(segments)
+
+
 def _b64_sub(m: re.Match[str]) -> str:
     s = m.group(0)
     body = s.strip("=")
-    if body.startswith("/") or body.count("/") > len(body) // 16:
+    if _looks_like_path(body):
         return s  # a file path or URL path, not a key
     if (
         any(c.isupper() for c in body)
