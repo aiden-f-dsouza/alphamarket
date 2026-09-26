@@ -85,6 +85,20 @@ class Settings(BaseSettings):
     worker_sync_tick_seconds: int = 30  # how often the ticker looks for due syncs
     rate_limiter_backend: str = "postgres"  # "postgres" (shared) | "memory" (one process)
 
+    # ---- p3-vault ----
+    # Credential vault v2 (vault.py): which KeyWrapper wraps per-record data
+    # keys. "local" = Fernet on VAULT_KEY (dev/tests; preflight refuses it in
+    # prod); "aws_kms" = AWS KMS GenerateDataKey/Decrypt on `kms_key_id`.
+    # VAULT_KEY may hold several comma-separated Fernet keys, newest first:
+    # prepend a new key, run the rotation, then drop the old one.
+    key_wrapper: str = "local"
+    kms_key_id: str = ""  # key id, key ARN or alias ("alias/koine-vault")
+    aws_region: str = ""
+    # Header carrying the real client IP when behind a trusted proxy
+    # ("fly-client-ip" on Fly). Empty = the socket peer (never trust
+    # X-Forwarded-For from the open internet: audit IPs would be spoofable).
+    client_ip_header: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

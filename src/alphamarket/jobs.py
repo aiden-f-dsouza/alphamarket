@@ -40,6 +40,7 @@ from sqlalchemy import delete, exists, func, or_, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.orm.attributes import set_committed_value
 
+from alphamarket.audit import job_context
 from alphamarket.config import Settings, get_settings
 from alphamarket.connectors.base import BudgetExhausted, RateLimited, VenueConnector
 from alphamarket.models import (
@@ -80,6 +81,10 @@ class JobKind(StrEnum):
 # Lower runs first. Copy lag matters for creators with followers, so their
 # syncs (and the signal/mirror jobs that follow a sync) go first; an expiring
 # OAuth token would fail every sync of that account, so it goes before them.
+# Accounts the worker never touches: disconnected, or suspended because the
+# key became writable (p3-vault; the credential is already erased).
+INACTIVE_ACCOUNT_STATUSES = (VenueAccountStatus.DISCONNECTED, VenueAccountStatus.SUSPENDED)
+
 PRIORITY_URGENT = 5
 PRIORITY_SYNC_FOLLOWED = 10
 PRIORITY_SYNC = 20
@@ -519,7 +524,7 @@ def fail(
         db.rollback()
         return None
     account = db.get(VenueAccount, job.venue_account_id) if job.venue_account_id else None
-    if account is not None and account.status != VenueAccountStatus.DISCONNECTED:
+    if account is not None and account.status not in INACTIVE_ACCOUNT_STATUSES:
         if values["status"] == JobStatus.DEAD:
             account.status = VenueAccountStatus.ERROR
             account.last_sync_error = dead_letter_reason(job.kind, attempts, msg)
@@ -601,7 +606,7 @@ def enqueue_due_syncs(db: Session, *, interval_seconds: int, now: datetime | Non
     rows = db.execute(
         select(VenueAccount.id, AccountSchedule.next_sync_at)
         .outerjoin(AccountSchedule, AccountSchedule.venue_account_id == VenueAccount.id)
-        .where(VenueAccount.status != VenueAccountStatus.DISCONNECTED)
+        .where(VenueAccount.status.not_in(INACTIVE_ACCOUNT_STATUSES))
     ).all()
     queued = 0
     for account_id, next_at in rows:
@@ -789,7 +794,7 @@ class JobRunner:
                 db, job_id, self.worker_id, self.settings.worker_lease_seconds, now=self.clock()
             ):
                 return "lost"
-            if account is not None and account.status == VenueAccountStatus.DISCONNECTED:
+            if account is not None and account.status in INACTIVE_ACCOUNT_STATUSES:
                 complete(db, job_id, self.worker_id, now=self.clock())
                 return "done"
             if venue and self.limiter is not None:
@@ -808,7 +813,10 @@ class JobRunner:
                 connector_factory=self.connector_factory,
             )
             try:
-                handler(ctx)
+                # Everything audited inside (decrypts, scope results) carries one
+                # job id, so an audit row can be traced to the run that made it.
+                with job_context(str(job.kind)):
+                    handler(ctx)
             except LeaseLost:
                 db.rollback()
                 logger.warning("job %s: lease lost mid-run; the new owner continues", job_id)

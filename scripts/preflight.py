@@ -12,7 +12,7 @@ from alphamarket.config import get_settings
 from alphamarket.db import engine
 
 # Invariant 3: every append-only table has a "<table>_append_only" trigger
-# (migrations 0003, 0007, 0009).
+# (migrations 0003, 0007, 0009, 0012).
 EXPECTED_APPEND_ONLY_TRIGGERS = frozenset(
     f"{table}_append_only"
     for table in (
@@ -24,8 +24,29 @@ EXPECTED_APPEND_ONLY_TRIGGERS = frozenset(
         "ledger_entries",
         "asset_fills",
         "ledger_quarantines",
+        "audit_log",
     )
 )
+
+
+def vault_problems(s) -> list[str]:
+    """p3-vault: prod wraps credential data keys with KMS, and the wrapper
+    must round-trip for real (a live GenerateDataKey + Decrypt)."""
+    from alphamarket import vault
+
+    problems: list[str] = []
+    if s.key_wrapper == "local" and s.kalshi_env == "prod":
+        problems.append("KEY_WRAPPER=local in prod (credential data keys must be KMS-wrapped)")
+    if s.key_wrapper == "aws_kms" and not s.kms_key_id:
+        problems.append("KEY_WRAPPER=aws_kms but KMS_KEY_ID is not set")
+    if s.key_wrapper not in ("local", "aws_kms"):
+        problems.append(f"KEY_WRAPPER={s.key_wrapper!r} is not local | aws_kms")
+    if not problems:
+        try:
+            vault.self_test()
+        except Exception as exc:  # noqa: BLE001
+            problems.append(f"vault self-test failed: {type(exc).__name__}")
+    return problems
 
 
 def main() -> int:
@@ -42,6 +63,7 @@ def main() -> int:
         problems.append("PUBLIC_BASE_URL is http:// in prod")
     if s.demo_mode:
         problems.append("DEMO_MODE is on (sample pages would be served to real users)")
+    problems.extend(vault_problems(s))
 
     try:
         with engine.connect() as conn:

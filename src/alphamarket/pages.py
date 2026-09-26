@@ -21,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from alphamarket import auth, demo
+from alphamarket import auth, credentials, demo
 from alphamarket.analytics import latest_stats
 from alphamarket.charts import drawdown_window, polyline, ticks
 from alphamarket.config import get_settings
@@ -35,7 +35,6 @@ from alphamarket.models import (
     StrategyStatus,
     User,
     VenueAccount,
-    VenueAccountStatus,
 )
 from alphamarket.public import (
     all_tags,
@@ -345,9 +344,7 @@ def account_action_form(
         elif action == "claim":
             claim_account(db, user, account.id)
         elif action == "disconnect":
-            account.encrypted_private_key = None
-            account.status = VenueAccountStatus.DISCONNECTED
-            db.commit()
+            credentials.disconnect(db, account, actor_user_id=user.id)
         else:
             raise HTTPException(status_code=404)
     except HTTPException as exc:

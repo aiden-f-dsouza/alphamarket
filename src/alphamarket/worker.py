@@ -28,6 +28,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from alphamarket import credentials, redaction, scopecheck
 from alphamarket.analytics import compute_strategy_stats, promote_incubating
 from alphamarket.config import get_settings
 from alphamarket.connectors.base import BudgetExhausted, InstrumentKind, RateLimited
@@ -35,8 +36,10 @@ from alphamarket.connectors.registry import build_market_data, get_profile
 from alphamarket.db import SessionLocal, engine
 from alphamarket.ingest import sync_account
 from alphamarket.jobs import (
+    INACTIVE_ACCOUNT_STATUSES,
     PAGE_RUNNERS,
     PRIORITY_SYNC_FOLLOWED,
+    PRIORITY_URGENT,
     Defer,
     JobContext,
     JobKind,
@@ -264,6 +267,21 @@ def handle_stats(ctx: JobContext) -> None:
             logger.exception("valuation failed for allocation %s", allocation.id)
 
 
+@register_handler(JobKind.SCOPE_RECHECK)
+def handle_scope_recheck(ctx: JobContext) -> None:
+    """Nightly (P3): prove every active key is still read-only; a writable one
+    is erased and its account suspended (scopecheck.py). Queued ahead of the
+    reconciles so a suspended key is never used for them."""
+    logger.info("scope re-check: %s", scopecheck.recheck_all(ctx.db))
+
+
+@register_handler(JobKind.KEY_ROTATE)
+def handle_key_rotate(ctx: JobContext) -> None:
+    """Re-seal credentials under the newest vault key version (P3), in batches."""
+    batch = int((ctx.job.payload or {}).get("batch_size", 100))
+    logger.info("re-sealed %d credentials", credentials.rotate_all(ctx.db, batch_size=batch))
+
+
 # ---- ticks (enqueue only) ---------------------------------------------------------
 
 
@@ -285,7 +303,7 @@ def _enqueue_backfills(db: Session, now) -> None:
     rows = db.execute(
         select(VenueAccount, AccountSchedule.backfill_done_at)
         .outerjoin(AccountSchedule, AccountSchedule.venue_account_id == VenueAccount.id)
-        .where(VenueAccount.status != VenueAccountStatus.DISCONNECTED)
+        .where(VenueAccount.status.not_in(INACTIVE_ACCOUNT_STATUSES))
     ).all()
     for account, done_at in rows:
         if done_at is None and _is_paged(account):
@@ -304,8 +322,16 @@ def tick_nightly(session_factory: sessionmaker = SessionLocal) -> None:
     now = utcnow()
     day = now.date().isoformat()
     with session_factory() as db:
+        enqueue(
+            db,
+            JobKind.SCOPE_RECHECK,
+            dedupe_key=f"scope_recheck:{day}",
+            once=True,
+            priority=PRIORITY_URGENT,
+            now=now,
+        )
         accounts = db.scalars(
-            select(VenueAccount).where(VenueAccount.status != VenueAccountStatus.DISCONNECTED)
+            select(VenueAccount).where(VenueAccount.status.not_in(INACTIVE_ACCOUNT_STATUSES))
         ).all()
         for account in accounts:
             if reconcilable(account):
@@ -333,6 +359,7 @@ def sync_now(db: Session, account: VenueAccount) -> int | None:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    redaction.install()
     settings = get_settings()
     runner = JobRunner(SessionLocal, build_limiter(settings, engine))
     scheduler = BackgroundScheduler(timezone="UTC")

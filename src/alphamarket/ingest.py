@@ -18,8 +18,9 @@ from decimal import Decimal, InvalidOperation
 from typing import NamedTuple
 
 from sqlalchemy import and_, func, literal, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
+from alphamarket import credentials
 from alphamarket.connectors.base import (
     InstrumentKind,
     InstrumentType,
@@ -56,7 +57,7 @@ from alphamarket.models import (
     VenueAccountStatus,
     utcnow,
 )
-from alphamarket.vault import decrypt_secret
+from alphamarket.redaction import redact
 
 logger = logging.getLogger(__name__)
 
@@ -89,10 +90,16 @@ def sync_account(db: Session, account: VenueAccount) -> SyncResult:
     except Exception as exc:
         account.status = VenueAccountStatus.ERROR
         # Exception text only; never credentials (invariant #4).
-        account.last_sync_error = f"{type(exc).__name__}: {exc}"
+        account.last_sync_error = redact(f"{type(exc).__name__}: {exc}")
         db.commit()
         raise
 
+    # A suspension (nightly scope re-check) or disconnect committed while this
+    # sync ran must stick: re-read the status instead of overwriting it.
+    db.refresh(account, attribute_names=["status"])
+    if account.status in (VenueAccountStatus.SUSPENDED, VenueAccountStatus.DISCONNECTED):
+        db.commit()
+        return result
     account.status = VenueAccountStatus.ACTIVE
     account.last_sync_error = None
     account.last_synced_at = utcnow()
@@ -100,16 +107,23 @@ def sync_account(db: Session, account: VenueAccount) -> SyncResult:
     return result
 
 
-def connector_for(account: VenueAccount) -> VenueConnector:
-    """Rebuild the venue client from the stored (encrypted) credential. A
-    venue that takes no secret (Polymarket) is built from the public id."""
+def connector_for(
+    account: VenueAccount, db: Session | None = None, purpose: str = "sync"
+) -> VenueConnector:
+    """Rebuild the venue client from the stored (encrypted) credential via
+    credentials.py, which audits the decrypt. A venue that takes no secret
+    (Polymarket) is built from the public id."""
+    db = db if db is not None else object_session(account)
+    if db is None:
+        raise ValueError(f"venue account {account.id} is detached; cannot audit the decrypt")
     if get_profile(account.venue).needs_secret:
-        if account.encrypted_private_key is None:
-            raise ValueError(f"venue account {account.id} has no stored credential")
-        secret = decrypt_secret(account.encrypted_private_key)
+        opened = credentials.open_credential(db, account, purpose=purpose)
+        secret, account_ref = opened.secret, opened.account_ref
     else:
-        secret = None
-    return build_connector(account.venue, account.venue_env, account.key_id, secret)
+        secret, account_ref = None, credentials.account_ref_for(db, account)
+    return build_connector(
+        account.venue, account.venue_env, account.key_id, secret, account_ref=account_ref
+    )
 
 
 def _sync(db: Session, connector, strategy: Strategy) -> SyncResult:
