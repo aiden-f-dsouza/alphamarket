@@ -8,6 +8,24 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: alphamarket
+          POSTGRES_PASSWORD: alphamarket
+          POSTGRES_DB: alphamarket_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U alphamarket"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # tests/conftest.py: pg_url connects here (as an admin connection) and
+      # creates one throwaway database per test session for pg-marked tests.
+      KOINE_TEST_PG_URL: postgresql+psycopg://alphamarket:alphamarket@localhost:5432/alphamarket_test
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
@@ -16,4 +34,38 @@ jobs:
       - run: uv sync --all-groups
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run pytest
+      - name: alembic upgrade head (sanity check against a clean service DB)
+        env:
+          DATABASE_URL: postgresql+psycopg://alphamarket:alphamarket@localhost:5432/alphamarket_test
+        run: uv run alembic upgrade head
+      # `alembic check` is deliberately NOT run here: it currently reports
+      # drift on `fills.venue_fill_id` / `settlements.venue_settlement_id`
+      # (models.py declares a unique index, alembic's autogenerate expects a
+      # unique constraint). See docs/implementation_plan.md P0 and the
+      # contract_requests/followups from the p0-infra workstream.
+      - run: uv run pytest -p no:cacheprovider
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Only required if this repo is private; gitleaks-action is free for
+          # public repos without a license. Set the GITLEAKS_LICENSE repo
+          # secret if/when this goes private.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  pip-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          python-version: "3.12"
+      - run: uv export --no-hashes --format requirements-txt -o requirements.txt
+      - run: uvx pip-audit -r requirements.txt
