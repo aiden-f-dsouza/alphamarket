@@ -16,7 +16,9 @@ import logging
 from apscheduler.schedulers.blocking import BlockingScheduler
 from sqlalchemy import select
 
+from alphamarket import redaction, scopecheck
 from alphamarket.analytics import compute_strategy_stats, promote_incubating
+from alphamarket.audit import as_job
 from alphamarket.config import get_settings
 from alphamarket.db import SessionLocal
 from alphamarket.ingest import sync_account
@@ -30,10 +32,15 @@ from alphamarket.signals import emit_signals
 logger = logging.getLogger(__name__)
 
 
+# Suspended accounts (key became writable) have no credential left to use.
+INACTIVE_STATUSES = (VenueAccountStatus.DISCONNECTED, VenueAccountStatus.SUSPENDED)
+
+
+@as_job("sync")
 def sync_all_accounts() -> None:
     with SessionLocal() as db:
         accounts = db.scalars(
-            select(VenueAccount).where(VenueAccount.status != VenueAccountStatus.DISCONNECTED)
+            select(VenueAccount).where(VenueAccount.status.not_in(INACTIVE_STATUSES))
         ).all()
         for account in accounts:
             try:
@@ -95,12 +102,13 @@ def value_all_allocations() -> None:
                 logger.exception("valuation failed for allocation %s", allocation.id)
 
 
+@as_job("reconcile")
 def reconcile_all_accounts() -> None:
     """Nightly (BUILD_PLAN M2.2): compare ledger-implied cash with the venue
     balance; divergence quarantines the strategy."""
     with SessionLocal() as db:
         accounts = db.scalars(
-            select(VenueAccount).where(VenueAccount.status != VenueAccountStatus.DISCONNECTED)
+            select(VenueAccount).where(VenueAccount.status.not_in(INACTIVE_STATUSES))
         ).all()
         for account in accounts:
             if not reconcilable(account):
@@ -130,7 +138,16 @@ def compute_all_stats() -> None:
         logger.info("promoted %d strategies to live", promote_incubating(db))
 
 
+@as_job("scope_recheck")
+def recheck_all_scopes() -> None:
+    """Nightly (P3): prove every active key is still read-only; a writable
+    one is erased and its account suspended (scopecheck.py)."""
+    with SessionLocal() as db:
+        logger.info("scope re-check: %s", scopecheck.recheck_all(db))
+
+
 def nightly() -> None:
+    recheck_all_scopes()  # first, so a suspended key is never used below
     reconcile_all_accounts()
     refresh_all_prices()
     compute_all_stats()
@@ -139,6 +156,7 @@ def nightly() -> None:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    redaction.install()
     interval = get_settings().ingest_interval_seconds
     scheduler = BlockingScheduler()
     scheduler.add_job(sync_all_accounts, "interval", seconds=interval, max_instances=1)

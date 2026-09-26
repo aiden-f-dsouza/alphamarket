@@ -19,6 +19,7 @@ dependencies = [
     "jinja2>=3.1",
     "markdown>=3.6",
     "python-multipart>=0.0.9",
+    "boto3>=1.43.103",
 ]
 
 [dependency-groups]

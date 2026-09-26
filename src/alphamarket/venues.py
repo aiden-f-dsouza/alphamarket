@@ -25,6 +25,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from alphamarket import audit, credentials
+from alphamarket.audit import AuditAction
 from alphamarket.auth import current_user
 from alphamarket.config import get_settings
 from alphamarket.connectors.base import OwnershipProof
@@ -33,7 +35,7 @@ from alphamarket.db import get_db
 from alphamarket.ingest import sync_account
 from alphamarket.models import Strategy, User, VenueAccount, VenueAccountStatus, utcnow
 from alphamarket.reconcile import reconcilable, reconcile_account, take_anchor
-from alphamarket.vault import encrypt_secret
+from alphamarket.scopecheck import apply_evidence, evidence_json, prove
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/venues", tags=["venues"])
@@ -48,6 +50,9 @@ class ConnectIn(BaseModel):
     secret: str | None = None
     private_key_pem: str | None = None
     strategy_name: str = Field(min_length=2, max_length=120)
+    # Which venue account to read when one credential spans several
+    # (VenueConnector.account_ref); None when key and account are 1:1.
+    account_ref: str | None = Field(default=None, max_length=120)
 
     @model_validator(mode="after")
     def _merge_secret(self) -> "ConnectIn":
@@ -127,7 +132,9 @@ def connect_account(db: Session, user: User, payload: ConnectIn) -> dict:
 
     venue_env = get_settings().venue_env(payload.venue)
     try:
-        connector = build_connector(payload.venue, venue_env, payload.key_id, secret)
+        connector = build_connector(
+            payload.venue, venue_env, payload.key_id, secret, account_ref=payload.account_ref
+        )
         connector.check_connection()
     except HTTPException:
         raise
@@ -143,8 +150,19 @@ def connect_account(db: Session, user: User, payload: ConnectIn) -> dict:
             ),
         ) from None
 
-    writable = connector.check_write_scope()
-    if writable:
+    evidence = prove(connector)
+    if evidence.read_only is False:
+        # Audited and committed before refusing: a writable key offered to
+        # Koine is a security event even though nothing is stored.
+        audit.record(
+            db,
+            AuditAction.CREDENTIAL_REJECTED,
+            actor_user_id=user.id,
+            target_type="venue",
+            target_id=payload.venue,
+            details={"reason": "scope_writable", **evidence_json(evidence)},
+        )
+        db.commit()
         raise HTTPException(
             status_code=422,
             detail=(
@@ -163,18 +181,37 @@ def connect_account(db: Session, user: User, payload: ConnectIn) -> dict:
         venue=payload.venue,
         venue_env=venue_env,
         key_id=payload.key_id.lower() if not profile.needs_secret else payload.key_id,
-        encrypted_private_key=encrypt_secret(secret) if secret else None,
+        # The key goes to venue_credentials (credentials.store below); the
+        # legacy column is no longer written.
+        encrypted_private_key=None,
         status=VenueAccountStatus.ACTIVE,
-        # None from the probe means "undetermined", recorded as unchecked.
-        scope_checked_at=utcnow() if writable is False else None,
         anchor_balance_micros=anchor.balance_micros,
         anchor_at=anchor.at,
         anchor_positions=anchor.positions,
         claim_code=None if key_proves_ownership else new_claim_code(),
         claimed_at=utcnow() if key_proves_ownership else None,
     )
+    # Undetermined evidence leaves scope_checked_at unset ("scope unverified").
+    apply_evidence(account, evidence)
     db.add(account)
     db.flush()
+    if secret:
+        credentials.store(
+            db,
+            account,
+            secret,
+            kind=profile.credential,
+            account_ref=payload.account_ref,
+            actor_user_id=user.id,
+        )
+    audit.record(
+        db,
+        AuditAction.SCOPE_CHECK,
+        actor_user_id=user.id,
+        target_type="venue_account",
+        target_id=account.id,
+        details={"trigger": "connect", "venue": account.venue, **evidence_json(evidence)},
+    )
     strategy = Strategy(
         user_id=user.id, venue_account_id=account.id, name=payload.strategy_name, slug="pending"
     )
@@ -242,6 +279,8 @@ def manual_sync(account_id: int, db: Session = Depends(get_db), user: User = Dep
     account = _owned_account(db, account_id, user)
     if account.status == VenueAccountStatus.DISCONNECTED:
         raise HTTPException(status_code=409, detail="Account is disconnected")
+    if account.status == VenueAccountStatus.SUSPENDED:
+        raise HTTPException(status_code=409, detail="Account is suspended; connect a read-only key")
     try:
         result = sync_account(db, account)
     except Exception:
@@ -275,6 +314,8 @@ def manual_reconcile(
     account = _owned_account(db, account_id, user)
     if account.status == VenueAccountStatus.DISCONNECTED:
         raise HTTPException(status_code=409, detail="Account is disconnected")
+    if account.status == VenueAccountStatus.SUSPENDED:
+        raise HTTPException(status_code=409, detail="Account is suspended; connect a read-only key")
     if not reconcilable(account):
         raise HTTPException(
             status_code=409, detail="This venue exposes no balance to reconcile against."
@@ -292,9 +333,7 @@ def disconnect(account_id: int, db: Session = Depends(get_db), user: User = Depe
     already-ingested ledger stays: it is append-only history the track record
     was built on, and the methodology page says exactly that."""
     account = _owned_account(db, account_id, user)
-    account.encrypted_private_key = None
-    account.status = VenueAccountStatus.DISCONNECTED
-    db.commit()
+    credentials.disconnect(db, account, actor_user_id=user.id)
 
 
 def _owned_account(db: Session, account_id: int, user: User) -> VenueAccount:

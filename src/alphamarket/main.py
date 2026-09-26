@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
-from alphamarket import auth, follows, pages, public, strategies, tails, venues
+from alphamarket import audit, auth, follows, pages, public, redaction, strategies, tails, venues
 from alphamarket.config import get_settings
 
 
@@ -14,6 +14,11 @@ def create_app() -> FastAPI:
         https_only=settings.secure_cookies,
         same_site="lax",
     )
+    # p3-vault: scrub secrets from every log record and 422 body; request id,
+    # IP and user agent for audit rows.
+    redaction.install()
+    redaction.install_error_handlers(app)
+    audit.install_request_context(app)
     app.include_router(auth.router)
     app.include_router(venues.router)
     app.include_router(strategies.router)

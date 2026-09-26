@@ -51,6 +51,7 @@ class VenueAccountStatus(StrEnum):
     ACTIVE = "active"
     ERROR = "error"  # last sync failed; retried on the next worker tick
     DISCONNECTED = "disconnected"  # user disconnected; encrypted key erased
+    SUSPENDED = "suspended"  # p3-vault: key became writable on a re-check; key erased
 
 
 class VenueAccount(Base):
@@ -61,8 +62,12 @@ class VenueAccount(Base):
     venue: Mapped[str] = mapped_column(String(40))
     venue_env: Mapped[str] = mapped_column(String(10))  # "demo" | "prod"
     key_id: Mapped[str] = mapped_column(String(120))
-    # Fernet token of the RSA private key PEM. Nulled on disconnect.
-    encrypted_private_key: Mapped[bytes | None] = mapped_column(LargeBinary, default=None)
+    # Fernet token of the RSA private key PEM. Nulled on disconnect. Deferred
+    # (p3-vault): only loaded when read, so the web DB role, which has no
+    # SELECT on it, can still load accounts.
+    encrypted_private_key: Mapped[bytes | None] = mapped_column(
+        LargeBinary, default=None, deferred=True
+    )
     status: Mapped[str] = mapped_column(String(20), default=VenueAccountStatus.ACTIVE)
     scope_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
@@ -86,6 +91,12 @@ class VenueAccount(Base):
     claim_code: Mapped[str | None] = mapped_column(String(40), default=None)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # ---- p3-vault ----
+    # Last ReadOnlyEvidence from connector.prove_read_only() (connect time and
+    # the nightly re-check), as JSON. `scope_checked_at` stays "last time the
+    # key was CONFIRMED read-only". The key itself lives in venue_credentials;
+    # `encrypted_private_key` above is read for one release, never written.
+    scope_evidence: Mapped[dict | None] = mapped_column(JSON, default=None)
 
     @property
     def claimed(self) -> bool:
@@ -382,3 +393,70 @@ def _enforce_append_only(session: Session, flush_context, instances) -> None:
     for obj in session.deleted:
         if isinstance(obj, APPEND_ONLY_MODELS):
             raise AppendOnlyViolation(f"{type(obj).__name__} rows are append-only; cannot delete")
+
+
+# ---- p3-vault ----------------------------------------------------------------
+
+
+class VenueCredential(Base):
+    """Envelope-encrypted venue credential (vault.py, platform_plan 2.4).
+
+    Mutable on purpose: rotation re-wraps `wrapped_dek`, revocation erases
+    every ciphertext column and stamps `revoked_at`. At most one row per
+    account has revoked_at NULL (the active credential). The web role cannot
+    SELECT the ciphertext columns (docs/security_roles.sql)."""
+
+    __tablename__ = "venue_credentials"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    venue_account_id: Mapped[int] = mapped_column(ForeignKey("venue_accounts.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(40))  # CredentialKind value
+    # Deferred: loaded only on access, so ordinary queries never select them
+    # (and the web role, which cannot, still works).
+    ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary, default=None, deferred=True)
+    wrapped_dek: Mapped[bytes | None] = mapped_column(  # NULL = legacy row
+        LargeBinary, default=None, deferred=True
+    )
+    key_version: Mapped[str] = mapped_column(String(200))
+    account_ref: Mapped[str | None] = mapped_column(String(120), default=None)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    refresh_ciphertext: Mapped[bytes | None] = mapped_column(
+        LargeBinary, default=None, deferred=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class AuditLog(Base):
+    """APPEND-ONLY security audit trail (invariant 3 applies: ORM guard below
+    plus the Postgres trigger audit_log_append_only). `details` never holds a
+    secret: audit.record() scrubs it. `actor_user_id` is a plain column, not a
+    foreign key, so an audit row outlives the user it names."""
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    actor_user_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
+    action: Mapped[str] = mapped_column(String(60), index=True)
+    target_type: Mapped[str | None] = mapped_column(String(40), default=None)
+    target_id: Mapped[str | None] = mapped_column(String(80), default=None)
+    ip: Mapped[str | None] = mapped_column(String(64), default=None)
+    user_agent: Mapped[str | None] = mapped_column(String(400), default=None)
+    request_or_job_id: Mapped[str | None] = mapped_column(String(80), default=None)
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+@event.listens_for(Session, "before_flush")
+def _enforce_audit_append_only(session: Session, flush_context, instances) -> None:
+    """Same guard as _enforce_append_only, for audit_log (kept separate so the
+    ledger tuple above can grow without touching this block)."""
+    for obj in session.dirty:
+        if isinstance(obj, AuditLog) and session.is_modified(obj):
+            raise AppendOnlyViolation("AuditLog rows are append-only; cannot update")
+    for obj in session.deleted:
+        if isinstance(obj, AuditLog):
+            raise AppendOnlyViolation("AuditLog rows are append-only; cannot delete")
