@@ -407,6 +407,34 @@ def test_repeated_cursor_is_an_error_not_a_loop(db, account, venue):
         ingest.sync_account(db, account)
 
 
+def test_interrupted_newest_first_backfill_resumes_and_loses_nothing(db, account, venue):
+    """A venue that pages newest-first across pages (Kraken ofs paging) is
+    rate-limited after page one. The next sync must continue from the stored
+    mid-pass cursor, not restart from since = newest stored fill - OVERLAP,
+    which would skip every older page for good."""
+    venue.fill_pages = {
+        None: Page([buy_btc("t3", "0.1", "50000", "5", 30)], next_cursor="p2"),
+        "p2": RateLimited(30, "TradesHistory"),
+    }
+    with pytest.raises(RateLimited):
+        ingest.sync_account(db, account)
+    assert ingest.stored_resume_cursor(db, account, ingest.STREAM_ASSET_FILLS) == "p2"
+
+    # The limit lifts: page two holds the OLDER fills (+1 and +2 minutes).
+    venue.fill_pages["p2"] = Page(
+        [buy_btc("t1", "0.5", "60000", "30", 1), buy_btc("t2", "0.1", "50000", "5", 2)],
+        resume_cursor="R1",
+    )
+    before = len(venue.calls)
+    result = ingest.sync_account(db, account)
+    assert result.new_fills == 2
+    # The second sync's first request continues the pass (a since-based
+    # restart, cursor None, is what loses the older pages on a real venue).
+    assert [c[1] for c in venue.calls[before:] if c[0] == "fills"] == ["p2"]
+    assert sorted(db.scalars(select(AssetFill.venue_fill_id)).all()) == ["t1", "t2", "t3"]
+    assert ingest.stored_resume_cursor(db, account, ingest.STREAM_ASSET_FILLS) == "R1"
+
+
 # ---- reconcile v2 ------------------------------------------------------------------
 
 

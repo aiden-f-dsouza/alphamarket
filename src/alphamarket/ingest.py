@@ -656,7 +656,8 @@ def ingest_events(
 
 
 def stored_resume_cursor(db: Session, account: VenueAccount, stream: str) -> str | None:
-    """What the last completed pass handed back for `stream` (None: use since)."""
+    """Where the next pass of `stream` starts: the cursor of an interrupted
+    pass, else what the last completed pass handed back (None: use since)."""
     return db.scalar(
         select(LedgerSyncState.resume_cursor).where(
             LedgerSyncState.venue_account_id == account.id, LedgerSyncState.stream == stream
@@ -695,6 +696,14 @@ def sync_since(db: Session, account: VenueAccount, stream: str) -> datetime | No
     return None if newest is None else aware(newest) - OVERLAP
 
 
+def _pass_cursor(page) -> str | None:
+    """What the next pass starts from: mid-pass, this page's next_cursor, so an
+    interrupted backfill resumes where it stopped (a venue paging newest-first
+    across pages would otherwise restart from `since` = the newest stored row
+    and never fetch the older pages); on the final page, its resume_cursor."""
+    return page.next_cursor if page.next_cursor is not None else page.resume_cursor
+
+
 def ingest_asset_fills_page(
     db: Session,
     account: VenueAccount,
@@ -703,13 +712,13 @@ def ingest_asset_fills_page(
     since: datetime | None = None,
     into: LedgerWriteResult | None = None,
 ) -> PageCursors:
-    """Fetch ONE page (one venue request), append it, store the resume cursor
-    if it is the final page, and commit. BudgetExhausted/RateLimited raised by
-    the fetch leave nothing half-written; the caller retries with `cursor`."""
+    """Fetch ONE page (one venue request), append it, store where the next
+    sync must start (_pass_cursor), and commit. BudgetExhausted/RateLimited
+    raised by the fetch leave nothing half-written; the caller retries with
+    `cursor`, and so does the next sync_account."""
     page = connector.fetch_asset_fills_page(cursor, since)
     result = ingest_asset_fills(db, account, page.items)
-    if page.next_cursor is None:
-        _store_resume_cursor(db, account, STREAM_ASSET_FILLS, page.resume_cursor)
+    _store_resume_cursor(db, account, STREAM_ASSET_FILLS, _pass_cursor(page))
     db.commit()
     if into is not None:
         into.merge(result)
@@ -727,8 +736,7 @@ def ingest_events_page(
     """Same as ingest_asset_fills_page for non-fill events."""
     page = connector.fetch_events_page(cursor, since)
     result = ingest_events(db, account, page.items)
-    if page.next_cursor is None:
-        _store_resume_cursor(db, account, STREAM_EVENTS, page.resume_cursor)
+    _store_resume_cursor(db, account, STREAM_EVENTS, _pass_cursor(page))
     db.commit()
     if into is not None:
         into.merge(result)
