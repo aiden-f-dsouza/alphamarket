@@ -16,7 +16,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from alphamarket import ratelimit, sessions
+from alphamarket import audit, ratelimit, sessions
 from alphamarket.db import get_db
 from alphamarket.email import send_security_alert
 from alphamarket.models import User, UserTotp
@@ -119,6 +119,8 @@ def finish_login(db: Session, request: Request, user: User, *, step_up: bool = F
     """Start a full session (rotating any presented one) and, when this
     user has signed in before but never from this IP, email an alert."""
     sess = sessions.issue(db, request, user, step_up=step_up)
+    audit.record(db, "security.login", actor_user_id=user.id, target_type="user", target_id=user.id)
+    db.commit()
     if sessions.has_prior_sessions(db, user.id, exclude_id=sess.id) and not (
         sessions.seen_ip_before(db, user.id, sess.ip, exclude_id=sess.id)
     ):
@@ -163,6 +165,15 @@ def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)) -> 
     ok = verify_password(payload.password, user.password_hash if user else _dummy_hash())
     # Same error for unknown email and wrong password: do not leak which one it was.
     if user is None or not ok:
+        # The attempted address is not stored: it may be a typo of someone else's.
+        audit.record(
+            db,
+            "security.login_failed",
+            actor_user_id=user.id if user else None,
+            target_type="user" if user else None,
+            target_id=user.id if user else None,
+        )
+        db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     if totp_enabled(db, user):
         sessions.issue(db, request, user, mfa_pending=True)

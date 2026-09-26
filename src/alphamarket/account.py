@@ -24,7 +24,7 @@ from alphamarket import ratelimit, sessions
 from alphamarket.auth import current_user, ensure_password_fits, hash_password, verify_password
 from alphamarket.config import get_settings
 from alphamarket.db import get_db
-from alphamarket.email import send_email, send_security_alert
+from alphamarket.email import security_event, send_email
 from alphamarket.models import AuthToken, AuthTokenKind, User
 from alphamarket.passwords import ensure_not_breached
 
@@ -165,7 +165,7 @@ def reset_password(db: Session, token: str, new_password: str) -> User:
     )
     db.commit()
     sessions.revoke_all(db, user.id)
-    send_security_alert(user, "password_changed", {"How": "password reset link"})
+    security_event(db, user, "password_changed", {"How": "password reset link"})
     return user
 
 
@@ -181,7 +181,7 @@ def change_password(
     db.commit()
     current = sessions.load(db, request)
     sessions.revoke_all(db, user.id, except_id=current.id if current else None)
-    send_security_alert(user, "password_changed", {"How": "changed while signed in"})
+    security_event(db, user, "password_changed", {"How": "changed while signed in"})
 
 
 def require_verified_email(user: User = Depends(current_user)) -> User:

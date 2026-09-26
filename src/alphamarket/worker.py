@@ -28,7 +28,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from alphamarket import credentials, redaction, scopecheck
+from alphamarket import credentials, email, redaction, scopecheck
 from alphamarket.analytics import compute_strategy_stats, promote_incubating
 from alphamarket.config import get_settings
 from alphamarket.connectors.base import BudgetExhausted, InstrumentKind, RateLimited
@@ -360,6 +360,7 @@ def sync_now(db: Session, account: VenueAccount) -> int | None:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     redaction.install()
+    email.register_alert_email(SessionLocal)  # key-suspension alerts reach the owner
     settings = get_settings()
     runner = JobRunner(SessionLocal, build_limiter(settings, engine))
     scheduler = BackgroundScheduler(timezone="UTC")

@@ -23,15 +23,30 @@ from alphamarket.main import create_app
 def test_settings():
     """Pin the cached settings so tests never depend on the developer's .env:
     a throwaway Fernet key for the vault, and KALSHI_ENV=demo so respx mocks
-    (which target the demo host) always match. Invariant #6: no live calls."""
+    (which target the demo host) always match. Invariant #6: no live calls, so
+    a developer .env can never make the suite send real email, query HIBP,
+    count rate limits in the dev database, or wrap keys with a real KMS."""
+    from alphamarket import email
     from alphamarket.config import get_settings
 
     settings = get_settings()
-    original = (settings.vault_key, settings.kalshi_env)
-    settings.vault_key = Fernet.generate_key().decode()
-    settings.kalshi_env = "demo"
+    pinned = {
+        "vault_key": Fernet.generate_key().decode(),
+        "kalshi_env": "demo",
+        "email_backend": "console",
+        "hibp_enabled": False,
+        "rate_limiter": "memory",
+        "trust_proxy_headers": False,
+        "key_wrapper": "local",
+    }
+    original = {name: getattr(settings, name) for name in pinned}
+    for name, value in pinned.items():
+        setattr(settings, name, value)
+    email.set_sender(None)
     yield
-    settings.vault_key, settings.kalshi_env = original
+    for name, value in original.items():
+        setattr(settings, name, value)
+    email.set_sender(None)
 
 
 @pytest.fixture()

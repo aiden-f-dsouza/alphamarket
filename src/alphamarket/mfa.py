@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 from alphamarket import ratelimit, sessions
 from alphamarket.auth import current_user, finish_login, totp_enabled
 from alphamarket.db import get_db
-from alphamarket.email import send_security_alert
+from alphamarket.email import security_event
 from alphamarket.models import RecoveryCode, User, UserTotp
 from alphamarket.vault import decrypt_secret, encrypt_secret
 
@@ -178,7 +178,7 @@ def _fail(request: Request, db: Session, user: User, row: UserTotp, now: datetim
     if decision.count >= rule.limit:
         row.locked_until = now + LOCKOUT
         db.commit()
-        send_security_alert(user, "totp_lockout", {"Locked until": _fmt(row.locked_until)})
+        security_event(db, user, "totp_lockout", {"Locked until": _fmt(row.locked_until)})
         ratelimit.too_many(
             int(LOCKOUT.total_seconds()), "Too many wrong codes. Try again in 15 minutes."
         )
@@ -221,8 +221,8 @@ def check_code(
         return True
     if allow_recovery and not enrolling and _use_recovery_code(db, user, code, now):
         db.commit()
-        send_security_alert(
-            user, "recovery_code_used", {"Codes left": str(remaining_recovery_codes(db, user))}
+        security_event(
+            db, user, "recovery_code_used", {"Codes left": str(remaining_recovery_codes(db, user))}
         )
         return True
     _fail(request, db, user, row, now)
@@ -237,7 +237,7 @@ def confirm_enrolment(request: Request, db: Session, user: User, code: str) -> l
     db.commit()
     codes = replace_recovery_codes(db, user)
     sessions.issue(db, request, user, step_up=True)  # rotate; this counts as a step-up
-    send_security_alert(user, "totp_enabled")
+    security_event(db, user, "totp_enabled")
     return codes
 
 
@@ -265,7 +265,7 @@ def disable(request: Request, db: Session, user: User) -> None:
     db.execute(delete(RecoveryCode).where(RecoveryCode.user_id == user.id))
     db.execute(delete(UserTotp).where(UserTotp.user_id == user.id))
     db.commit()
-    send_security_alert(user, "totp_disabled")
+    security_event(db, user, "totp_disabled")
 
 
 # ---- dependencies --------------------------------------------------------------

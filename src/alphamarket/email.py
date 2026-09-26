@@ -171,3 +171,39 @@ def send_security_alert(user, kind: str, details: dict[str, str] | None = None) 
         "Koine",
     ]
     return send_email(user.email, subject, "\n".join(lines))
+
+
+def security_event(db, user, kind: str, details: dict[str, str] | None = None) -> bool:
+    """Record an account-security event in the audit log ("security.<kind>",
+    committed) and email the owner about it. The one call for every event the
+    security page promises is both recorded and notified."""
+    from alphamarket import audit
+
+    audit.record(
+        db,
+        f"security.{kind}",
+        actor_user_id=user.id,
+        target_type="user",
+        target_id=user.id,
+        details=dict(details or {}),
+    )
+    db.commit()
+    return send_security_alert(user, kind, details)
+
+
+def register_alert_email(session_factory) -> None:
+    """Route alerts.py events (key suspension by the nightly scope re-check) to
+    the account owner's inbox. Registered by the worker, which is where those
+    events happen; alerts.emit already isolates hook failures."""
+    from alphamarket import alerts
+    from alphamarket.models import User
+
+    def hook(alert) -> None:
+        if alert.user_id is None:
+            return
+        with session_factory() as db:
+            user = db.get(User, alert.user_id)
+            if user is not None:
+                send_security_alert(user, alert.kind, {k: str(v) for k, v in alert.details.items()})
+
+    alerts.register(hook)
