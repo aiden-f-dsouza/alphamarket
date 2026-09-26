@@ -26,7 +26,7 @@ def fresh_outbox():
 
 
 def _second_browser(client) -> TestClient:
-    other = TestClient(client.app)
+    other = TestClient(client.app, headers={"origin": get_settings().public_base_url})
     other.__enter__()
     return other
 

@@ -70,9 +70,15 @@ def client(session_factory):
         finally:
             db.close()
 
+    from alphamarket.config import get_settings
+
     app = create_app()
     app.dependency_overrides[get_db] = override_get_db
-    with TestClient(app) as c:
+    # csrf.py (P3) requires unsafe methods that carry a session cookie to
+    # also carry a matching Origin; default every test request to one so
+    # existing POST/PUT/PATCH/DELETE tests keep passing without change. A
+    # test exercising cross-origin rejection overrides this per-request.
+    with TestClient(app, headers={"origin": get_settings().public_base_url}) as c:
         yield c
 
 

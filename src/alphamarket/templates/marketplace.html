@@ -44,7 +44,7 @@
   <div style="display:flex;align-items:center;gap:20px">
     <form method="get" action="/marketplace" class="toggle mono small text2">
       {% if tag %}<input type="hidden" name="tag" value="{{ tag }}">{% endif %}{% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}{% if view == "table" %}<input type="hidden" name="view" value="table">{% endif %}
-      <input type="checkbox" name="incubating" value="1" {% if incubating %}checked{% endif %} onchange="this.form.submit()"> Show incubating
+      <input type="checkbox" name="incubating" value="1" {% if incubating %}checked{% endif %} data-autosubmit> Show incubating
     </form>
     {% set base = '/marketplace?' ~ ('tag=' ~ tag|urlencode ~ '&' if tag) ~ ('incubating=1&' if incubating) ~ ('q=' ~ q|urlencode ~ '&' if q) %}
     <div class="seg" role="group" aria-label="View"><a class="{{ 'on' if view == 'cards' }}" href="{{ base }}view=cards" {% if view == 'cards' %}aria-current="true"{% endif %}>Browse</a><a class="{{ 'on' if view == 'table' }}" href="{{ base }}view=table" {% if view == 'table' %}aria-current="true"{% endif %}>Compare</a></div>

@@ -34,14 +34,4 @@
     </div></form>
   </div>
 </div>
-<script>
-  document.getElementById("copy-link").addEventListener("click", function () {
-    var btn = this, input = document.getElementById("invite-link");
-    input.select();
-    navigator.clipboard.writeText(input.value).then(function () {
-      var label = btn.lastChild; label.textContent = btn.dataset.copied;
-      setTimeout(function () { label.textContent = "Copy"; }, 1500);
-    });
-  });
-</script>
 {% endblock %}

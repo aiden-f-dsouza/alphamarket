@@ -78,7 +78,7 @@
     <form class="inline" method="post" action="/dashboard/accounts/{{ a.id }}/sync"><button class="btn secondary">{{ m.icon("sync", 14) }}Sync now</button></form>
     {% if row.reconcilable %}<form class="inline" method="post" action="/dashboard/accounts/{{ a.id }}/reconcile"><button class="btn secondary">Reconcile now</button></form>{% else %}<span class="mono small muted">no venue balance to reconcile against</span>{% endif %}
     <span style="flex-grow:1"></span>
-    <form class="inline" method="post" action="/dashboard/accounts/{{ a.id }}/disconnect" onsubmit="return confirm('Disconnect this account?')"><button class="btn danger">{{ "Disconnect and erase key" if row.profile.needs_secret else "Disconnect" }}</button></form>
+    <form class="inline" method="post" action="/dashboard/accounts/{{ a.id }}/disconnect" data-confirm="Disconnect this account?"><button class="btn danger">{{ "Disconnect and erase key" if row.profile.needs_secret else "Disconnect" }}</button></form>
   </div>
   {% endif %}
 </div>

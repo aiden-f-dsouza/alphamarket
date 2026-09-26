@@ -189,3 +189,59 @@ take over. These controls apply to every account:
 - **Security emails** go to you when your account is signed in from a new
   network, when two-factor is turned on or off or locks, when a recovery code
   is used, when your password changes, and when a key is connected.
+
+## Browser protections
+
+Beyond the account and key handling above, the app itself is hardened
+against the standard web attacks:
+
+- **CSRF (cross-site request forgery).** Every state-changing request
+  (connect, sync, reconcile, disconnect, claim, follow, allocate, edit a
+  listing, log in or out) is rejected with 403 unless its `Origin` header
+  (or, when a browser omits `Origin`, its `Referer`) matches Koine's own
+  origin. `SameSite=Lax` on the session cookie is the first layer; this
+  Origin/Referer check is the second, independent one, because SameSite
+  alone is not something every client is guaranteed to enforce. A request
+  with no session cookie (a plain API call, or a future webhook) is not
+  checked at all: there is no session to forge into.
+- **Content-Security-Policy.** Scripts load only from Koine's own origin
+  (`script-src 'self'`); there is no inline `<script>` anywhere in the
+  rendered HTML and no inline event-handler attribute (`onclick=`,
+  `onchange=`, etc.) — the small amount of client JS (closing a menu,
+  drawing in an equity chart, copying the invite link, confirming a
+  disconnect) lives in one static file the browser fetches once and
+  verifies against this policy. Images, fonts and stylesheets are
+  restricted to Koine's own origin plus Google Fonts, the only third-party
+  asset any page loads. Styles keep `'unsafe-inline'`, because the templates
+  use plain `style="..."` attributes for one-off layout; this is a
+  narrower exception than script execution and does not, by itself, let an
+  injected `<script>` run. Framing is refused entirely
+  (`frame-ancestors 'none'`, and the older `X-Frame-Options: DENY` for
+  browsers that only understand that header), forms may only submit back to
+  Koine (`form-action 'self'`), and `<base>` cannot be used to redirect
+  relative URLs elsewhere (`base-uri 'none'`).
+- **Other response headers**, sent on every page: `Strict-Transport-Security`
+  once the deployment serves HTTPS-only, so a browser never even tries plain
+  HTTP again; `X-Content-Type-Options: nosniff`, so a browser never
+  reinterprets a response as a different, more dangerous content type;
+  `Referrer-Policy: strict-origin-when-cross-origin`, so a link to another
+  site only ever leaks that site's own address, never a page's path or
+  query string; and `Permissions-Policy` turning off camera, microphone and
+  geolocation, none of which this app uses.
+
+## Edge
+
+Every non-demo deployment sits behind Cloudflare in front of the app:
+
+- **TLS in full (strict) mode**, so the connection from Cloudflare to the
+  origin is itself verified, not just encrypted, closing the gap a
+  Cloudflare-to-origin man-in-the-middle would otherwise leave.
+- **WAF managed rules**, Cloudflare's maintained rule sets for common
+  injection and exploit patterns, in front of every request before it
+  reaches the app.
+- **A rate rule on `/auth/*` and `/api/*`**, so a flood aimed at login,
+  signup, or the public JSON API is slowed at the edge, before it ever
+  reaches the app's own rate limiter or the database.
+- **Caching of public pages** (the marketplace, strategy pages, the trust
+  pages), so a spike in readers is served from the edge rather than
+  recomputing the same platform-verified numbers on every request.

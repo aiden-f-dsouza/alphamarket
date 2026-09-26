@@ -159,7 +159,7 @@ def test_change_password_keeps_this_session_only(client, session_factory, fresh_
     from fastapi.testclient import TestClient
 
     client.post("/auth/signup", json=SIGNUP)
-    with TestClient(client.app) as other:
+    with TestClient(client.app, headers={"origin": get_settings().public_base_url}) as other:
         other.post("/auth/login", json=LOGIN)
         bad = {"current_password": "wrong-one-1", "new_password": "next-password-1"}
         assert client.post("/auth/password/change", json=bad).status_code == 401
