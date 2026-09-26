@@ -382,3 +382,104 @@ def _enforce_append_only(session: Session, flush_context, instances) -> None:
     for obj in session.deleted:
         if isinstance(obj, APPEND_ONLY_MODELS):
             raise AppendOnlyViolation(f"{type(obj).__name__} rows are append-only; cannot delete")
+
+
+# ---- p2-jobs ----
+# Job queue, per-account sync schedule, outbound rate buckets and per-venue
+# circuit breakers (platform_plan 2.5, implementation_plan P2). None of these
+# are ledger facts: they are mutable coordination state, so invariant 3 does
+# not apply (a job row is claimed, leased, retried and finished in place).
+
+from sqlalchemy import Index, text  # noqa: E402  (kept in this block to avoid merge conflicts)
+
+
+class JobStatus(StrEnum):
+    PENDING = "pending"  # waiting for run_after
+    RUNNING = "running"  # claimed by a worker; lease_until says until when
+    DONE = "done"
+    DEAD = "dead"  # dead-lettered after max_attempts failures
+
+
+ACTIVE_JOB_STATUSES = (JobStatus.PENDING, JobStatus.RUNNING)
+
+
+class Job(Base):
+    """One unit of worker work. See jobs.py for the queue protocol and
+    docs/worker.md for the kinds and priorities."""
+
+    __tablename__ = "jobs"
+    __table_args__ = (
+        # The same dedupe key (default kind + account) is never queued twice
+        # while a job for it is pending or running.
+        Index(
+            "uq_jobs_active_dedupe",
+            "dedupe_key",
+            unique=True,
+            postgresql_where=text("status IN ('pending', 'running')"),
+            sqlite_where=text("status IN ('pending', 'running')"),
+        ),
+        Index("ix_jobs_claim", "status", "priority", "run_after"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(40))
+    venue_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("venue_accounts.id"), index=True, default=None
+    )
+    dedupe_key: Mapped[str] = mapped_column(String(200))
+    # Handler input; a backfill keeps its connector cursor here. Never secrets.
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    priority: Mapped[int] = mapped_column(Integer)  # lower runs first
+    status: Mapped[str] = mapped_column(String(12), default=JobStatus.PENDING)
+    run_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)  # failures so far
+    max_attempts: Mapped[int] = mapped_column(Integer, default=5)
+    deferrals: Mapped[int] = mapped_column(Integer, default=0)  # budget/rate-limit reschedules
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    locked_by: Mapped[str | None] = mapped_column(String(80), default=None)
+    last_error: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class AccountSchedule(Base):
+    """Per-account worker state kept off venue_accounts: when the next
+    incremental sync is due (deterministic per-account jitter, see
+    jobs.next_sync_slot) and the resume cursors each page stream returned
+    on its last completed pass (connectors.base.Page.resume_cursor)."""
+
+    __tablename__ = "account_schedules"
+
+    venue_account_id: Mapped[int] = mapped_column(ForeignKey("venue_accounts.id"), primary_key=True)
+    next_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    resume_cursors: Mapped[dict] = mapped_column(JSON, default=dict)  # stream -> cursor
+    backfill_done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class RateBucket(Base):
+    """One outbound token bucket (venue_limits.PostgresBuckets). Integer
+    milli-tokens and epoch milliseconds so the refill+take UPDATE is exact
+    integer arithmetic. capacity/refill mirror the profile's RateBudget and
+    are rewritten on every take."""
+
+    __tablename__ = "rate_buckets"
+
+    bucket_key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    capacity_milli: Mapped[int] = mapped_column(BigInteger)
+    refill_per_minute: Mapped[int] = mapped_column(Integer)
+    level_milli: Mapped[int] = mapped_column(BigInteger)  # may go negative after after()
+    updated_ms: Mapped[int] = mapped_column(BigInteger)
+    penalty_until_ms: Mapped[int] = mapped_column(BigInteger, default=0)  # refill halved until
+    blocked_until_ms: Mapped[int] = mapped_column(BigInteger, default=0)  # venue Retry-After
+
+
+class VenueCircuit(Base):
+    """Per-venue circuit breaker: consecutive 5xx/timeouts, open until."""
+
+    __tablename__ = "venue_circuits"
+
+    venue: Mapped[str] = mapped_column(String(40), primary_key=True)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
+    open_until_ms: Mapped[int] = mapped_column(BigInteger, default=0)
