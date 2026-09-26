@@ -13,9 +13,15 @@ from alphamarket.connectors.base import (
     InstrumentKind,
     MarketDataSource,
     OwnershipProof,
+    PaperFeeModel,
+    RateBudget,
+    RateScope,
+    ReadOnlyProof,
     VenueConnector,
     VenueProfile,
 )
+from alphamarket.connectors.coinbase import CoinbaseConnector, CoinbaseMarketData
+from alphamarket.connectors.coinbase import load_private_key as load_coinbase_key
 from alphamarket.connectors.kalshi import KalshiConnector, KalshiMarketData, load_private_key_pem
 from alphamarket.connectors.polymarket import PolymarketConnector, PolymarketMarketData
 
@@ -59,6 +65,48 @@ PROFILES: dict[str, VenueProfile] = {
         fee_rounding_micros=1,  # usdcSize carries six decimals
         ownership=OwnershipProof.PROFILE_CODE,
     ),
+    # ---- venue-coinbase ----
+    "coinbase": VenueProfile(
+        venue="coinbase",
+        display_name="Coinbase",
+        envs=("prod",),  # no sandbox for Advanced Trade
+        credential=CredentialKind.KEY_SECRET,
+        key_label="API key name",
+        secret_label="Private key (base64 Ed25519, or legacy PEM)",
+        key_help=(
+            "In Coinbase Developer Platform (CDP): create an API key scoped to "
+            "View only (no Trade, no Transfer). Key name looks like "
+            "'organizations/…/apiKeys/…'; paste the private key exactly as shown "
+            "(base64 for the current Ed25519 key type)."
+        ),
+        balance_observable=True,
+        instrument=InstrumentKind.ASSET,
+        # Binary-era fields, unused by an ASSET venue's paper mirror (which reads
+        # NormalizedInstrument.qty_step_atoms / min_notional per product instead);
+        # kept at a representative USD-pair value so the profile stays well-formed.
+        tick_micros=10_000,  # $0.01, the common USD-pair quote_increment
+        contract_step_micros=10_000,
+        fee_rate_bps=90,  # [VERIFY] US "Basic" tier taker ~0.90%, Sept 2026 schedule
+        fee_rounding_micros=1,  # commission reported at the quote asset's own scale (assumed 6dp)
+        ownership=OwnershipProof.KEY,
+        readonly_proof=ReadOnlyProof.SCOPE_ENDPOINT,
+        transfers_observable=True,  # v2 /v2/accounts/:id/transactions, same key [VERIFY auth works]
+        history_depth="all",  # [VERIFY] no documented cap on fills, unlike Binance/Hyperliquid
+        quote_asset="USD",
+        tos_doc="docs/venues/coinbase.md",
+        requires_partner_approval=True,  # CDP terms: written approval needed for public display
+        daily_resolution=False,
+        rate_budgets=(
+            # [VERIFY] official rate-limit page moved; "30 req/s" per credential is
+            # widely cited (docs/research/2026-09-16-crypto-venues.md); not
+            # independently confirmed against a live account.
+            RateBudget(scope=RateScope.CREDENTIAL, capacity=30, refill_per_minute=1800),
+            # [VERIFY] public market-data endpoints are not documented as
+            # separately budgeted; a conservative per-IP guess.
+            RateBudget(scope=RateScope.IP, capacity=10, refill_per_minute=600),
+        ),
+        paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
+    ),
 }
 
 SUPPORTED_VENUES = tuple(PROFILES)
@@ -88,9 +136,17 @@ def _build_polymarket(venue_env: str, key_id: str, secret: str | None) -> VenueC
     )
 
 
+def _build_coinbase(venue_env: str, key_id: str, secret: str | None) -> VenueConnector:
+    if not secret:
+        raise ValueError("Coinbase needs a private key (base64 Ed25519 or legacy PEM)")
+    alg, private_key = load_coinbase_key(secret)
+    return CoinbaseConnector(key_name=key_id, private_key=private_key, alg=alg)
+
+
 _BUILDERS: dict[str, Callable[[str, str, str | None], VenueConnector]] = {
     "kalshi": _build_kalshi,
     "polymarket": _build_polymarket,
+    "coinbase": _build_coinbase,  # ---- venue-coinbase ----
 }
 
 
@@ -121,6 +177,7 @@ _MARKET_DATA_BUILDERS: dict[str, Callable[[str], MarketDataSource]] = {
     "polymarket": lambda venue_env: PolymarketMarketData(
         clob_url=POLYMARKET_BASE_URLS[venue_env]["clob"]
     ),
+    "coinbase": lambda venue_env: CoinbaseMarketData(),  # ---- venue-coinbase ----
 }
 
 

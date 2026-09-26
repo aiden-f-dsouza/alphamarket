@@ -1,0 +1,30 @@
+{
+  "pagination": {
+    "ending_before": null,
+    "starting_after": null,
+    "limit": 100,
+    "order": "desc",
+    "previous_uri": null,
+    "next_uri": null
+  },
+  "data": [
+    {
+      "id": "9d1e6c1a-2222-4444-8888-000000000001",
+      "type": "fiat_deposit",
+      "status": "completed",
+      "amount": { "amount": "1000.00", "currency": "USD" },
+      "native_amount": { "amount": "1000.00", "currency": "USD" },
+      "created_at": "2026-06-15T00:00:00Z",
+      "resource": "transaction"
+    },
+    {
+      "id": "9d1e6c1a-2222-4444-8888-000000000002",
+      "type": "staking_transfer",
+      "status": "completed",
+      "amount": { "amount": "0.75", "currency": "USD" },
+      "native_amount": { "amount": "0.75", "currency": "USD" },
+      "created_at": "2026-06-20T00:00:00Z",
+      "resource": "transaction"
+    }
+  ]
+}

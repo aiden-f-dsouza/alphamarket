@@ -1,0 +1,20 @@
+{
+  "fills": [
+    {
+      "entry_id": "22222-2222222-22222224",
+      "trade_id": "1111-11111-111113",
+      "order_id": "0000-000000-000002",
+      "trade_time": "2026-08-01T12:00:00Z",
+      "price": "50000.00",
+      "size": "100.00",
+      "commission": "0.50",
+      "side": "BUY",
+      "size_in_quote": true,
+      "product_id": "BTC-USD",
+      "liquidity_indicator": "TAKER",
+      "retail_portfolio_id": "4444-444444-4444444"
+    }
+  ],
+  "cursor": "",
+  "proof_token_required": false
+}

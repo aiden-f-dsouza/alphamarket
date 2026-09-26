@@ -1,0 +1,30 @@
+{
+  "pagination": {
+    "ending_before": null,
+    "starting_after": null,
+    "limit": 100,
+    "order": "desc",
+    "previous_uri": null,
+    "next_uri": null
+  },
+  "data": [
+    {
+      "id": "57ffb4ae-0c59-5430-bcd3-3f98f797a66c",
+      "type": "receive",
+      "status": "completed",
+      "amount": { "amount": "0.01000000", "currency": "BTC" },
+      "native_amount": { "amount": "500.00", "currency": "USD" },
+      "created_at": "2026-07-01T00:00:00Z",
+      "resource": "transaction"
+    },
+    {
+      "id": "57ffb4ae-0c59-5430-bcd3-3f98f797a66d",
+      "type": "advanced_trade_fill",
+      "status": "completed",
+      "amount": { "amount": "-0.00200000", "currency": "BTC" },
+      "native_amount": { "amount": "-100.00", "currency": "USD" },
+      "created_at": "2026-08-01T12:00:00Z",
+      "resource": "transaction"
+    }
+  ]
+}
