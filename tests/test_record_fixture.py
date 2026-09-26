@@ -121,6 +121,31 @@ def test_refuses_credential_like_input(tmp_path, frozen_now, url, params, header
     assert not (tmp_path / "v").exists()
 
 
+@pytest.mark.parametrize(
+    "json_body",
+    [
+        {"api_key": "abc123"},
+        {"symbol": "BTC-USD", "auth": {"token": "shh"}},
+        {"filters": [{"secret": "nope"}]},
+        {"note": "contains a token embedded in this value"},
+    ],
+)
+def test_refuses_credential_like_json_body(tmp_path, frozen_now, json_body):
+    with pytest.raises(CredentialLikeInput):
+        record(
+            "v",
+            "name",
+            "https://example.com/quote",
+            method="POST",
+            json_body=json_body,
+            fixtures_root=tmp_path,
+            now=frozen_now,
+        )
+    # nothing written, and no request attempted (respx not even mocked here:
+    # a real request would fail the test suite under invariant #6)
+    assert not (tmp_path / "v").exists()
+
+
 @respx.mock
 def test_cli_writes_fixture(tmp_path, frozen_now, monkeypatch):
     respx.get("https://example.com/markets/BTC").mock(

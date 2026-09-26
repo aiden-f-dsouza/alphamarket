@@ -8,10 +8,11 @@ pretty-printed JSON response to
 `tests/fixtures/<venue>/<name>_<YYYYMMDD>.json`, and appends a provenance
 line (url, params, date) to `tests/fixtures/<venue>/README.md`.
 
-It refuses to run if the URL, any param, or any header looks like it would
-carry a credential (matches "key", "secret", "token", "signature" or
-"authorization", case-insensitively) -- this script must never be the way a
-real API key reaches disk or a fixture file.
+It refuses to run if the URL, any param, any header, or any key/value in a
+POST JSON body (checked recursively) looks like it would carry a credential
+(matches "key", "secret", "token", "signature" or "authorization",
+case-insensitively) -- this script must never be the way a real API key
+reaches disk or a fixture file.
 
 Usage:
   uv run python scripts/record_fixture.py kalshi market_btc \\
@@ -52,7 +53,27 @@ def _check_not_credential_like(label: str, value: str) -> None:
             )
 
 
-def _check_request(url: str, params: dict[str, str], headers: dict[str, str]) -> None:
+def _check_json_body(label: str, value: object) -> None:
+    """Recursively scan a POST JSON body for credential-like keys/values.
+
+    The body is a public request payload (e.g. {"symbol": "BTC-USD"}), but
+    nothing stops a caller from pasting a real key/secret into it, so it gets
+    the same scan as the URL/params/headers.
+    """
+    if isinstance(value, dict):
+        for k, v in value.items():
+            _check_not_credential_like(f"{label} key", str(k))
+            _check_json_body(f"{label}.{k}", v)
+    elif isinstance(value, list):
+        for i, item in enumerate(value):
+            _check_json_body(f"{label}[{i}]", item)
+    elif isinstance(value, str):
+        _check_not_credential_like(label, value)
+
+
+def _check_request(
+    url: str, params: dict[str, str], headers: dict[str, str], json_body: dict | None = None
+) -> None:
     _check_not_credential_like("url", url)
     for k, v in params.items():
         _check_not_credential_like("param name", k)
@@ -60,6 +81,8 @@ def _check_request(url: str, params: dict[str, str], headers: dict[str, str]) ->
     for k, v in headers.items():
         _check_not_credential_like("header name", k)
         _check_not_credential_like(f"header value ({k})", v)
+    if json_body:
+        _check_json_body("json body", json_body)
 
 
 def record(
@@ -84,7 +107,7 @@ def record(
     params = params or {}
     headers = headers or {}
     method = method.upper()
-    _check_request(url, params, headers)
+    _check_request(url, params, headers, json_body)
 
     owns_client = client is None
     client = client or httpx.Client(timeout=10.0)
