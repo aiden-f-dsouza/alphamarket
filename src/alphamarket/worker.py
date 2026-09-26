@@ -177,11 +177,26 @@ def handle_mirror(ctx: JobContext) -> None:
     """Apply new signals and resolved markets to allocations (one strategy's,
     or all). Stopped allocations still settle so their curves finish."""
     db = ctx.db
-    q = select(Allocation)
+    q = select(Allocation.id)
     strategy_id = (ctx.job.payload or {}).get("strategy_id")
     if strategy_id is not None:
         q = q.where(Allocation.strategy_id == strategy_id)
-    for allocation in db.scalars(q).all():
+    for allocation_id in db.scalars(q).all():
+        # The global `mirror` job and per-strategy `mirror:strategy:<id>` jobs
+        # can run at once on different workers. mirror_pending reads
+        # last_signal_id and appends mirror_fills (append-only, no unique key
+        # per signal), so two concurrent passes would mirror a signal twice.
+        # Lock the allocation row for the pass; a worker that finds it locked
+        # skips it (the holder is already applying those signals).
+        allocation = db.scalars(
+            select(Allocation)
+            .where(Allocation.id == allocation_id)
+            .with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
+        ).first()
+        if allocation is None:
+            db.rollback()
+            continue
         try:
             mirrored, settled = process_allocation(db, allocation)
             if mirrored or settled:
@@ -199,11 +214,12 @@ def handle_mirror(ctx: JobContext) -> None:
 @register_handler(JobKind.PRICES)
 def handle_prices(ctx: JobContext) -> None:
     """Public quotes for every ticker that may still be open. Each venue's
-    market data spends that venue's IP bucket; a venue that is out of budget
-    or has an open circuit is skipped and the job re-runs after the shortest
-    wait."""
+    market data spends that venue's IP bucket. A venue that is out of budget,
+    answers 429 or has an open circuit is left for the next prices tick: the
+    quotes already fetched are kept, and the job is NOT re-queued early,
+    because a refresh has no cursor and an early re-run would spend the
+    venue's shared IP budget re-fetching the same leading tickers."""
     db, limiter = ctx.db, ctx.limiter
-    retry: float | None = None
     for (venue, venue_env), tickers in open_tickers_by_venue(db).items():
         if limiter is not None and limiter.breaker_open_until(venue) is not None:
             continue
@@ -217,13 +233,12 @@ def handle_prices(ctx: JobContext) -> None:
             db.rollback()
             if isinstance(exc, RateLimited) and limiter is not None:
                 limiter.on_rate_limited(venue, None, exc.retry_after_seconds, exc.endpoint)
-            wait = exc.retry_after_seconds
-            retry = wait if retry is None else min(retry, wait)
+            logger.info(
+                "%s %s price refresh stopped until the next tick: %s", venue, venue_env, exc
+            )
         except Exception:
             db.rollback()
             logger.exception("price refresh failed for %s %s", venue, venue_env)
-    if retry is not None:
-        raise Defer(retry, "some venues' price budgets are spent")
 
 
 @register_handler(JobKind.STATS)

@@ -38,6 +38,7 @@ from enum import StrEnum
 
 from sqlalchemy import delete, exists, func, or_, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm.attributes import set_committed_value
 
 from alphamarket.config import Settings, get_settings
 from alphamarket.connectors.base import BudgetExhausted, RateLimited, VenueConnector
@@ -625,6 +626,28 @@ def _start_cursor(sched: AccountSchedule, stream: str, incremental: bool) -> str
     return (sched.resume_cursors or {}).get(stream) if incremental else None
 
 
+def _commit_owned_payload(ctx: JobContext, payload: dict) -> None:
+    """Write the job's payload and extend its lease in one conditional UPDATE,
+    then commit it with whatever else the session holds (a page's rows, the
+    account's resume cursors). Rolls back and raises LeaseLost if another
+    worker has taken the job over."""
+    now = ctx.clock()
+    n = ctx.db.execute(
+        _update_jobs()
+        .where(*_owned(ctx.job.id, ctx.worker_id))
+        .values(
+            payload=payload,
+            lease_until=now + timedelta(seconds=ctx.settings.worker_lease_seconds),
+            updated_at=now,
+        )
+    ).rowcount
+    if n != 1:
+        ctx.db.rollback()
+        raise LeaseLost(f"job {ctx.job.id} was reclaimed by another worker")
+    ctx.db.commit()
+    set_committed_value(ctx.job, "payload", payload)
+
+
 def run_page_streams(
     ctx: JobContext, *, incremental: bool, streams: Sequence[str] | None = None
 ) -> None:
@@ -646,8 +669,7 @@ def run_page_streams(
         payload["streams"] = names
         payload["cursor"] = _start_cursor(sched, names[0], incremental) if names else None
         payload["pages"] = 0
-        job.payload = payload
-        db.commit()
+        _commit_owned_payload(ctx, payload)
     connector = ctx.connector()
     pages_this_run = 0
     while payload["streams"]:
@@ -668,10 +690,10 @@ def run_page_streams(
             payload["cursor"] = _start_cursor(sched, rest[0], incremental) if rest else None
         else:
             payload["cursor"] = next_cursor
-        job.payload = payload
-        db.commit()  # this page's rows + the advanced cursor, atomically
-        if not ctx.heartbeat():
-            raise LeaseLost(f"job {job.id} was reclaimed by another worker")
+        # This page's rows + the advanced cursor + a renewed lease, atomically,
+        # and only while this worker still owns the job: a worker whose lease
+        # was reaped must not commit a page or move the new owner's cursor.
+        _commit_owned_payload(ctx, payload)
         if payload["streams"] and pages_this_run >= ctx.settings.worker_backfill_pages_per_run:
             raise Defer(0, f"yielding after {pages_this_run} pages")
 
@@ -759,6 +781,14 @@ class JobRunner:
             if handler is None:
                 fail(db, job_id, self.worker_id, f"no handler registered for {job.kind!r}")
                 return "failed"
+            # The batch's lease started at claim time; jobs later in the batch
+            # may have waited behind slow ones. Renew it before starting so a
+            # reaper never counts a failed attempt against a job that has not
+            # run yet (or runs it twice); if it was already reaped, stop here.
+            if not heartbeat(
+                db, job_id, self.worker_id, self.settings.worker_lease_seconds, now=self.clock()
+            ):
+                return "lost"
             if account is not None and account.status == VenueAccountStatus.DISCONNECTED:
                 complete(db, job_id, self.worker_id, now=self.clock())
                 return "done"

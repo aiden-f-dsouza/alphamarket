@@ -173,3 +173,60 @@ def test_migration_0010_downgrades_and_reapplies(pg_url):
         with admin.connect() as conn:
             conn.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
         admin.dispose()
+
+
+def test_concurrent_mirror_passes_skip_a_locked_allocation(pg, monkeypatch):
+    """The global mirror sweep and a strategy's mirror job may run at once on
+    two workers; a pass must skip an allocation another pass holds, or a
+    signal would be mirrored twice into append-only mirror_fills."""
+    from alphamarket import worker
+    from alphamarket.config import get_settings
+    from alphamarket.jobs import JobContext
+    from alphamarket.models import Allocation, Strategy, User, VenueAccount
+
+    tag = uuid.uuid4().hex[:8]
+    with pg() as s:
+        user = User(email=f"m-{tag}@example.com", password_hash="x", display_name=tag)
+        s.add(user)
+        s.flush()
+        acct = VenueAccount(user_id=user.id, venue="kalshi", venue_env="prod", key_id=tag)
+        s.add(acct)
+        s.flush()
+        strat = Strategy(user_id=user.id, venue_account_id=acct.id, name=tag, slug=f"m-{tag}")
+        s.add(strat)
+        s.flush()
+        allocs = [
+            Allocation(
+                user_id=user.id,
+                strategy_id=strat.id,
+                allocation_micros=1_000_000,
+                drawdown_limit_bps=1500,
+                high_water_micros=1_000_000,
+            )
+            for _ in range(2)
+        ]
+        s.add_all(allocs)
+        s.commit()
+        strategy_id, (held, free) = strat.id, [a.id for a in allocs]
+
+    processed: list[int] = []
+
+    def fake_process(db, allocation):
+        processed.append(allocation.id)
+        return 0, 0
+
+    monkeypatch.setattr(worker, "process_allocation", fake_process)
+    holder = pg()
+    try:
+        # Worker A is mid-pass on `held` (row locked, transaction open).
+        holder.scalars(select(Allocation).where(Allocation.id == held).with_for_update()).one()
+        with pg() as b:
+            job = Job(kind="mirror", payload={"strategy_id": strategy_id})
+            ctx = JobContext(
+                db=b, job=job, account=None, worker_id="w-b", settings=get_settings(), limiter=None
+            )
+            worker.handle_mirror(ctx)  # must neither block on nor re-mirror `held`
+    finally:
+        holder.rollback()
+        holder.close()
+    assert processed == [free]

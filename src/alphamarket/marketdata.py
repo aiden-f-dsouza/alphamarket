@@ -12,7 +12,7 @@ from collections.abc import Iterable
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from alphamarket.connectors.base import MarketDataSource
+from alphamarket.connectors.base import BudgetExhausted, MarketDataSource, RateLimited
 from alphamarket.connectors.registry import build_market_data
 from alphamarket.models import (
     Allocation,
@@ -44,6 +44,12 @@ def refresh_prices(
     for ticker in tickers:
         try:
             market = source.fetch_market(ticker)
+        except (BudgetExhausted, RateLimited):
+            # Out of outbound budget or told to back off: keep the quotes
+            # already fetched and stop, so the caller can defer (P2) instead
+            # of hammering the venue with the remaining tickers.
+            db.commit()
+            raise
         except Exception:
             logger.exception("price fetch failed for %s %s", venue, ticker)
             continue

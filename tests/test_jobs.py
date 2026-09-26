@@ -636,3 +636,122 @@ def test_register_handler_decorator(handlers):
         return None
 
     assert handlers[JobKind.KEY_ROTATE] is rotate
+
+
+# ---- review fixes: lease ownership, prices budget handling --------------------------------------
+
+
+def test_lease_lost_mid_page_commits_neither_the_page_nor_the_cursor(
+    db, session_factory, clock, fake_venue, handlers
+):
+    acct = make_account(db, venue="fakex")
+    conn = FakePagedConnector(n_pages=3)
+    job_id = enqueue(db, JobKind.BACKFILL, account_id=acct.id, now=clock())
+    db.commit()
+
+    def run(db_, account, connector, cursor):
+        page = connector.fetch_asset_fills_page(cursor)
+        account.last_sync_error = f"rows of page {cursor}"  # this page's (uncommitted) writes
+        if cursor == "c1":
+            # Meanwhile the lease ran out and another worker took the job over.
+            with session_factory() as other:
+                other.get(Job, job_id).locked_by = "w2"
+                other.commit()
+        return page.next_cursor, page.resume_cursor
+
+    jobs.register_page_runner("asset_fills", run)
+    r = runner(session_factory, clock, None, connector_factory=lambda a: conn)
+    assert r.run_once() == 1
+    job = get_job(session_factory, job_id)
+    # Page c0 and its cursor were committed while w1 owned the job; page c1
+    # was fetched after the takeover, so neither its rows nor cursor c2 landed.
+    assert (job.status, job.locked_by, job.attempts) == ("running", "w2", 0)
+    assert job.payload["cursor"] == "c1"
+    with session_factory() as s:
+        assert s.get(VenueAccount, acct.id).last_sync_error == "rows of page None"
+
+
+def test_each_job_renews_its_lease_when_it_starts(db, session_factory, clock, handlers):
+    ran = []
+    handlers[JobKind.SCOPE_RECHECK] = lambda ctx: ran.append(ctx.job.id)
+    a, b = (make_account(db, key_id=k) for k in ("a", "b"))
+    first = enqueue(db, JobKind.SCOPE_RECHECK, account_id=a.id, now=clock())
+    second = enqueue(db, JobKind.SCOPE_RECHECK, account_id=b.id, now=clock())
+    db.commit()
+    claim_all(session_factory, clock)  # lease until T0 + 300 s for both
+    r = runner(session_factory, clock)
+    # The batch waited behind a slow job: the second job starts 400 s after the
+    # claim, with its lease already expired but not yet reaped. Starting it
+    # renews the lease to now + 300 s, so a reaper cannot count it as failed.
+    clock.advance(400)
+    seen = {}
+
+    def check_lease(ctx):
+        seen["lease"] = jobs.aware(get_job(session_factory, ctx.job.id).lease_until)
+        ran.append(ctx.job.id)
+
+    handlers[JobKind.SCOPE_RECHECK] = check_lease
+    assert r.run_job(second) == "done"
+    assert seen["lease"] == clock() + timedelta(seconds=300)
+    # A job reaped before its turn is not run at all (it is back to pending).
+    with session_factory() as s:
+        assert reap_expired(s, now=clock()) == 1  # `first`: lease T0 + 300 < T0 + 400
+    assert r.run_job(first) == "lost"
+    assert ran == [second]
+    assert get_job(session_factory, first).status == "pending"
+
+
+def test_prices_stop_at_budget_keep_quotes_and_wait_for_the_next_tick(
+    db, session_factory, clock, handlers, monkeypatch
+):
+    from alphamarket.connectors.base import MarketDataSource, NormalizedMarket
+    from alphamarket.models import MarketPrice
+
+    class FakeQuotes(MarketDataSource):
+        venue = "fakex"
+
+        def __init__(self) -> None:
+            self.limited_at: str | None = None
+            self.sent: list[str] = []
+
+        def fetch_market(self, ticker):
+            self.throttle("market")
+            self.sent.append(ticker)
+            if ticker == self.limited_at:
+                raise RateLimited(20.0, "market")
+            return NormalizedMarket(
+                ticker=ticker,
+                status="active",
+                yes_bid_micros=400_000,
+                yes_ask_micros=420_000,
+                last_price_micros=410_000,
+                as_of=clock(),
+            )
+
+    tickers = {("fakex", "prod"): {"A", "B", "C", "D"}}
+    monkeypatch.setattr(worker, "open_tickers_by_venue", lambda db_: tickers)
+    source = FakeQuotes()
+    monkeypatch.setattr(worker, "build_market_data", lambda v, e: source)
+    ip_budget = RateBudget(scope=RateScope.IP, capacity=2, refill_per_minute=60)
+    limiter = VenueLimiter(MemoryBuckets(), budgets_for=lambda v: (ip_budget,), clock_ms=clock.ms)
+    job_id = enqueue(db, JobKind.PRICES, now=clock())
+    db.commit()
+    runner(session_factory, clock, limiter).run_once()
+    # 2 tokens: A and B are fetched and stored; C's before() refuses, nothing is
+    # sent for C or D, and the job completes (no early re-run on the shared bucket).
+    assert source.sent == ["A", "B"]
+    job = get_job(session_factory, job_id)
+    assert (job.status, job.attempts, job.deferrals) == ("done", 0, 0)
+    with session_factory() as s:
+        assert sorted(s.scalars(select(MarketPrice.ticker)).all()) == ["A", "B"]
+
+    # A 429 stops the venue at once (no requests for the remaining tickers) and
+    # penalises the IP bucket: blocked until Retry-After, 20 s = 20,000 ms.
+    clock.advance(60)  # 60 s x 60/min = 60 tokens gained, capped at capacity 2
+    source.sent, source.limited_at = [], "A"
+    enqueue(db, JobKind.PRICES, now=clock())
+    db.commit()
+    runner(session_factory, clock, limiter).run_once()
+    assert source.sent == ["A"]
+    spec = limiter.buckets("fakex", None)[0][1]
+    assert limiter.backend.state(spec, clock.ms()).blocked_until_ms == clock.ms() + 20_000

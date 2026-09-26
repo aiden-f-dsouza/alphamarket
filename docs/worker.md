@@ -92,8 +92,10 @@ the same second. `next_sync_at` lives in `account_schedules`.
   in a row, so Koine paused it. Last error: ... reconnect it if ..."), and its
   next sync is pushed out by `WORKER_DEAD_LETTER_COOLOFF_SECONDS` (1 h).
   The next scheduled sync starts a fresh job.
-- A claim holds a lease of `WORKER_LEASE_SECONDS` (300 s). Page streams
-  heartbeat after every page. A lease that expires (the worker died) is
+- A claim holds a lease of `WORKER_LEASE_SECONDS` (300 s). The lease is
+  renewed when each job of a claimed batch starts, and page streams renew it
+  with every page's commit (the page is only committed if the lease is still
+  held). A lease that expires (the worker died) is
   reaped by the next claim round as one failed attempt. Every state change is
   conditional on the worker still holding the lease, so a slow worker that
   lost its job cannot overwrite the new owner's progress.
@@ -103,7 +105,15 @@ the same second. `next_sync_at` lives in `account_schedules`.
 httpx 429/418 from connectors written before contract v2), an open circuit,
 and a handler's own `jobs.Defer` put the job back to pending at the
 retry-after time *without* counting an attempt. A budget can delay a job; it
-can never dead-letter it.
+can never dead-letter it. The global `prices` job is the exception: it has no
+cursor, so a venue that runs out of budget or answers 429 keeps the quotes
+already fetched and waits for the next `tick_prices` rather than re-running
+early and re-spending the shared IP bucket on the same tickers.
+
+**Mirroring is serialised per allocation.** The global `mirror` sweep and a
+strategy's `mirror` job can run at once on two workers; each pass locks the
+allocation row (`FOR UPDATE SKIP LOCKED`) so a signal is never mirrored twice
+into the append-only `mirror_fills`.
 
 ## Outbound rate limits
 
@@ -184,8 +194,8 @@ history) and sets `account_schedules.backfill_done_at` when it finishes.
 - Worker hosts need NTP: bucket refill uses each host's clock (skew is capped:
   a clock behind the stored time refills nothing).
 - `WORKER_CLAIM_SIZE` (5) jobs are claimed per round trip and run one after
-  another; keep `claim size x slowest job` under `WORKER_LEASE_SECONDS`, or
-  lower the claim size.
+  another; each job's lease is renewed as it starts, so keep the slowest
+  single non-paged job (stats, a global mirror) under `WORKER_LEASE_SECONDS`.
 
 ## Settings
 
