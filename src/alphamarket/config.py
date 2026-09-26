@@ -69,6 +69,22 @@ class Settings(BaseSettings):
         still has to list it)."""
         return {"kalshi": self.kalshi_env, "polymarket": self.polymarket_env}.get(venue, "prod")
 
+    # ---- p2-jobs ----
+    # Job queue and outbound rate limiting (jobs.py, venue_limits.py,
+    # docs/worker.md). egress_ip names the IP bucket this process spends:
+    # every worker behind the same public IP must use the same value.
+    egress_ip: str = "default"
+    worker_claim_size: int = 5  # jobs claimed per SKIP LOCKED round trip
+    worker_lease_seconds: int = 300  # a claimed job is reclaimable after this
+    worker_max_attempts: int = 5  # failures before a job is dead-lettered
+    worker_poll_seconds: float = 2.0  # idle sleep between empty claims
+    worker_backoff_base_seconds: int = 30  # retry delay: base x 2^(attempts-1)
+    worker_backoff_cap_seconds: int = 3600
+    worker_dead_letter_cooloff_seconds: int = 3600  # next sync after a dead letter
+    worker_backfill_pages_per_run: int = 50  # then re-queue so others get a turn
+    worker_sync_tick_seconds: int = 30  # how often the ticker looks for due syncs
+    rate_limiter_backend: str = "postgres"  # "postgres" (shared) | "memory" (one process)
+
 
 @lru_cache
 def get_settings() -> Settings:

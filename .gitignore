@@ -25,3 +25,6 @@ design/koine/*-design-pack.html
 
 # graphify knowledge graph (local, rebuilt by git hooks)
 graphify-out/
+
+# agent worktrees (Claude Code parallel builds)
+.claude/worktrees/
