@@ -1,0 +1,20 @@
+{
+  "list": [
+    {
+      "quoteId": "f3b91c525a44498d8d5b1c9c1a111111",
+      "orderId": 940708407462087195,
+      "orderStatus": "SUCCESS",
+      "fromAsset": "USD",
+      "fromAmount": "100.00000000",
+      "toAsset": "BTC",
+      "toAmount": "0.00118500",
+      "ratio": "0.0000118500",
+      "inverseRatio": "84388.185",
+      "createTime": 1790035200000
+    }
+  ],
+  "startTime": 1789430400000,
+  "endTime": 1790035200000,
+  "limit": 100,
+  "moreData": false
+}
