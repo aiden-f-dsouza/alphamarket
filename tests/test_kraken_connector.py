@@ -207,6 +207,34 @@ def test_fetch_balances_from_docs_example():
     assert conn.fetch_balance().balance_micros == 171_288_615_800
 
 
+@respx.mock
+def test_check_connection_accepts_an_account_with_no_usd():
+    # A new or EUR-only account: Kraken's Balance simply has no ZUSD entry.
+    # That is a valid key with 0 USD, not a failed authentication.
+    _mock(FakeKraken(balance={"ZEUR": "150.0000", "XXBT": "0.0100000000"}))
+    bal = _connector().check_connection()
+    assert bal.balance_micros == 0
+    assert bal.as_of == datetime.fromtimestamp(NOW, UTC)
+
+
+@respx.mock
+def test_check_connection_reports_usd_in_micros():
+    # 171288.6158 USD at 4 dp = 1_712_886_158 atoms; x 10**(6-4) = 171_288_615_800 micros.
+    _mock(FakeKraken(balance=_fixture("docs_balance.json")["result"]))
+    assert _connector().check_connection().balance_micros == 171_288_615_800
+
+
+@respx.mock
+def test_pasted_credentials_with_whitespace_still_sign_correctly():
+    # FakeKraken checks API-Key == KEY and API-Sign against the clean SECRET.
+    _mock(FakeKraken())
+    wrapped = SECRET[:44] + "\n" + SECRET[44:] + "\n"
+    conn = KrakenConnector(
+        f"  {KEY}\n", wrapped, nonces=NonceCounter(clock=lambda: 1_000), clock=lambda: NOW
+    )
+    assert conn.fetch_balances().assets
+
+
 # ---- fills ----------------------------------------------------------------------
 
 

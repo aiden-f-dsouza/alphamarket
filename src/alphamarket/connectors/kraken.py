@@ -69,6 +69,7 @@ from alphamarket.connectors.base import (
     InstrumentType,
     LegKind,
     NormalizedAssetFill,
+    NormalizedBalance,
     NormalizedBalances,
     NormalizedEvent,
     NormalizedInstrument,
@@ -79,7 +80,7 @@ from alphamarket.connectors.base import (
     ReadOnlyEvidence,
     ReadOnlyProof,
 )
-from alphamarket.money import to_atoms
+from alphamarket.money import from_atoms, to_atoms, to_micros
 
 log = logging.getLogger(__name__)
 
@@ -560,6 +561,10 @@ class KrakenConnector(AssetVenueConnector):
         nonces: NonceCounter | None = None,
         clock=time.time,
     ) -> None:
+        # Pasted credentials often carry a trailing newline or wrapped lines;
+        # neither the key nor base64 ever contains whitespace.
+        api_key = (api_key or "").strip()
+        api_secret = "".join((api_secret or "").split())
         if not api_key:
             raise ValueError("Kraken needs an API key")
         try:
@@ -615,6 +620,19 @@ class KrakenConnector(AssetVenueConnector):
         return NormalizedBalances(
             as_of=datetime.fromtimestamp(self._clock(), UTC), assets=list(amounts.values())
         )
+
+    def check_connection(self) -> NormalizedBalance:
+        """One authenticated Balance call. Kraken omits assets the account has
+        never held (a new or EUR-only account has no ZUSD), so a missing USD
+        entry is a USD balance of exactly 0, not a bad key: the base
+        fetch_balance would raise BalanceUnavailable and the connect screen
+        would report "could not authenticate" for a valid key."""
+        balances = self.fetch_balances()
+        for amount in balances.assets:
+            if amount.asset == "USD":
+                micros = to_micros(from_atoms(amount.atoms, amount.decimals))
+                return NormalizedBalance(balance_micros=micros, as_of=balances.as_of)
+        return NormalizedBalance(balance_micros=0, as_of=balances.as_of)
 
     # -- read-only proof --
 
