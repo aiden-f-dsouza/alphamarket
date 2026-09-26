@@ -53,13 +53,23 @@ and a note on what changed. In particular, VERIFY on a real statement:
   `POLL_INTERVAL_SECONDS` and retries.
 - `get_statement_too_many_requests.xml` -- IBKR's rate-limit signal (code
   1018), mapped to `base.RateLimited` exactly like an HTTP 429 would be.
-- `get_statement_success.xml` -- a full statement covering two IBKR accounts
-  under one Flex Query (`U1234567`, the one this connector's tests read via
-  `account_ref`, and `U9999999`, present only to prove account filtering
-  works): two `Trade` rows (a buy then a partial sell of AAPL, both at
-  Execution detail with `ibExecID`), a deposit/dividend/withholding-tax/
-  broker-interest `CashTransaction` set, a 4-for-1 forward split
-  `CorporateAction`, one `OpenPosition`, and two `EquitySummaryByReportDateInBase`
-  rows (to prove the connector picks the latest `reportDate`, not the first
-  one in document order). Every dollar figure in the tests is hand-computed
-  from these exact attribute values -- see `tests/test_ibkr_connector.py`.
+- `get_statement_success.xml` -- a `<FlexStatements count="2">` response
+  covering two IBKR accounts under one ("master") Flex Query, each its own
+  SIBLING `<FlexStatement accountId="...">` element (verified against
+  `ibflex`'s `FlexQueryResponse.FlexStatements: tuple[FlexStatement, ...]`,
+  each with its own required `accountId` -- NOT one statement with mixed
+  per-row accountIds, which an earlier version of this fixture wrongly
+  modeled and which let `connectors/ibkr.py` get away with reading only the
+  first `<FlexStatement>` in the response). `U1234567` (the account this
+  connector's tests mostly read via `account_ref`) has two `Trade` rows (a
+  buy then a partial sell of AAPL, both at Execution detail with
+  `ibExecID`), a deposit/dividend/withholding-tax/broker-interest
+  `CashTransaction` set, a 4-for-1 forward split `CorporateAction`, one
+  `OpenPosition`, and two `EquitySummaryByReportDateInBase` rows (to prove
+  the connector picks the latest `reportDate`, not the first one in
+  document order). `U9999999` has its own statement with one MSFT `Trade`,
+  one deposit, one `OpenPosition` and one equity summary row, to prove
+  `account_ref` selects the matching SIBLING statement rather than merging
+  or reading the wrong one. Every dollar figure in the tests is
+  hand-computed from these exact attribute values -- see
+  `tests/test_ibkr_connector.py`.

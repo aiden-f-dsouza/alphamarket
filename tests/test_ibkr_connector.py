@@ -235,6 +235,47 @@ def test_account_ref_filters_trades_and_positions():
     assert fills[0].instrument.symbol == "MSFT"
 
 
+@respx.mock
+def test_multi_account_response_reads_the_matching_sibling_statement():
+    """A real Flex "master" query response is <FlexStatements count="N">
+    holding N SIBLING <FlexStatement accountId="..."> elements, one per
+    account (verified against `ibflex`'s FlexQueryResponse.FlexStatements:
+    tuple[FlexStatement, ...], each with its own accountId) -- not one
+    statement with mixed per-row accountIds. Selecting only the first
+    sibling would silently return the wrong (or no) data for any other
+    account; both accounts here must resolve to their OWN statement."""
+    _mock_happy_path()
+    first = _connector(account_ref="U1234567")
+    second = _connector(account_ref="U9999999")
+
+    first_fills = first.fetch_asset_fills_page().items
+    second_fills = second.fetch_asset_fills_page().items
+
+    assert {f.instrument.symbol for f in first_fills} == {"AAPL"}
+    assert {f.instrument.symbol for f in second_fills} == {"MSFT"}
+
+    first_balances = first.fetch_balances()
+    second_balances = second.fetch_balances()
+    assert first_balances.equity_usd_micros == to_micros("5084.20")
+    assert second_balances.equity_usd_micros == to_micros("1010.00")
+    assert not any(a.asset == "MSFT" for a in first_balances.assets)
+    assert not any(a.asset == "AAPL" for a in second_balances.assets)
+
+
+@respx.mock
+def test_account_with_no_activity_this_window_returns_empty_not_another_accounts_rows():
+    """A master query's response only contains statements for accounts that
+    had activity; an account with none in this window must come back empty,
+    never silently read from a statement that isn't its own."""
+    _mock_happy_path()
+    conn = _connector(account_ref="U7777777")  # present in neither statement
+    assert conn.fetch_asset_fills_page().items == []
+    assert conn.fetch_events_page().items == []
+    balances = conn.fetch_balances()
+    assert balances.assets == []
+    assert balances.equity_usd_micros is None
+
+
 # ---- CashTransactions -> NormalizedEvent, hand-computed legs ---------------
 
 

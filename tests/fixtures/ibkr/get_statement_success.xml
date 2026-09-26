@@ -1,28 +1,41 @@
 <FlexQueryResponse queryName="Koine Activity Query" type="AF">
-  <FlexStatements count="1">
+  <FlexStatements count="2">
     <FlexStatement accountId="U1234567" fromDate="20260101" toDate="20260301" period="Custom" whenGenerated="20260301;180000">
       <Trades>
         <Trade accountId="U1234567" assetCategory="STK" symbol="AAPL" currency="USD" buySell="BUY" quantity="10" tradePrice="150.25" proceeds="-1502.50" ibCommission="-1.00" ibCommissionCurrency="USD" taxes="0" netCash="-1503.50" tradeID="1001" ibExecID="0001a2b3.65432101.01.01" dateTime="20260110;143000" levelOfDetail="EXECUTION" />
         <Trade accountId="U1234567" assetCategory="STK" symbol="AAPL" currency="USD" buySell="SELL" quantity="5" tradePrice="155.00" proceeds="775.00" ibCommission="-1.00" ibCommissionCurrency="USD" taxes="0" netCash="774.00" tradeID="1002" ibExecID="0001a2b3.65432101.02.01" dateTime="20260115;100000" levelOfDetail="EXECUTION" />
-        <Trade accountId="U9999999" assetCategory="STK" symbol="MSFT" currency="USD" buySell="BUY" quantity="1" tradePrice="300.00" proceeds="-300.00" ibCommission="-1.00" ibCommissionCurrency="USD" taxes="0" netCash="-301.00" tradeID="9001" ibExecID="0009z9y9.99999999.01.01" dateTime="20260112;093000" levelOfDetail="EXECUTION" />
       </Trades>
       <CashTransactions>
         <CashTransaction accountId="U1234567" currency="USD" type="Deposits/Withdrawals" amount="5000.00" dateTime="20260105" transactionID="cash-dep-01" />
         <CashTransaction accountId="U1234567" currency="USD" type="Dividends" symbol="AAPL" amount="12.34" dateTime="20260201" transactionID="cash-d-01" description="AAPL(US0378331005) CASH DIVIDEND USD 0.24 PER SHARE - US TAX" />
         <CashTransaction accountId="U1234567" currency="USD" type="Withholding Tax" symbol="AAPL" amount="-1.85" dateTime="20260201" transactionID="cash-t-01" />
         <CashTransaction accountId="U1234567" currency="USD" type="Broker Interest Received" amount="3.21" dateTime="20260228" transactionID="cash-int-01" />
-        <CashTransaction accountId="U9999999" currency="USD" type="Deposits/Withdrawals" amount="1000.00" dateTime="20260106" transactionID="cash-dep-99" />
       </CashTransactions>
       <CorporateActions>
         <CorporateAction accountId="U1234567" currency="USD" symbol="XYZ" type="FS" quantity="300" dateTime="20260210" actionID="ca-001" actionDescription="XYZ SPLIT 4 FOR 1" />
       </CorporateActions>
       <OpenPositions>
         <OpenPosition accountId="U1234567" assetCategory="STK" symbol="AAPL" currency="USD" position="5" costBasisPrice="150.25" markPrice="160.00" reportDate="20260301" />
-        <OpenPosition accountId="U9999999" assetCategory="STK" symbol="MSFT" currency="USD" position="1" costBasisPrice="300.00" markPrice="310.00" reportDate="20260301" />
       </OpenPositions>
       <EquitySummaryInBase>
         <EquitySummaryByReportDateInBase accountId="U1234567" reportDate="20260228" cash="4284.20" stock="795.00" total="5079.20" />
         <EquitySummaryByReportDateInBase accountId="U1234567" reportDate="20260301" cash="4284.20" stock="800.00" total="5084.20" />
+      </EquitySummaryInBase>
+    </FlexStatement>
+    <FlexStatement accountId="U9999999" fromDate="20260101" toDate="20260301" period="Custom" whenGenerated="20260301;180000">
+      <Trades>
+        <Trade accountId="U9999999" assetCategory="STK" symbol="MSFT" currency="USD" buySell="BUY" quantity="1" tradePrice="300.00" proceeds="-300.00" ibCommission="-1.00" ibCommissionCurrency="USD" taxes="0" netCash="-301.00" tradeID="9001" ibExecID="0009z9y9.99999999.01.01" dateTime="20260112;093000" levelOfDetail="EXECUTION" />
+      </Trades>
+      <CashTransactions>
+        <CashTransaction accountId="U9999999" currency="USD" type="Deposits/Withdrawals" amount="1000.00" dateTime="20260106" transactionID="cash-dep-99" />
+      </CashTransactions>
+      <CorporateActions>
+      </CorporateActions>
+      <OpenPositions>
+        <OpenPosition accountId="U9999999" assetCategory="STK" symbol="MSFT" currency="USD" position="1" costBasisPrice="300.00" markPrice="310.00" reportDate="20260301" />
+      </OpenPositions>
+      <EquitySummaryInBase>
+        <EquitySummaryByReportDateInBase accountId="U9999999" reportDate="20260301" cash="700.00" stock="310.00" total="1010.00" />
       </EquitySummaryInBase>
     </FlexStatement>
   </FlexStatements>

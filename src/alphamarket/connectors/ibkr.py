@@ -275,9 +275,38 @@ class IbkrConnector(AssetVenueConnector):
         self, fd: date | None = None, td: date | None = None, p: int | None = None
     ) -> _Statement:
         root = self._fetch_statement_xml(fd, td, p)
-        stmt_el = root.find(".//FlexStatement")
-        if stmt_el is None:
+        # A Flex Query covering several accounts (a "master" query, module
+        # docstring) returns one <FlexStatement> PER ACCOUNT as a SIBLING
+        # element under <FlexStatements> -- verified against the `ibflex`
+        # reference client, whose FlexQueryResponse.FlexStatements is a
+        # tuple[FlexStatement, ...] and whose FlexStatement.accountId is a
+        # required field -- not one statement with mixed per-row accountIds.
+        # `.find()` would silently keep only the first sibling, so every
+        # other account's data would come back empty even though nothing
+        # errors; every sibling is checked for a match instead.
+        statements = root.findall(".//FlexStatement")
+        if not statements:
             raise IbkrStatementError("empty", "no FlexStatement in response", "GetStatement")
+        stmt_el: Element | None = statements[0]
+        if self.account_ref is not None:
+            stmt_el = next((s for s in statements if s.get("accountId") == self.account_ref), None)
+            if stmt_el is None:
+                # None of the statements in this response cover our account
+                # (e.g. a master query where other accounts traded and ours
+                # did not this window): report no activity rather than
+                # reading a different account's rows.
+                fallback_to = td or date.today()
+                return _Statement(
+                    account_id=self.account_ref,
+                    from_date=fd or fallback_to,
+                    to_date=fallback_to,
+                    when_generated=None,
+                    trades=[],
+                    cash_transactions=[],
+                    corporate_actions=[],
+                    open_positions=[],
+                    equity_summary=None,
+                )
         account_id = self.account_ref or stmt_el.get("accountId") or ""
         self._last_when_generated = stmt_el.get("whenGenerated")
 
