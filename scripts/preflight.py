@@ -11,6 +11,22 @@ from sqlalchemy import text
 from alphamarket.config import get_settings
 from alphamarket.db import engine
 
+# Invariant 3: every append-only table has a "<table>_append_only" trigger
+# (migrations 0003, 0007, 0009).
+EXPECTED_APPEND_ONLY_TRIGGERS = frozenset(
+    f"{table}_append_only"
+    for table in (
+        "fills",
+        "settlements",
+        "signals",
+        "mirror_fills",
+        "mirror_settlements",
+        "ledger_entries",
+        "asset_fills",
+        "ledger_quarantines",
+    )
+)
+
 
 def main() -> int:
     s = get_settings()
@@ -34,14 +50,14 @@ def main() -> int:
             if dialect != "postgresql":
                 problems.append(f"database is {dialect}, not postgresql")
             else:
-                trig = conn.execute(
-                    text("SELECT count(*) FROM pg_trigger WHERE tgname LIKE '%_append_only'")
-                ).scalar()
-                if trig < 5:
-                    problems.append(
-                        "append-only triggers missing (fills, settlements, signals, "
-                        "mirror_fills, mirror_settlements)"
-                    )
+                installed = set(
+                    conn.execute(
+                        text("SELECT tgname FROM pg_trigger WHERE tgname LIKE '%_append_only'")
+                    ).scalars()
+                )
+                missing = sorted(EXPECTED_APPEND_ONLY_TRIGGERS - installed)
+                if missing:
+                    problems.append(f"append-only triggers missing: {', '.join(missing)}")
     except Exception as exc:  # noqa: BLE001
         problems.append(f"database unreachable: {type(exc).__name__}")
         head = None
