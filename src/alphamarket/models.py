@@ -382,3 +382,217 @@ def _enforce_append_only(session: Session, flush_context, instances) -> None:
     for obj in session.deleted:
         if isinstance(obj, APPEND_ONLY_MODELS):
             raise AppendOnlyViolation(f"{type(obj).__name__} rows are append-only; cannot delete")
+
+
+# ---- p1-ledger ----
+# Ledger v2 (platform_plan 2.1): instruments, legs, asset fills, anchors and
+# daily prices. Asset quantities are integer atoms at a per-row `decimals`
+# (<= 12), parsed from the venue's decimal string via money.to_atoms.
+
+from datetime import date  # noqa: E402
+
+from sqlalchemy import CheckConstraint, Date, Index  # noqa: E402
+
+MAX_LEDGER_DECIMALS = 12  # money.MAX_DECIMALS; the CHECK constraints pin it in the schema
+
+
+def _decimals_check(column: str, table: str) -> CheckConstraint:
+    return CheckConstraint(
+        f"{column} >= 0 AND {column} <= {MAX_LEDGER_DECIMALS}", name=f"ck_{table}_{column}"
+    )
+
+
+# SQLite only auto-increments an INTEGER PRIMARY KEY; Postgres gets BIGINT.
+_BigId = BigInteger().with_variant(Integer, "sqlite")
+
+
+class Instrument(Base):
+    """One tradable thing on one venue, exactly as the venue names it. Binary
+    venues register one row per market ticker (base_asset = ticker)."""
+
+    __tablename__ = "instruments"
+    __table_args__ = (
+        UniqueConstraint("venue", "symbol", name="uq_instruments_venue_symbol"),
+        _decimals_check("qty_decimals", "instruments"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    venue: Mapped[str] = mapped_column(String(40))
+    symbol: Mapped[str] = mapped_column(String(160))
+    type: Mapped[str] = mapped_column(String(20))  # connectors.base.InstrumentType
+    base_asset: Mapped[str] = mapped_column(String(120))
+    quote_asset: Mapped[str] = mapped_column(String(40))
+    qty_decimals: Mapped[int] = mapped_column(Integer)
+    qty_step_atoms: Mapped[int] = mapped_column(BigInteger, default=1)
+    min_qty_atoms: Mapped[int] = mapped_column(BigInteger, default=0)
+    min_notional: Mapped[str | None] = mapped_column(String(64), default=None)  # decimal string
+    multiplier: Mapped[int] = mapped_column(Integer, default=1)
+    expiry: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SymbolHistory(Base):
+    """Which symbol an instrument traded under, and when (renames, mergers)."""
+
+    __tablename__ = "symbol_history"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"), index=True)
+    symbol: Mapped[str] = mapped_column(String(160))
+    valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class LedgerEntry(Base):
+    """APPEND-ONLY. One leg: the signed change of one asset in one venue
+    account. Every fill, settlement and event is a group of legs sharing
+    `group_ref`; balances are sums of legs (ledger.balance_vector)."""
+
+    __tablename__ = "ledger_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "venue_account_id", "venue_ref", "kind", "asset", name="uq_ledger_entries_identity"
+        ),
+        _decimals_check("decimals", "ledger_entries"),
+        Index("ix_ledger_entries_account_group", "venue_account_id", "group_ref"),
+        Index("ix_ledger_entries_account_asset", "venue_account_id", "asset"),
+    )
+
+    id: Mapped[int] = mapped_column(_BigId, primary_key=True)
+    venue_account_id: Mapped[int] = mapped_column(ForeignKey("venue_accounts.id"))
+    instrument_id: Mapped[int | None] = mapped_column(ForeignKey("instruments.id"), default=None)
+    asset: Mapped[str] = mapped_column(String(120))
+    delta_atoms: Mapped[int] = mapped_column(BigInteger)
+    decimals: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(20))  # connectors.base.LegKind
+    venue_ref: Mapped[str] = mapped_column(String(255))
+    group_ref: Mapped[str] = mapped_column(String(300))
+    balance_after_atoms: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AssetFill(Base):
+    """APPEND-ONLY. The non-leg fields of a NormalizedAssetFill (what signals
+    and paper copying read); the cash truth is its ledger legs."""
+
+    __tablename__ = "asset_fills"
+    __table_args__ = (
+        UniqueConstraint("venue_account_id", "venue_fill_id", name="uq_asset_fills_account_fill"),
+        _decimals_check("qty_decimals", "asset_fills"),
+    )
+
+    id: Mapped[int] = mapped_column(_BigId, primary_key=True)
+    venue_account_id: Mapped[int] = mapped_column(ForeignKey("venue_accounts.id"), index=True)
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"), index=True)
+    venue_fill_id: Mapped[str] = mapped_column(String(255))
+    order_id: Mapped[str | None] = mapped_column(String(255), default=None)
+    action: Mapped[str] = mapped_column(String(10))  # buy | sell
+    qty_atoms: Mapped[int] = mapped_column(BigInteger)
+    qty_decimals: Mapped[int] = mapped_column(Integer)
+    price: Mapped[str] = mapped_column(String(64))  # decimal string, as reported
+    liquidity: Mapped[str | None] = mapped_column(String(10), default=None)
+    filled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AnchorBalance(Base):
+    """One asset of the venue's balance vector at anchor time (asset venues).
+    The newest `as_of` set per account is the reconciliation anchor."""
+
+    __tablename__ = "anchor_balances"
+    __table_args__ = (
+        UniqueConstraint("venue_account_id", "asset", "as_of", name="uq_anchor_balances_asset_at"),
+        _decimals_check("decimals", "anchor_balances"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    venue_account_id: Mapped[int] = mapped_column(ForeignKey("venue_accounts.id"), index=True)
+    asset: Mapped[str] = mapped_column(String(120))
+    atoms: Mapped[int] = mapped_column(BigInteger)
+    decimals: Mapped[int] = mapped_column(Integer)
+    entry_price: Mapped[str | None] = mapped_column(String(64), default=None)
+    mark_price: Mapped[str | None] = mapped_column(String(64), default=None)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PriceDaily(Base):
+    """One UTC daily close per instrument. `close` is the venue's string;
+    `usd_micros_per_unit` is filled only when the quote is USD or a
+    stablecoin valued at par."""
+
+    __tablename__ = "prices_daily"
+    __table_args__ = (UniqueConstraint("instrument_id", "day", name="uq_prices_daily_inst_day"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"), index=True)
+    day: Mapped[date] = mapped_column(Date)
+    close: Mapped[str] = mapped_column(String(64))
+    usd_micros_per_unit: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    source: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class LedgerSyncState(Base):
+    """Per-account, per-stream resume cursor (connectors.base.Page): the
+    opaque state the final page of a pass hands back for the next sync."""
+
+    __tablename__ = "ledger_sync_state"
+    __table_args__ = (
+        UniqueConstraint("venue_account_id", "stream", name="uq_ledger_sync_state_stream"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    venue_account_id: Mapped[int] = mapped_column(ForeignKey("venue_accounts.id"))
+    stream: Mapped[str] = mapped_column(String(20))  # "asset_fills" | "events"
+    resume_cursor: Mapped[str | None] = mapped_column(Text, default=None)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class LedgerQuarantine(Base):
+    """APPEND-ONLY. Why an account's strategy was quarantined by the ledger
+    (a mismatching or partial duplicate event, a broken venue running
+    balance, a per-asset divergence). A human reads these before
+    un-quarantining."""
+
+    __tablename__ = "ledger_quarantines"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    venue_account_id: Mapped[int] = mapped_column(ForeignKey("venue_accounts.id"), index=True)
+    reason: Mapped[str] = mapped_column(Text)
+    ref: Mapped[str | None] = mapped_column(String(300), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AssetReconciliation(Base):
+    """One asset of one reconciliation run on an asset venue (reconcile v2).
+    The run's overall verdict is also written as an EquitySnapshot."""
+
+    __tablename__ = "asset_reconciliations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    venue_account_id: Mapped[int] = mapped_column(ForeignKey("venue_accounts.id"), index=True)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    asset: Mapped[str] = mapped_column(String(120))
+    decimals: Mapped[int] = mapped_column(Integer)
+    venue_atoms: Mapped[int] = mapped_column(BigInteger)
+    computed_atoms: Mapped[int] = mapped_column(BigInteger)
+    divergence_atoms: Mapped[int] = mapped_column(BigInteger)  # venue - computed
+    tolerance_atoms: Mapped[int] = mapped_column(BigInteger)
+    reconciled: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+APPEND_ONLY_MODELS_V2 = (LedgerEntry, AssetFill, LedgerQuarantine)
+
+
+@event.listens_for(Session, "before_flush")
+def _enforce_append_only_v2(session: Session, flush_context, instances) -> None:
+    """Same guard as _enforce_append_only for the ledger v2 tables; Postgres
+    triggers (migration 0009) back it for raw SQL."""
+    for obj in session.dirty:
+        if isinstance(obj, APPEND_ONLY_MODELS_V2) and session.is_modified(obj):
+            raise AppendOnlyViolation(f"{type(obj).__name__} rows are append-only; cannot update")
+    for obj in session.deleted:
+        if isinstance(obj, APPEND_ONLY_MODELS_V2):
+            raise AppendOnlyViolation(f"{type(obj).__name__} rows are append-only; cannot delete")

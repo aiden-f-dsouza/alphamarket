@@ -32,7 +32,12 @@ from alphamarket.connectors.registry import SUPPORTED_VENUES, build_connector, g
 from alphamarket.db import get_db
 from alphamarket.ingest import sync_account
 from alphamarket.models import Strategy, User, VenueAccount, VenueAccountStatus, utcnow
-from alphamarket.reconcile import reconcilable, reconcile_account, take_anchor
+from alphamarket.reconcile import (
+    reconcilable,
+    reconcile_account,
+    store_anchor_balances,
+    take_anchor,
+)
 from alphamarket.vault import encrypt_secret
 
 logger = logging.getLogger(__name__)
@@ -175,6 +180,7 @@ def connect_account(db: Session, user: User, payload: ConnectIn) -> dict:
     )
     db.add(account)
     db.flush()
+    store_anchor_balances(db, account, anchor)  # asset venues: the anchor vector (P1)
     strategy = Strategy(
         user_id=user.id, venue_account_id=account.id, name=payload.strategy_name, slug="pending"
     )

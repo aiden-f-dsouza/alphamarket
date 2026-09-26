@@ -245,3 +245,119 @@ Each valuation is stored, and the series of valuations is the follower's
 curve. Live mirroring into a real account is not offered: it requires a
 licensed party in the loop, and the platform refuses it structurally rather
 than behind a setting.
+
+## Ledger legs
+
+Every fill, settlement and account event is stored as a group of **legs**.
+A leg is the signed change of one asset in one venue account: a contract, a
+coin, a share, or cash. An account's holding of any asset is the sum of its
+legs, and the cash ledger above is the special case "sum of the USD legs
+after the anchor". Legs are append-only like fills.
+
+A binary fill of `count` contracts at `price` with `fee` becomes three legs,
+all in micro-units:
+
+```
+fill_base   contract   +count or -count (see below)
+fill_quote  USD        -count × price (buy)   or  +count × price (sell)
+fee         USD        -fee
+```
+
+`fill_quote + fee` is exactly `fill_cash_flow` above. How contracts are
+counted depends on the venue:
+
+- **Netting venues (Kalshi)** hold one signed position per market, as the
+  venue reports it: `+` is YES, `-` is NO. Buying YES or selling NO adds
+  `count`; buying NO or selling YES subtracts it. Settlement removes the
+  position: `-(yes_count - no_count)`.
+- **Tokenised venues (Polymarket)** can hold both outcome tokens at once, so
+  each is its own asset (`<market>:yes`, `<market>:no`). Buying adds, selling
+  subtracts, and a redemption burns the tokens redeemed.
+
+A settlement adds one more leg, `+revenue` in USD. Its fee field is not a
+leg, for the reason given under "The cash ledger".
+
+Worked example (the live demo account): cash 1101.8980. Buy 0.84 NO at 0.57
+with fee 0.0145: legs `-0.84` contract, `-0.4788` USD, `-0.0145` USD. The
+market resolves YES: legs `+0.84` contract, `+0` USD. Result: contract
+position `-0.84 + 0.84 = 0`, cash `1101.8980 - 0.4788 - 0.0145 = 1101.4047`,
+the venue's balance to the micro-dollar.
+
+A leg that moves nothing (a zero fee, a losing side's $0 payout) is not
+stored. A settlement with no contracts and no payout therefore leaves no
+trace, and the cash curve at every moment is unchanged.
+
+**Re-reads are checked, not trusted.** Koine re-reads recent venue history
+on every sync, so it sees events it has already stored. An event is either
+stored whole or not at all. If any leg of an event is already stored, every
+leg the venue now reports must match it exactly (compared at the finer of
+the two precisions). A partial or different duplicate is not written. It
+quarantines the strategy, with the reason recorded for review.
+
+Before the legs path replaced the old formula, every recorded Kalshi and
+Polymarket history, plus a generated 200-event history, was replayed both
+ways and gave identical cash curves to the micro-dollar.
+
+## Precision by asset
+
+Coins and shares are not counted in micro-units. Each quantity is an integer
+number of **atoms** at a stated number of decimal places, at most 12: 0.5
+BTC at 8 decimals is `50000000` atoms. Quantities are parsed only from the
+venue's decimal text, never from a floating-point number, and a value finer
+than its stated precision is refused rather than rounded.
+
+Venues change precision, and one venue can report the same asset at
+different precisions (for example 8 decimals on fills and 10 on its ledger).
+So before any sum, every value of an asset is rescaled to the finest
+precision seen for that asset. Rescaling to more decimals is exact:
+
+```
+BTC:  +0.5 (8 dp)  and  -0.1234567891 (10 dp)
+      -> 5000000000 - 1234567891 = 3765432109 atoms at 10 dp  (0.3765432109 BTC)
+USD:  +100.25 (2 dp)  and  -0.0001 (4 dp)
+      -> 1002500 - 1 = 1002499 atoms at 4 dp  (100.2499 USD)
+```
+
+Nothing is ever rescaled to fewer decimals unless the value is exact at the
+coarser precision.
+
+## Reconciliation v2 (coins and shares)
+
+Binary venues are reconciled exactly as described under "Reconciliation".
+Venues that hold coins or shares are reconciled asset by asset:
+
+```
+anchor vector   = every asset balance the venue reported at connection
+ledger vector   = anchor vector + every leg after the anchor, per asset
+for each asset in either vector (a missing side counts as 0),
+at the finer of the two precisions:
+    divergence  = venue amount - ledger amount
+    tolerance   = max(0.1% × venue amount, 1 atom)
+                  (USD keeps the one-cent floor: max(0.1% × venue, $0.01))
+```
+
+Examples: USD 1000.0000 has a tolerance of $1.00. USD 5.00 gets one cent,
+because 0.1% is only half a cent. 0.5 BTC gets 0.0005 BTC (50000 atoms at 8
+dp). 0.000001 BTC gets one atom (0.1% rounds down to zero). A ledger
+holding 0.3765432109 BTC against a venue report of 0.37654321 BTC differs by
+9 atoms at 10 dp, well inside its tolerance of 3765432 atoms.
+
+**Running balances.** Some venues report the balance after each ledger row.
+Koine checks these exactly, with no tolerance, in the order it stored them.
+For each asset, the first reported balance starts the chain. Every later one
+must equal the previous reported balance plus every leg of that asset in
+between:
+
+```
++100.0000  balance 100.0000   (chain starts)
+ -30.0000  (no balance)
+ -20.0000  balance  50.0000   100 - 30 - 20 = 50: ok
+```
+
+Had the venue reported 49.0000 on the last row, the chain would break
+(expected 50.0000).
+
+Any asset outside its tolerance, or any running balance that does not
+follow, quarantines the strategy, as today. Every asset of every check is
+stored, so the history of "did the ledger explain each balance?" is
+auditable per asset.
