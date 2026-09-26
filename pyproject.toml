@@ -52,3 +52,4 @@ extend-immutable-calls = ["fastapi.Depends"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["pg: needs the Postgres test DB (docker compose up -d db_test); skipped when absent"]

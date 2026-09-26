@@ -52,6 +52,48 @@ def from_micros(micros: int) -> Decimal:
     return Decimal(micros) / MICROS_PER_UNIT
 
 
+MAX_DECIMALS = 12
+"""Finest quantity precision the ledger stores (a CHECK constraint enforces it).
+Every exchange in scope reports at most 10 dp; BigInteger at 12 dp still
+holds 9.2 million whole units, and nothing in scope needs 18-dp wei."""
+
+
+def to_atoms(value: str | Decimal, decimals: int) -> int:
+    """Parse a venue decimal string into an exact integer count of atoms,
+    where one whole unit is 10**decimals atoms (BTC at 8 dp: "0.5" -> 50_000_000).
+
+    Asset quantities use this instead of micros (invariant 1, amended by
+    platform_plan D3): rounding 1e-7 BTC away would manufacture exactly the
+    divergence reconciliation exists to detect. Same rules as to_micros:
+    str/Decimal only, and precision finer than `decimals` raises instead of
+    rounding.
+    """
+    if isinstance(value, float | int):
+        raise TypeError(
+            f"to_atoms() takes str or Decimal, got {type(value).__name__}. "
+            "Floats cannot represent decimals exactly; ints are ambiguous about scale."
+        )
+    if not 0 <= decimals <= MAX_DECIMALS:
+        raise ValueError(f"decimals must be within 0..{MAX_DECIMALS}, got {decimals}")
+    scaled = Decimal(value).scaleb(decimals)
+    if scaled != scaled.to_integral_value():
+        raise ValueError(
+            f"{value!r} has precision finer than {decimals} decimals and cannot be "
+            "stored exactly; use the venue's own precision for this asset."
+        )
+    return int(scaled)
+
+
+def from_atoms(atoms: int, decimals: int) -> Decimal:
+    """Exact Decimal in whole units. For display and assertions, not storage."""
+    return Decimal(atoms).scaleb(-decimals)
+
+
+def format_atoms(atoms: int, decimals: int) -> str:
+    """Fixed-point string with exactly `decimals` places, e.g. (50_000_000, 8) -> '0.50000000'."""
+    return f"{from_atoms(atoms, decimals):.{decimals}f}"
+
+
 def format_micros(micros: int, places: int = 4) -> str:
     """Human-readable unit string, e.g. 1_101_898_000 -> '1101.8980'."""
     return f"{from_micros(micros):.{places}f}"
