@@ -1,6 +1,22 @@
-# Fly.io deployment (BUILD_PLAN M4.4). One web process, one worker process,
-# managed Postgres attached as DATABASE_URL. Secrets set with `fly secrets set`:
+# Fly.io deployment (BUILD_PLAN M4.4; docs/deploy.md). Two process GROUPS
+# from the one Dockerfile image, sharing Fly Managed Postgres as DATABASE_URL:
+#   web    -- runs migrations then serves HTTP (the only group with a
+#             http_service / public port below)
+#   worker -- python -m alphamarket.worker: polling, nightly reconcile,
+#             stats, incubation promotion. No http_service: it takes no
+#             inbound traffic, so `fly scale count worker=N` never opens a
+#             port for it.
+# Secrets set with `fly secrets set`:
 #   SECRET_KEY, VAULT_KEY, DATABASE_URL, KALSHI_ENV=prod, SECURE_COOKIES=true
+#
+# Static egress IP (platform_plan/implementation_plan section 2): Kraken,
+# Coinbase and Binance.US let users restrict a key to an IP allowlist, and
+# it's published on /security so users can do that. Allocate one per region
+# BEFORE connecting real venue keys in prod (not run here -- do it by hand):
+#   fly ips allocate-egress -r iad
+# This assigns a static IPv4 (and IPv6) that every machine in that region
+# shares as its outbound source address; see implementation_plan.md 2.3 for
+# how many wallets/keys one IP can poll before it becomes a limiter.
 app = "alphamarket"
 primary_region = "iad"
 
@@ -21,3 +37,9 @@ primary_region = "iad"
 [[vm]]
   size = "shared-cpu-1x"
   memory = "512mb"
+  processes = ["web"]
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  processes = ["worker"]
