@@ -1,0 +1,22 @@
+[
+  {
+    "id": "917c8734-8470-4a3e-a18f-57c3f2ee6631",
+    "brokerage_authorization": "87b24961-b51e-4db8-9226-f198f6518a89",
+    "name": "Robinhood Individual",
+    "number": "Q6542138443",
+    "institution_account_id": "54953432",
+    "institution_name": "Robinhood",
+    "created_date": "2024-07-23T22:50:22.761Z",
+    "funding_date": null,
+    "opening_date": null,
+    "balance": {
+      "total": { "amount": 15363.23, "currency": "USD" }
+    },
+    "status": "open",
+    "raw_type": "Individual",
+    "account_category": "INVESTMENT",
+    "meta": {},
+    "portfolio_group": null,
+    "is_paper": false
+  }
+]

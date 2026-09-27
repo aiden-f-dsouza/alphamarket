@@ -163,6 +163,13 @@ class Settings(BaseSettings):
     ibkr_flex_query_id: str = ""
     ibkr_flex_token: str = ""
 
+    # ---- venue-snaptrade ----
+    # Koine's own SnapTrade partner credentials (identify Koine to SnapTrade;
+    # the same pair is used for every connected trader's userId/userSecret).
+    # https://docs.snaptrade.com/docs/register-a-developer-account
+    snaptrade_client_id: str = ""
+    snaptrade_consumer_key: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
