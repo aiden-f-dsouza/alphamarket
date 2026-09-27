@@ -1,0 +1,149 @@
+{
+ "error": [],
+ "result": {
+  "XXBT": {
+   "aclass": "currency",
+   "altname": "XBT",
+   "decimals": 10,
+   "display_decimals": 5,
+   "collateral_value": 0.99,
+   "status": "enabled",
+   "margin_rate": "0.01"
+  },
+  "XETH": {
+   "aclass": "currency",
+   "altname": "ETH",
+   "decimals": 10,
+   "display_decimals": 5,
+   "collateral_value": 0.99,
+   "status": "enabled",
+   "margin_rate": "0.02"
+  },
+  "ZUSD": {
+   "aclass": "currency",
+   "altname": "USD",
+   "decimals": 4,
+   "display_decimals": 2,
+   "collateral_value": 1.0,
+   "status": "enabled",
+   "margin_rate": "0.025"
+  },
+  "ZEUR": {
+   "aclass": "currency",
+   "altname": "EUR",
+   "decimals": 4,
+   "display_decimals": 2,
+   "collateral_value": 1.0,
+   "status": "enabled",
+   "margin_rate": "0.02"
+  },
+  "USDC": {
+   "aclass": "currency",
+   "altname": "USDC",
+   "decimals": 8,
+   "display_decimals": 4,
+   "collateral_value": 0.995,
+   "status": "enabled",
+   "margin_rate": "0.02"
+  },
+  "USDT": {
+   "aclass": "currency",
+   "altname": "USDT",
+   "decimals": 8,
+   "display_decimals": 4,
+   "collateral_value": 0.995,
+   "status": "enabled",
+   "margin_rate": "0.02"
+  },
+  "SOL": {
+   "aclass": "currency",
+   "altname": "SOL",
+   "decimals": 10,
+   "display_decimals": 5,
+   "collateral_value": 0.925,
+   "status": "enabled",
+   "margin_rate": "0.02"
+  },
+  "ETH2": {
+   "aclass": "currency",
+   "altname": "ETH2",
+   "decimals": 10,
+   "display_decimals": 5,
+   "status": "enabled"
+  },
+  "ETH2.S": {
+   "aclass": "currency",
+   "altname": "ETH2.S",
+   "decimals": 10,
+   "display_decimals": 5,
+   "status": "enabled"
+  },
+  "DOT": {
+   "aclass": "currency",
+   "altname": "DOT",
+   "decimals": 10,
+   "display_decimals": 8,
+   "collateral_value": 0.925,
+   "status": "enabled",
+   "margin_rate": "0.02"
+  },
+  "DOT.S": {
+   "aclass": "currency",
+   "altname": "DOT.S",
+   "decimals": 10,
+   "display_decimals": 8,
+   "status": "enabled"
+  },
+  "DOT28.S": {
+   "aclass": "currency",
+   "altname": "DOT28.S",
+   "decimals": 10,
+   "display_decimals": 8,
+   "status": "enabled"
+  },
+  "XBT.M": {
+   "aclass": "currency",
+   "altname": "XBT.M",
+   "decimals": 10,
+   "display_decimals": 8,
+   "status": "enabled"
+  },
+  "USD.M": {
+   "aclass": "currency",
+   "altname": "USD.M",
+   "decimals": 4,
+   "display_decimals": 4,
+   "status": "enabled"
+  },
+  "USD.HOLD": {
+   "aclass": "currency",
+   "altname": "USD.HOLD",
+   "decimals": 4,
+   "display_decimals": 2,
+   "status": "enabled"
+  },
+  "KFEE": {
+   "aclass": "currency",
+   "altname": "FEE",
+   "decimals": 2,
+   "display_decimals": 2,
+   "status": "enabled"
+  },
+  "XXDG": {
+   "aclass": "currency",
+   "altname": "XDG",
+   "decimals": 8,
+   "display_decimals": 2,
+   "collateral_value": 0.925,
+   "status": "enabled",
+   "margin_rate": "0.02"
+  },
+  "SOL03.S": {
+   "aclass": "currency",
+   "altname": "SOL03.S",
+   "decimals": 10,
+   "display_decimals": 5,
+   "status": "enabled"
+  }
+ }
+}

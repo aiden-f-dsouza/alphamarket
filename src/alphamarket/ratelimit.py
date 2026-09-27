@@ -99,14 +99,17 @@ class MemoryLimiter:
     """Per-process counters. Stale windows are dropped on the next hit of
     the same key, so memory stays bounded by the number of live keys."""
 
-    def __init__(self) -> None:
+    def __init__(self, clock: Callable[[], datetime] | None = None) -> None:
         self._counts: dict[str, tuple[int, int]] = {}  # key -> (window start, count)
         self._lock = threading.Lock()
+        # Injectable so tests can hold one fixed window (a loop that straddles
+        # a window boundary would otherwise reset the count mid-test).
+        self.clock = clock or (lambda: datetime.now(UTC))
 
     def hit(
         self, key: str, limit: int, window_seconds: int, now: datetime | None = None
     ) -> Decision:
-        start, left = window_bounds(now or datetime.now(UTC), window_seconds)
+        start, left = window_bounds(now or self.clock(), window_seconds)
         with self._lock:
             prev_start, prev_count = self._counts.get(key, (start, 0))
             count = (prev_count if prev_start == start else 0) + 1

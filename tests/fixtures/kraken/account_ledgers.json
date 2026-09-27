@@ -1,0 +1,129 @@
+{
+  "error": [],
+  "result": {
+    "ledger": {
+      "L11WDR-AAAAA-AAAAAA": {
+        "refid": "FTWDRAW-00000-000011",
+        "time": 1788100000.0,
+        "type": "withdrawal",
+        "subtype": "",
+        "aclass": "currency",
+        "asset": "ZUSD",
+        "amount": "-100.0000",
+        "fee": "0.3500",
+        "balance": "604.4835"
+      },
+      "L10T3Q-AAAAA-AAAAAA": {
+        "refid": "T3SELL-AAAAA-AAAAAA",
+        "time": 1788090000.75,
+        "type": "trade",
+        "subtype": "",
+        "aclass": "currency",
+        "asset": "ZUSD",
+        "amount": "310.0000",
+        "fee": "0.8060",
+        "balance": "704.8335"
+      },
+      "L09T3B-AAAAA-AAAAAA": {
+        "refid": "T3SELL-AAAAA-AAAAAA",
+        "time": 1788090000.75,
+        "type": "trade",
+        "subtype": "",
+        "aclass": "currency",
+        "asset": "XXBT",
+        "amount": "-0.0100000000",
+        "fee": "0.0000000000",
+        "balance": "0.0100000000"
+      },
+      "L08STK-AAAAA-AAAAAA": {
+        "refid": "STKRWD-00000-000008",
+        "time": 1788086400.0,
+        "type": "staking",
+        "subtype": "",
+        "aclass": "currency",
+        "asset": "ETH2.S",
+        "amount": "0.0001250000",
+        "fee": "0.0000000000",
+        "balance": "0.2501250000"
+      },
+      "L07SIN-AAAAA-AAAAAA": {
+        "refid": "RSTK2S-00000-000007",
+        "time": 1788000301.0,
+        "type": "transfer",
+        "subtype": "stakingfromspot",
+        "aclass": "currency",
+        "asset": "ETH2.S",
+        "amount": "0.2500000000",
+        "fee": "0.0000000000",
+        "balance": "0.2500000000"
+      },
+      "L06SOT-AAAAA-AAAAAA": {
+        "refid": "RSPOT2-00000-000006",
+        "time": 1788000300.0,
+        "type": "transfer",
+        "subtype": "spottostaking",
+        "aclass": "currency",
+        "asset": "XETH",
+        "amount": "-0.2500000000",
+        "fee": "0.0000000000",
+        "balance": "0.2500000000"
+      },
+      "L05T2Q-AAAAA-AAAAAA": {
+        "refid": "T2BUYE-AAAAA-AAAAAA",
+        "time": 1788000200.25,
+        "type": "trade",
+        "subtype": "",
+        "aclass": "currency",
+        "asset": "ZUSD",
+        "amount": "-1000.0000",
+        "fee": "2.6000",
+        "balance": "395.6395"
+      },
+      "L04T2B-AAAAA-AAAAAA": {
+        "refid": "T2BUYE-AAAAA-AAAAAA",
+        "time": 1788000200.25,
+        "type": "trade",
+        "subtype": "",
+        "aclass": "currency",
+        "asset": "XETH",
+        "amount": "0.5000000000",
+        "fee": "0.0000000000",
+        "balance": "0.5000000000"
+      },
+      "L03T1Q-AAAAA-AAAAAA": {
+        "refid": "T1BUYB-AAAAA-AAAAAA",
+        "time": 1788000100.5,
+        "type": "trade",
+        "subtype": "",
+        "aclass": "currency",
+        "asset": "ZUSD",
+        "amount": "-600.2000",
+        "fee": "1.5605",
+        "balance": "1398.2395"
+      },
+      "L02T1B-AAAAA-AAAAAA": {
+        "refid": "T1BUYB-AAAAA-AAAAAA",
+        "time": 1788000100.5,
+        "type": "trade",
+        "subtype": "",
+        "aclass": "currency",
+        "asset": "XXBT",
+        "amount": "0.0200000000",
+        "fee": "0.0000000000",
+        "balance": "0.0200000000"
+      },
+      "L01DEP-AAAAA-AAAAAA": {
+        "refid": "FTDEPO-00000-000001",
+        "time": 1788000000.1,
+        "type": "deposit",
+        "subtype": "",
+        "aclass": "currency",
+        "asset": "ZUSD",
+        "amount": "2000.0000",
+        "fee": "0.0000",
+        "balance": "2000.0000"
+      }
+    },
+    "count": 11
+  }
+}

@@ -506,3 +506,48 @@ money-weighted figure worse, while the time-weighted figure, which measures
 the trader's decisions, stays at −1%.
 
 Returns are computed exactly (as fractions) and are only rounded for display.
+
+## Kraken (spot)
+
+**Where each number comes from.** Kraken's `Ledgers` endpoint lists every
+change to every asset balance, with the balance after it. Kraken defines
+
+```
+balance = previous balance + amount - fee          (per asset, per ledger row)
+```
+
+so each row becomes a leg of `amount` plus a fee leg of `-fee`, and the
+reported `balance` is checked exactly against our replay after that row.
+
+**Trades.** A trade's legs are its ledger rows (the rows whose `refid` is the
+trade id), not the trade's own `cost` and `fee` fields: Kraken prints trade
+cost to the pair's cost precision (5 decimals for USD pairs) but moves the
+USD balance at 4 decimals, so only the ledger rows reproduce the balance. The
+asset that moves with the trade direction (up on a buy, down on a sell) is the
+base, the other is the quote, and every row's fee is a fee leg in that row's
+asset (Kraken fee credits, KFEE, included). The trade's own price, volume and
+side describe the fill; they are cross-checked against the ledger rows and a
+disagreement beyond one unit of the last decimal is logged.
+
+Worked example (tested): buy 0.02 BTC at 30010.0, ledger rows BTC +0.0200000000
+and USD -600.2000 with fee 1.5605: legs BTC +0.02, USD -600.2000, fee USD
+-1.5605, and 2000.0000 - 600.2000 - 1.5605 = 1398.2395 is the USD balance
+Kraken reports after it.
+
+**Everything else** is one event per ledger row: deposits and withdrawals are
+external flows; staking rewards are income; moving coins into or out of a
+staked or earning balance (ETH to ETH2.S, Earn allocations) is a conversion
+inside the account, not a flow; transfers to Kraken Futures and unlabelled
+transfers (airdrops) are external flows, so they never count as a return;
+margin rollover is interest; anything unrecognised is an audited adjustment.
+
+**Assets.** Kraken's codes are renamed to the common ones (XXBT is BTC, ZUSD is
+USD). Staked and earning balances (ETH2.S, DOT28.S, BTC.M) are kept as their
+own assets because Kraken keeps a separate running balance for each, and are
+valued at the price of the underlying coin. USD, USDC and USDT (and their held
+or earning variants) are valued at 1.00.
+
+**Read-only check.** Kraken cannot describe a key's permissions, so we ask it
+to validate an order that is never placed (`validate=true`) and to list
+withdrawal methods; both must be refused with "Permission denied", while
+balance, trade and ledger reads succeed. The check reruns nightly.

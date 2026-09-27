@@ -245,3 +245,17 @@ Every non-demo deployment sits behind Cloudflare in front of the app:
 - **Caching of public pages** (the marketplace, strategy pages, the trust
   pages), so a spike in readers is served from the edge rather than
   recomputing the same platform-verified numbers on every request.
+
+## Kraken keys
+
+A Kraken key is an API key plus a private key; create it with only Query
+Funds, Query Closed Orders & Trades and Query Ledger Entries. Kraken has no
+way to report a key's permissions, so when you connect (and every night) we
+send two requests a read-only key must be refused: an order with
+`validate=true`, which Kraken checks but never sends to the market (a $1
+limit price as a second guard), and a request for your withdrawal methods.
+If Kraken answers either with anything but "Permission denied", the key is
+rejected, or suspended if it was already connected. We store what each check
+returned, never the key. Every request is signed on our server with your
+private key and a strictly increasing number, so a copied request cannot be
+replayed.

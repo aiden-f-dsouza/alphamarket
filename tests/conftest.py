@@ -6,6 +6,7 @@ SQLite is fine here because the models stick to portable column types.
 
 import os
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from cryptography.fernet import Fernet
@@ -74,6 +75,12 @@ def client(session_factory):
 
     app = create_app()
     app.dependency_overrides[get_db] = override_get_db
+    # One fixed rate-limit window for the whole test: loops that count up to a
+    # limit must not straddle a real minute boundary (flaky 429 assertions).
+    limiter = getattr(app.state, "rate_limiter", None)
+    if limiter is not None and hasattr(limiter, "clock"):
+        frozen = datetime(2026, 1, 1, 12, 0, 30, tzinfo=UTC)
+        limiter.clock = lambda: frozen
     # csrf.py (P3) requires unsafe methods that carry a session cookie to
     # also carry a matching Origin; default every test request to one so
     # existing POST/PUT/PATCH/DELETE tests keep passing without change. A

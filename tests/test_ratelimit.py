@@ -61,7 +61,9 @@ def test_postgres_limiter_prunes_expired_windows(session_factory):
 
 def _mini_app(rule: str) -> TestClient:
     app = FastAPI()
-    app.state.rate_limiter = MemoryLimiter()
+    # A fixed clock: 61 requests must land in one window, never straddle two.
+    frozen = datetime(2026, 1, 1, 12, 0, 30, tzinfo=UTC)
+    app.state.rate_limiter = MemoryLimiter(clock=lambda: frozen)
 
     @app.get("/x", dependencies=[Depends(rate_limit(rule))])
     def x() -> dict:
