@@ -24,6 +24,7 @@ dependencies = [
     "segno>=1.6.6",
     "eth-account>=0.14.0",
     "pyjwt>=2.15.0",
+    "defusedxml>=0.7.1",
 ]
 
 [dependency-groups]

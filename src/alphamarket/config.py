@@ -158,6 +158,11 @@ class Settings(BaseSettings):
     def csrf_allowed_origin_list(self) -> list[str]:
         return [o.strip() for o in self.csrf_allowed_origins.split(",") if o.strip()]
 
+    # ---- venue-ibkr ----
+    # Flex Web Service credentials for scripts/ibkr_smoke.py; never logged.
+    ibkr_flex_query_id: str = ""
+    ibkr_flex_token: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
