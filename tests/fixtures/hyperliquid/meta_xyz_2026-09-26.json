@@ -1,0 +1,17 @@
+{
+ "universe": [
+  {
+   "szDecimals": 2,
+   "name": "xyz:RKLB",
+   "maxLeverage": 10,
+   "marginTableId": 10,
+   "onlyIsolated": true,
+   "marginMode": "noCross",
+   "growthMode": "enabled",
+   "lastFeeScaleChangeTime": "2026-04-13T15:14:54.385823035",
+   "deployerFeeScale": "1.0"
+  }
+ ],
+ "marginTables": [],
+ "collateralToken": 0
+}

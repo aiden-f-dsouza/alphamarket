@@ -22,6 +22,7 @@ dependencies = [
     "boto3>=1.43.103",
     "pyotp>=2.10.0",
     "segno>=1.6.6",
+    "eth-account>=0.14.0",
 ]
 
 [dependency-groups]

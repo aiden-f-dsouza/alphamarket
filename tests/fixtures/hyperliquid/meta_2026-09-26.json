@@ -1,0 +1,113 @@
+{
+ "universe": [
+  {
+   "szDecimals": 5,
+   "name": "BTC",
+   "maxLeverage": 40,
+   "marginTableId": 56
+  },
+  {
+   "szDecimals": 4,
+   "name": "ETH",
+   "maxLeverage": 25,
+   "marginTableId": 55
+  },
+  {
+   "szDecimals": 1,
+   "name": "LDO",
+   "maxLeverage": 5,
+   "marginTableId": 5
+  },
+  {
+   "szDecimals": 1,
+   "name": "LINK",
+   "maxLeverage": 10,
+   "marginTableId": 52
+  },
+  {
+   "szDecimals": 0,
+   "name": "ONDO",
+   "maxLeverage": 10,
+   "marginTableId": 51
+  },
+  {
+   "szDecimals": 0,
+   "name": "PUMP",
+   "maxLeverage": 10,
+   "marginTableId": 52
+  },
+  {
+   "szDecimals": 0,
+   "name": "XPL",
+   "maxLeverage": 10,
+   "marginTableId": 51
+  }
+ ],
+ "marginTables": [
+  [
+   51,
+   {
+    "description": "tiered 10x",
+    "marginTiers": [
+     {
+      "lowerBound": "0.0",
+      "maxLeverage": 10
+     },
+     {
+      "lowerBound": "3000000.0",
+      "maxLeverage": 5
+     }
+    ]
+   }
+  ],
+  [
+   52,
+   {
+    "description": "tiered 10x (2)",
+    "marginTiers": [
+     {
+      "lowerBound": "0.0",
+      "maxLeverage": 10
+     },
+     {
+      "lowerBound": "20000000.0",
+      "maxLeverage": 5
+     }
+    ]
+   }
+  ],
+  [
+   55,
+   {
+    "description": "tiered 25x",
+    "marginTiers": [
+     {
+      "lowerBound": "0.0",
+      "maxLeverage": 25
+     },
+     {
+      "lowerBound": "100000000.0",
+      "maxLeverage": 15
+     }
+    ]
+   }
+  ],
+  [
+   56,
+   {
+    "description": "tiered 40x",
+    "marginTiers": [
+     {
+      "lowerBound": "0.0",
+      "maxLeverage": 40
+     },
+     {
+      "lowerBound": "150000000.0",
+      "maxLeverage": 20
+     }
+    ]
+   }
+  ]
+ ],
+ "collateralToken": 0
+}

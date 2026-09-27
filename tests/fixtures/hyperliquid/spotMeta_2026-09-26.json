@@ -1,0 +1,142 @@
+{
+ "universe": [
+  {
+   "tokens": [
+    1,
+    0
+   ],
+   "name": "PURR/USDC",
+   "index": 0,
+   "isCanonical": true
+  },
+  {
+   "tokens": [
+    150,
+    0
+   ],
+   "name": "@107",
+   "index": 107,
+   "isCanonical": false
+  },
+  {
+   "tokens": [
+    343,
+    0
+   ],
+   "name": "@210",
+   "index": 210,
+   "isCanonical": false
+  }
+ ],
+ "tokens": [
+  {
+   "name": "USDC",
+   "szDecimals": 8,
+   "weiDecimals": 8,
+   "index": 0,
+   "tokenId": "0x6d1e7cde53ba9467b783cb7c530ce054",
+   "isCanonical": true,
+   "evmContract": {
+    "address": "0x6b9e773128f453f5c2c60935ee2de2cbc5390a24",
+    "evm_extra_wei_decimals": -2
+   },
+   "fullName": null,
+   "deployerTradingFeeShare": "0.0"
+  },
+  {
+   "name": "PURR",
+   "szDecimals": 0,
+   "weiDecimals": 5,
+   "index": 1,
+   "tokenId": "0xc1fb593aeffbeb02f85e0308e9956a90",
+   "isCanonical": true,
+   "evmContract": {
+    "address": "0x9b498c3c8a0b8cd8ba1d9851d40d186f1872b44e",
+    "evm_extra_wei_decimals": 13
+   },
+   "fullName": null,
+   "deployerTradingFeeShare": "0.0"
+  },
+  {
+   "name": "HYPE",
+   "szDecimals": 2,
+   "weiDecimals": 8,
+   "index": 150,
+   "tokenId": "0x0d01dc56dcaaca66ad901c959b4011ec",
+   "isCanonical": false,
+   "evmContract": null,
+   "fullName": "Hyperliquid",
+   "deployerTradingFeeShare": "0.0"
+  },
+  {
+   "name": "UETH",
+   "szDecimals": 4,
+   "weiDecimals": 9,
+   "index": 221,
+   "tokenId": "0xe1edd30daaf5caac3fe63569e24748da",
+   "isCanonical": false,
+   "evmContract": {
+    "address": "0xbe6727b535545c67d5caa73dea54865b92cf7907",
+    "evm_extra_wei_decimals": 9
+   },
+   "fullName": "Unit Ethereum",
+   "deployerTradingFeeShare": "1.0"
+  },
+  {
+   "name": "USDE",
+   "szDecimals": 2,
+   "weiDecimals": 8,
+   "index": 235,
+   "tokenId": "0x2e6d84f2d7ca82e6581e03523e4389f7",
+   "isCanonical": false,
+   "evmContract": {
+    "address": "0x5d3a1ff2b6bab83b63cd9ad0787074081a52ef34",
+    "evm_extra_wei_decimals": 10
+   },
+   "fullName": "USDe",
+   "deployerTradingFeeShare": "0.0"
+  },
+  {
+   "name": "USDT0",
+   "szDecimals": 2,
+   "weiDecimals": 8,
+   "index": 268,
+   "tokenId": "0x25faedc3f054130dbb4e4203aca63567",
+   "isCanonical": false,
+   "evmContract": {
+    "address": "0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb",
+    "evm_extra_wei_decimals": -2
+   },
+   "fullName": "USDT0",
+   "deployerTradingFeeShare": "0.0"
+  },
+  {
+   "name": "UXPL",
+   "szDecimals": 1,
+   "weiDecimals": 6,
+   "index": 343,
+   "tokenId": "0x2c54c60600e1d786b2dfc139a38a5a99",
+   "isCanonical": false,
+   "evmContract": {
+    "address": "0x33af3c2540ba72054e044efe504867b39ae421f5",
+    "evm_extra_wei_decimals": 12
+   },
+   "fullName": "Unit Plasma",
+   "deployerTradingFeeShare": "1.0"
+  },
+  {
+   "name": "USDH",
+   "szDecimals": 2,
+   "weiDecimals": 8,
+   "index": 360,
+   "tokenId": "0x54e00a5988577cb0b0c9ab0cb6ef7f4b",
+   "isCanonical": false,
+   "evmContract": {
+    "address": "0x111111a1a0667d36bd57c0a9f569b98057111111",
+    "evm_extra_wei_decimals": -2
+   },
+   "fullName": "USDH",
+   "deployerTradingFeeShare": "0.0"
+  }
+ ]
+}
