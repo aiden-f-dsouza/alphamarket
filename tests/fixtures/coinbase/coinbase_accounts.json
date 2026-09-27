@@ -1,0 +1,27 @@
+{
+  "accounts": [
+    {
+      "uuid": "8bfc20d7-f7c6-4422-bf07-8243ca4169fe",
+      "name": "BTC Wallet",
+      "currency": "BTC",
+      "available_balance": { "value": "0.50000000", "currency": "BTC" },
+      "hold": { "value": "0.00000000", "currency": "BTC" },
+      "active": true,
+      "type": "ACCOUNT_TYPE_CRYPTO",
+      "ready": true
+    },
+    {
+      "uuid": "8bfc20d7-f7c6-4422-bf07-8243ca4169ff",
+      "name": "USD Wallet",
+      "currency": "USD",
+      "available_balance": { "value": "1234.560000", "currency": "USD" },
+      "hold": { "value": "10.000000", "currency": "USD" },
+      "active": true,
+      "type": "ACCOUNT_TYPE_FIAT",
+      "ready": true
+    }
+  ],
+  "has_next": false,
+  "cursor": "",
+  "size": 2
+}
