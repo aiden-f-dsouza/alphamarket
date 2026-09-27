@@ -37,7 +37,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 from sqlalchemy import delete, exists, func, or_, select, text, update
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, aliased, sessionmaker
 from sqlalchemy.orm.attributes import set_committed_value
 
 from alphamarket.audit import job_context
@@ -381,11 +381,34 @@ def claim(
     the status flip is committed before any handler runs. (SQLite ignores
     the lock clause; it serialises writers anyway.)"""
     now = now or utcnow()
-    q = select(Job).where(Job.status == JobStatus.PENDING, Job.run_after <= now)
+    # One job per venue account at a time: a sync and a backfill of the same
+    # account must not interleave (Kraken rejects concurrent nonces; two page
+    # streams would race the account's cursors). Jobs whose account already
+    # has a RUNNING job wait; within one batch only the first per account is
+    # taken. Two claimers in the same instant can still each take one job of
+    # an account; the ledger's per-event idempotency makes that harmless, and
+    # the venue rejects the loser's request, which retries with backoff.
+    running = aliased(Job)
+    busy = exists().where(
+        running.venue_account_id == Job.venue_account_id,
+        running.status == JobStatus.RUNNING,
+    )
+    q = select(Job).where(
+        Job.status == JobStatus.PENDING,
+        Job.run_after <= now,
+        or_(Job.venue_account_id.is_(None), ~busy),
+    )
     if kinds is not None:
         q = q.where(Job.kind.in_(list(kinds)))
     q = q.order_by(Job.priority, Job.run_after, Job.id).limit(limit)
-    jobs = list(db.scalars(q.with_for_update(skip_locked=True)).all())
+    candidates = list(db.scalars(q.with_for_update(skip_locked=True)).all())
+    jobs, accounts = [], set()
+    for job in candidates:
+        if job.venue_account_id is not None:
+            if job.venue_account_id in accounts:
+                continue
+            accounts.add(job.venue_account_id)
+        jobs.append(job)
     lease_until = now + timedelta(seconds=lease_seconds)
     for job in jobs:
         job.status = JobStatus.RUNNING

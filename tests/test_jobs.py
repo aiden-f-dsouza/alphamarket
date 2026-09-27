@@ -224,8 +224,11 @@ def test_enqueue_rejects_unknown_kinds(db):
 def test_claim_orders_by_priority_then_run_after(db, clock):
     creator = make_account(db, key_id="creator", followed=True)
     plain = make_account(db, key_id="plain")
-    enqueue(db, JobKind.BACKFILL, account_id=plain.id, now=clock())
-    enqueue(db, JobKind.RECONCILE, account_id=plain.id, now=clock())
+    # One running job per account (claim), so each job gets its own account.
+    fresh = make_account(db, key_id="fresh")
+    nightly = make_account(db, key_id="nightly")
+    enqueue(db, JobKind.BACKFILL, account_id=fresh.id, now=clock())
+    enqueue(db, JobKind.RECONCILE, account_id=nightly.id, now=clock())
     for acct in (plain, creator):
         prio = jobs.sync_priority(db, acct.id)
         enqueue(db, JobKind.SYNC, account_id=acct.id, priority=prio, now=clock())
@@ -755,3 +758,21 @@ def test_prices_stop_at_budget_keep_quotes_and_wait_for_the_next_tick(
     assert source.sent == ["A"]
     spec = limiter.buckets("fakex", None)[0][1]
     assert limiter.backend.state(spec, clock.ms()).blocked_until_ms == clock.ms() + 20_000
+
+
+def test_one_running_job_per_account(session_factory, db):
+    # A sync and a backfill of the same account never run together; a job for
+    # another account (and an account-less job) is still claimed.
+    a = make_account(db, key_id="a")
+    b = make_account(db, key_id="b")
+    jobs.enqueue(db, JobKind.SYNC, account_id=a.id)
+    jobs.enqueue(db, JobKind.BACKFILL, account_id=a.id)
+    jobs.enqueue(db, JobKind.SYNC, account_id=b.id)
+    jobs.enqueue(db, JobKind.PRICES)
+    db.commit()
+    first = jobs.claim(db, "w1", limit=10, lease_seconds=60)
+    assert sorted((j.kind, j.venue_account_id) for j in first) == sorted(
+        [("sync", a.id), ("sync", b.id), ("prices", None)]
+    )
+    # While a's sync runs, its backfill is not claimable.
+    assert jobs.claim(db, "w2", limit=10, lease_seconds=60) == []
