@@ -314,6 +314,9 @@ def start(
     strategy_name: str = Query(min_length=2, max_length=120),
     user: User = Depends(require_connect_ready),
 ) -> RedirectResponse:
+    from alphamarket.venues import ensure_venue_open  # venues imports this module's users
+
+    ensure_venue_open(venue)
     provider = _provider_or_404(venue)
     state = secrets.token_urlsafe(32)
     verifier = new_code_verifier()

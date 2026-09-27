@@ -34,7 +34,7 @@ from alphamarket.config import get_settings
 from alphamarket.connectors.base import BudgetExhausted, InstrumentKind, RateLimited
 from alphamarket.connectors.registry import build_market_data, get_profile
 from alphamarket.db import SessionLocal, engine
-from alphamarket.ingest import sync_account
+from alphamarket.ingest import STREAM_ASSET_FILLS, STREAM_EVENTS, page_runner, sync_account
 from alphamarket.jobs import (
     INACTIVE_ACCOUNT_STATUSES,
     PAGE_RUNNERS,
@@ -51,6 +51,7 @@ from alphamarket.jobs import (
     get_schedule,
     prune_finished,
     register_handler,
+    register_page_runner,
     run_page_streams,
     sync_priority,
     utcnow,
@@ -83,6 +84,11 @@ def _strategy_for(db: Session, account: VenueAccount) -> Strategy | None:
 def _is_paged(account: VenueAccount) -> bool:
     """Non-binary venues ingest through the v2 page streams (PAGE_RUNNERS)."""
     return get_profile(account.venue).instrument is not InstrumentKind.BINARY
+
+
+# Asset venues ingest through ledger v2's two page streams (fills, then events).
+for _stream in (STREAM_ASSET_FILLS, STREAM_EVENTS):
+    register_page_runner(_stream, page_runner(_stream))
 
 
 # ---- handlers -------------------------------------------------------------------

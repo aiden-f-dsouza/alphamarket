@@ -63,6 +63,12 @@ class Settings(BaseSettings):
 
     polymarket_env: str = "prod"
 
+    # ---- integration: partner-approval gate (invariant 10) ----
+    # Venues whose terms need written approval (profile.requires_partner_approval:
+    # Kraken, Coinbase, Alpaca, IBKR, SnapTrade as of 2026-09-26) refuse connects
+    # unless this is on. Dev and tests turn it on; preflight refuses it.
+    enable_unapproved_venues: bool = False
+
     def venue_env(self, venue: str) -> str:
         """Environment new connections of `venue` are made in. Venues without
         their own setting connect to "prod" (the connector's profile.envs

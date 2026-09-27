@@ -60,6 +60,10 @@ def security_problems(s) -> list[str]:
         problems.append("SMTP_HOST / EMAIL_FROM not configured")
     if not s.hibp_enabled:
         problems.append("HIBP_ENABLED is false (breached passwords accepted)")
+    if s.enable_unapproved_venues:
+        problems.append(
+            "ENABLE_UNAPPROVED_VENUES is true (venues awaiting written approval accept connects)"
+        )
     return problems
 
 

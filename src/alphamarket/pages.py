@@ -27,7 +27,6 @@ from alphamarket.charts import drawdown_window, polyline, ticks
 from alphamarket.config import get_settings
 from alphamarket.connectors.registry import PROFILES, get_profile
 from alphamarket.db import get_db
-from alphamarket.ingest import sync_account
 from alphamarket.marks import sigil, tag_color
 from alphamarket.models import (
     EquitySnapshot,
@@ -50,6 +49,8 @@ from alphamarket.venues import (
     _owned_account,
     claim_account,
     connect_account,
+    import_now,
+    venue_closed_reason,
     verification_tier,
 )
 
@@ -283,6 +284,7 @@ def _connect_ctx(venue: str) -> dict:
         "profile": profile,
         "profiles": list(PROFILES.values()),
         "venue_env": get_settings().venue_env(venue),
+        "closed_reason": venue_closed_reason(venue),
     }
 
 
@@ -364,7 +366,7 @@ def account_action_form(
     error = None
     try:
         if action == "sync":
-            sync_account(db, account)
+            import_now(db, account)
         elif action == "reconcile":
             reconcile_account(db, account)
         elif action == "claim":

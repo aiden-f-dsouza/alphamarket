@@ -33,9 +33,17 @@ from alphamarket.connectors.base import CredentialKind, OwnershipProof
 from alphamarket.connectors.registry import SUPPORTED_VENUES, build_connector, get_profile
 from alphamarket.db import get_db
 from alphamarket.email import send_security_alert
-from alphamarket.ingest import sync_account
+from alphamarket.ingest import SyncResult, is_asset_venue, sync_account
+from alphamarket.jobs import PRIORITY_URGENT, JobKind, enqueue
 from alphamarket.mfa import require_connect_ready, require_step_up
-from alphamarket.models import Strategy, User, VenueAccount, VenueAccountStatus, utcnow
+from alphamarket.models import (
+    AccountSchedule,
+    Strategy,
+    User,
+    VenueAccount,
+    VenueAccountStatus,
+    utcnow,
+)
 from alphamarket.ratelimit import rate_limit
 from alphamarket.reconcile import (
     reconcilable,
@@ -128,6 +136,25 @@ def slugify(name: str) -> str:
     return base[:100] or "strategy"
 
 
+def venue_closed_reason(venue: str) -> str | None:
+    """Why `venue` cannot be connected yet, or None. Invariant 10: a venue
+    whose terms need written approval stays closed until the approval is on
+    file (the profile flag flips) or a non-prod deployment opts in."""
+    profile = get_profile(venue)
+    if profile.requires_partner_approval and not get_settings().enable_unapproved_venues:
+        return (
+            f"{profile.display_name} is not open for connections yet: Koine is waiting "
+            f"for {profile.display_name}'s written approval to show account data."
+        )
+    return None
+
+
+def ensure_venue_open(venue: str) -> None:
+    reason = venue_closed_reason(venue)
+    if reason is not None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=reason)
+
+
 def connect_account(
     db: Session, user: User, payload: ConnectIn, *, oauth_grant: bool = False
 ) -> dict:
@@ -138,6 +165,7 @@ def connect_account(
     if payload.venue not in SUPPORTED_VENUES:
         raise HTTPException(status_code=422, detail=f"Unsupported venue: {payload.venue}")
     profile = get_profile(payload.venue)
+    ensure_venue_open(payload.venue)
     if profile.credential is CredentialKind.OAUTH2 and not oauth_grant:
         raise HTTPException(
             status_code=422,
@@ -240,7 +268,7 @@ def connect_account(
     if secret:  # p3-auth: tell the owner whenever a key is added (never the key itself)
         send_security_alert(user, "key_connected", {"Venue": profile.display_name})
 
-    result = sync_account(db, account)
+    result = import_now(db, account)
     return {
         **_to_out(account, strategy),
         "imported_fills": result.new_fills,
@@ -312,7 +340,7 @@ def manual_sync(account_id: int, db: Session = Depends(get_db), user: User = Dep
     if account.status == VenueAccountStatus.SUSPENDED:
         raise HTTPException(status_code=409, detail="Account is suspended; connect a read-only key")
     try:
-        result = sync_account(db, account)
+        result = import_now(db, account)
     except Exception:
         logger.exception("manual sync failed for account %s", account.id)
         raise HTTPException(status_code=502, detail="Sync failed; see connection status.") from None
@@ -368,6 +396,24 @@ def disconnect(account_id: int, db: Session = Depends(get_db), user: User = Depe
     was built on, and the methodology page says exactly that."""
     account = _owned_account(db, account_id, user)
     credentials.disconnect(db, account, actor_user_id=user.id)
+
+
+def import_now(db: Session, account: VenueAccount) -> SyncResult:
+    """Binary venues import inline (a few requests). Asset venues can need
+    hundreds of paged, rate-limited requests (Binance.US per-symbol windows),
+    so the worker does it: a first connect queues a full backfill, a manual
+    sync an urgent incremental sync. Returns zero counts for queued work."""
+    if not is_asset_venue(account.venue):
+        return sync_account(db, account)
+    done = db.scalar(
+        select(AccountSchedule.backfill_done_at).where(
+            AccountSchedule.venue_account_id == account.id
+        )
+    )
+    kind = JobKind.SYNC if done is not None else JobKind.BACKFILL
+    enqueue(db, kind, account_id=account.id, priority=PRIORITY_URGENT)
+    db.commit()
+    return SyncResult(new_fills=0, new_settlements=0)
 
 
 def _owned_account(db: Session, account_id: int, user: User) -> VenueAccount:

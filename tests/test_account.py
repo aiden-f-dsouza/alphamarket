@@ -370,4 +370,5 @@ def test_preflight_refuses_dev_security_backends(monkeypatch):
     monkeypatch.setattr(s, "smtp_host", "smtp.postmarkapp.com")
     monkeypatch.setattr(s, "email_from", "Koine <no-reply@koine.example>")
     monkeypatch.setattr(s, "hibp_enabled", True)
+    monkeypatch.setattr(s, "enable_unapproved_venues", False)
     assert preflight.security_problems(s) == []

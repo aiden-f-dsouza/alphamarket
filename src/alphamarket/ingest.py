@@ -725,6 +725,7 @@ def ingest_asset_fills_page(
     cursor: str | None = None,
     since: datetime | None = None,
     into: LedgerWriteResult | None = None,
+    commit: bool = True,
 ) -> PageCursors:
     """Fetch ONE page (one venue request), append it, store where the next
     sync must start (_pass_cursor), and commit. BudgetExhausted/RateLimited
@@ -733,7 +734,8 @@ def ingest_asset_fills_page(
     page = connector.fetch_asset_fills_page(cursor, since)
     result = ingest_asset_fills(db, account, page.items)
     _store_resume_cursor(db, account, STREAM_ASSET_FILLS, _pass_cursor(page))
-    db.commit()
+    if commit:  # the job runner commits the page with its own cursor instead
+        db.commit()
     if into is not None:
         into.merge(result)
     return PageCursors(page.next_cursor, page.resume_cursor)
@@ -746,12 +748,14 @@ def ingest_events_page(
     cursor: str | None = None,
     since: datetime | None = None,
     into: LedgerWriteResult | None = None,
+    commit: bool = True,
 ) -> PageCursors:
     """Same as ingest_asset_fills_page for non-fill events."""
     page = connector.fetch_events_page(cursor, since)
     result = ingest_events(db, account, page.items)
     _store_resume_cursor(db, account, STREAM_EVENTS, _pass_cursor(page))
-    db.commit()
+    if commit:  # the job runner commits the page with its own cursor instead
+        db.commit()
     if into is not None:
         into.merge(result)
     return PageCursors(page.next_cursor, page.resume_cursor)
@@ -770,6 +774,21 @@ def _run_stream(db: Session, account: VenueAccount, connector, stream: str, page
             raise RuntimeError(f"{account.venue} {stream}: connector repeated cursor")
         followed.add(next_cursor)
         cursor = next_cursor
+
+
+def page_runner(stream: str):
+    """A jobs.PageRunner for one v2 stream (registered by the worker). With no
+    cursor it starts from the ledger's own watermark (sync_since), so a first
+    backfill fetches full history and later syncs overlap by OVERLAP; rows are
+    committed by run_page_streams together with the job's cursor."""
+    page_fn = ingest_asset_fills_page if stream == STREAM_ASSET_FILLS else ingest_events_page
+
+    def run(db: Session, account: VenueAccount, connector, cursor: str | None):
+        since = sync_since(db, account, stream) if cursor is None else None
+        result = page_fn(db, account, connector, cursor, since, commit=False)
+        return result.next_cursor, result.resume_cursor
+
+    return run
 
 
 def _sync_assets(db: Session, connector: VenueConnector, account: VenueAccount) -> SyncResult:

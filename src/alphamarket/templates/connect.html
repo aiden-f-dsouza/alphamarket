@@ -46,6 +46,7 @@
       <p class="text2" style="font-size:16px">{{ profile.display_name }} history is public, so no key is needed. Because anyone could paste any address, your page stays hidden until you prove the account is yours with a code in your profile bio.</p></div>
     {% endif %}
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    {% if closed_reason %}<div class="notice">{{ closed_reason }}</div>{% endif %}
     {% if gate %}{# p3-auth: TOTP, a verified email and a fresh step-up come before any key #}
     <div class="notice stack" style="gap:12px">
       {% if gate[0] == "step_up" %}
@@ -67,7 +68,7 @@
         <label class="field"><span class="label">Strategy name</span><input name="strategy_name" required minlength="2" maxlength="120" placeholder="Shown on your public page"></label>
         <div class="spread" style="align-items:center;padding-top:4px">
           <span class="mono small muted" style="display:inline-flex;align-items:center;gap:8px">{{ m.icon("lock", 14, "var(--muted)") }}Environment: {{ venue_env }}</span>
-          <button class="btn" type="submit"{{ " disabled" if gate }}>Continue to {{ profile.display_name }}</button>
+          <button class="btn" type="submit"{{ " disabled" if gate or closed_reason }}>Continue to {{ profile.display_name }}</button>
         </div>
       </div>
     </form>
@@ -82,7 +83,7 @@
         {% endif %}
         <div class="spread" style="align-items:center;padding-top:4px">
           <span class="mono small muted" style="display:inline-flex;align-items:center;gap:8px">{{ m.icon("lock", 14, "var(--muted)") }}Environment: {{ "production" if venue_env == "prod" else venue_env }}</span>
-          <button class="btn" type="submit"{{ " disabled" if gate }}>{{ "Check scope and import" if profile.needs_secret else "Import public history" }}</button>
+          <button class="btn" type="submit"{{ " disabled" if gate or closed_reason }}>{{ "Check scope and import" if profile.needs_secret else "Import public history" }}</button>
         </div>
       </div>
     </form>

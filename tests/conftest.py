@@ -39,6 +39,7 @@ def test_settings():
         "rate_limiter": "memory",
         "trust_proxy_headers": False,
         "key_wrapper": "local",
+        "enable_unapproved_venues": True,  # the gate itself is tested explicitly
     }
     original = {name: getattr(settings, name) for name in pinned}
     for name, value in pinned.items():
