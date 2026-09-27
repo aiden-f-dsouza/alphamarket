@@ -601,3 +601,44 @@ account connects (the anchor), and the page says from which date fills are
 individually verified. Staking rewards and borrow/lend interest are treated
 as flows, not returns (a small understatement), until they are verified
 against a real account.
+
+## Alpaca accounts (US stocks and ETFs)
+
+**Source.** Alpaca's account activities (every fill and every non-trade cash
+or share movement, each with a stable id), the account's cash and equity,
+and its open positions, read with a read-only OAuth grant.
+
+**Units.** Shares are counted to 9 decimal places (Alpaca sells fractional
+shares); dollars to 6 (micro-dollars). A fill moves two amounts:
+
+```
+buy  q shares at price p :  shares +q ,  cash -(q x p)
+sell q shares at price p :  shares -q ,  cash +(q x p)
+q x p is rounded half-even to $0.000001; it is exact for every whole-share
+fill at a cent price. Example: 0.123456789 x 174.78 = 21.57777758142
+-> $21.577778.
+```
+
+Regulatory fees (SEC fee, FINRA trading activity fee) are not part of the
+fill: Alpaca books them as separate fee entries, usually the next day, and
+they are counted as fees on that day. Dividend withholding (non-resident or
+backup withholding, foreign tax) is recorded as tax, never as a trading
+cost. Deposits, withdrawals and journals are external flows: they change the
+capital, not the return. A stock split changes the share count with no cash;
+cash paid in lieu of a fractional share is recorded with it. Non-trade
+entries that Alpaca dates without a time are placed at 23:59:59 UTC of that
+date.
+
+**What is not supported yet.** Short sales, options, crypto, stock
+dividends, mergers, spin-offs and symbol changes on the account are not put
+into the ledger. When one appears the account carries a visible
+"unsupported activity" flag, because numbers after it may not reconcile;
+nothing is estimated in its place.
+
+**Reconciliation.** Nightly, the ledger's cash and share counts are compared
+with Alpaca's reported cash and positions, and the valuation with Alpaca's
+reported account equity.
+
+**Prices.** Daily closes are Alpaca's unadjusted daily bars (share counts
+are adjusted by the split entries themselves, so prices must not be
+adjusted twice). A bar belongs to its New York trading date.

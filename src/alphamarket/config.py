@@ -67,7 +67,25 @@ class Settings(BaseSettings):
         """Environment new connections of `venue` are made in. Venues without
         their own setting connect to "prod" (the connector's profile.envs
         still has to list it)."""
-        return {"kalshi": self.kalshi_env, "polymarket": self.polymarket_env}.get(venue, "prod")
+        return {
+            "kalshi": self.kalshi_env,
+            "polymarket": self.polymarket_env,
+            "alpaca": self.alpaca_env,
+        }.get(venue, "prod")
+
+    # ---- venue-alpaca ----
+    # "paper" | "live" (paper-api vs api.alpaca.markets). The OAuth grant is
+    # requested for this env only, so one token reads exactly one account.
+    alpaca_env: str = "paper"
+    # Koine's Alpaca OAuth app (Dashboard -> Alpaca Connect). The secret never
+    # leaves the server: the code exchange is a backend call.
+    alpaca_client_id: str = ""
+    alpaca_client_secret: str = ""
+    # Koine's own Alpaca API key pair for public market data (bars, quotes,
+    # corporate actions). Users' tokens carry no `data` scope and are never
+    # used for prices.
+    alpaca_data_key_id: str = ""
+    alpaca_data_secret_key: str = ""
 
     # ---- p2-jobs ----
     # Job queue and outbound rate limiting (jobs.py, venue_limits.py,

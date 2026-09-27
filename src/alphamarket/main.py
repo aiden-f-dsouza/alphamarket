@@ -10,6 +10,7 @@ from alphamarket import (
     auth,
     follows,
     mfa,
+    oauth,
     pages,
     public,
     redaction,
@@ -61,6 +62,7 @@ def create_app() -> FastAPI:
     app.include_router(account.router)
     app.include_router(security_pages.router)
     app.include_router(venues.router)
+    app.include_router(oauth.router)
     app.include_router(strategies.router)
     app.include_router(public.router)
     app.include_router(follows.router)

@@ -1,0 +1,44 @@
+[
+  {
+    "id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+    "class": "us_equity",
+    "exchange": "NASDAQ",
+    "symbol": "AAPL",
+    "name": "Apple Inc. Common Stock",
+    "status": "active",
+    "tradable": true,
+    "marginable": true,
+    "shortable": true,
+    "easy_to_borrow": true,
+    "fractionable": true,
+    "attributes": ["fractional_eh_enabled", "has_options"]
+  },
+  {
+    "id": "0c5a2b3d-0000-4000-8000-00000000abcd",
+    "class": "us_equity",
+    "exchange": "NYSE",
+    "symbol": "BRK.A",
+    "name": "Berkshire Hathaway Inc. Class A",
+    "status": "active",
+    "tradable": true,
+    "marginable": true,
+    "shortable": true,
+    "easy_to_borrow": true,
+    "fractionable": false,
+    "attributes": []
+  },
+  {
+    "id": "0c5a2b3d-0000-4000-8000-00000000abce",
+    "class": "us_equity",
+    "exchange": "OTC",
+    "symbol": "XYZQ",
+    "name": "Delisted Example",
+    "status": "active",
+    "tradable": false,
+    "marginable": false,
+    "shortable": false,
+    "easy_to_borrow": false,
+    "fractionable": false,
+    "attributes": []
+  }
+]

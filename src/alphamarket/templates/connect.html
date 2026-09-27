@@ -35,7 +35,10 @@
   </div>
 
   <div class="stack" style="gap:28px">
-    {% if profile.needs_secret %}
+    {% if profile.credential == "oauth2" %}
+    <div class="stack"><h1 style="font-size:40px">Approve read-only access.</h1>
+      <p class="text2" style="font-size:16px">You sign in on {{ profile.display_name }} and approve access there. Koine requests no trading permission; a grant that could place orders is refused.</p></div>
+    {% elif profile.needs_secret %}
     <div class="stack"><h1 style="font-size:40px">Paste a read-only key.</h1>
       <p class="text2" style="font-size:16px">We check the scope before we store it. A key that can place orders is refused, and you'll be asked to make a read-only one instead.</p></div>
     {% else %}
@@ -58,6 +61,17 @@
       {% endif %}
     </div>
     {% endif %}
+    {% if profile.credential == "oauth2" %}
+    <form method="get" action="/oauth/{{ profile.venue }}/start" class="card" autocomplete="off">
+      <div class="body" style="padding:28px;gap:22px">
+        <label class="field"><span class="label">Strategy name</span><input name="strategy_name" required minlength="2" maxlength="120" placeholder="Shown on your public page"></label>
+        <div class="spread" style="align-items:center;padding-top:4px">
+          <span class="mono small muted" style="display:inline-flex;align-items:center;gap:8px">{{ m.icon("lock", 14, "var(--muted)") }}Environment: {{ venue_env }}</span>
+          <button class="btn" type="submit"{{ " disabled" if gate }}>Continue to {{ profile.display_name }}</button>
+        </div>
+      </div>
+    </form>
+    {% else %}
     <form method="post" action="/dashboard/connect" class="card" autocomplete="off">
       <input type="hidden" name="venue" value="{{ profile.venue }}">
       <div class="body" style="padding:28px;gap:22px">
@@ -72,6 +86,7 @@
         </div>
       </div>
     </form>
+    {% endif %}
   </div>
 
   <div class="stack" style="gap:0;padding-top:4px">

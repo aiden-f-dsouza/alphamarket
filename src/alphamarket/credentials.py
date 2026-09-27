@@ -187,10 +187,27 @@ def revoke(
 
 
 def disconnect(db: Session, account: VenueAccount, *, actor_user_id: int | None) -> None:
-    """User disconnect: erase the key, keep the ledger (append-only)."""
+    """User disconnect: erase the key, keep the ledger (append-only). An OAuth
+    grant is revoked at the venue first, so it does not outlive the account."""
+    _revoke_oauth_grant(db, account)
     revoke(db, account, actor_user_id=actor_user_id, reason="user_disconnect")
     account.status = VenueAccountStatus.DISCONNECTED
     db.commit()
+
+
+def _revoke_oauth_grant(db: Session, account: VenueAccount) -> None:
+    from alphamarket.connectors.base import CredentialKind
+    from alphamarket.connectors.registry import get_profile
+
+    if get_profile(account.venue).credential is not CredentialKind.OAUTH2:
+        return
+    from alphamarket.oauth import revoke_quietly  # oauth imports venues -> credentials
+
+    try:
+        opened = open_credential(db, account, purpose="oauth_revoke")
+        revoke_quietly(account.venue, opened.secret)
+    except Exception:  # noqa: BLE001 - erasing the credential must still happen
+        logger.warning("oauth revoke failed for account %s", account.id)
 
 
 def _adopt_legacy(db: Session, batch_size: int) -> int:

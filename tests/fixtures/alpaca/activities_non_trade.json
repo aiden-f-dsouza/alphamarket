@@ -1,0 +1,118 @@
+[
+  {
+    "activity_type": "CSD",
+    "id": "20190712000000000::7b1c3a2e-0000-4000-8000-00000000c5d1",
+    "date": "2019-07-12",
+    "net_amount": "5000",
+    "description": "",
+    "status": "executed"
+  },
+  {
+    "activity_sub_type": "SDIV",
+    "activity_type": "DIV",
+    "created_at": "2021-05-10T14:01:04.650275Z",
+    "currency": "USD",
+    "date": "2019-08-01",
+    "id": "20190801011955195::5f596936-6f23-4cef-bdf1-3806aae57dbf",
+    "net_amount": "1.02",
+    "per_share_amount": "0.51",
+    "qty": "2",
+    "status": "executed",
+    "symbol": "T"
+  },
+  {
+    "activity_sub_type": "CDIV",
+    "activity_type": "DIV",
+    "currency": "USD",
+    "date": "2019-08-02",
+    "id": "20190802011955195::6a6a6a6a-0000-4000-8000-0000000d1v01",
+    "net_amount": "1.02",
+    "per_share_amount": "0.51",
+    "qty": "2",
+    "status": "executed",
+    "symbol": "T"
+  },
+  {
+    "activity_type": "DIVNRA",
+    "currency": "USD",
+    "date": "2019-08-02",
+    "id": "20190802011955196::6a6a6a6a-0000-4000-8000-0000000d1v02",
+    "net_amount": "-0.31",
+    "status": "executed",
+    "symbol": "T"
+  },
+  {
+    "activity_sub_type": "TAF",
+    "activity_type": "FEE",
+    "currency": "USD",
+    "date": "2019-08-05",
+    "id": "20190805000000000::6a6a6a6a-0000-4000-8000-0000000fee01",
+    "net_amount": "-0.02",
+    "description": "FINRA TAF",
+    "status": "executed",
+    "symbol": "AAPL"
+  },
+  {
+    "activity_sub_type": "CDT",
+    "activity_type": "INT",
+    "currency": "USD",
+    "date": "2019-08-31",
+    "id": "20190831000000000::6a6a6a6a-0000-4000-8000-0000000int01",
+    "net_amount": "0.37",
+    "status": "executed"
+  },
+  {
+    "activity_type": "JNLC",
+    "currency": "USD",
+    "date": "2019-09-03",
+    "id": "20190903000000000::6a6a6a6a-0000-4000-8000-0000000jnl01",
+    "net_amount": "-250",
+    "description": "Journal to 010203ABCE",
+    "status": "executed"
+  },
+  {
+    "activity_type": "CSW",
+    "currency": "USD",
+    "date": "2019-09-04",
+    "id": "20190904000000000::6a6a6a6a-0000-4000-8000-0000000csw01",
+    "net_amount": "-100",
+    "status": "executed"
+  },
+  {
+    "activity_sub_type": "FSPLIT",
+    "activity_type": "SPLIT",
+    "date": "2020-08-31",
+    "id": "20200831000000000::6a6a6a6a-0000-4000-8000-000000split1",
+    "net_amount": "0",
+    "qty": "15",
+    "status": "executed",
+    "symbol": "AAPL"
+  },
+  {
+    "activity_type": "OPEXP",
+    "date": "2023-07-21",
+    "description": "Option Expiry",
+    "id": "20230721000000000::5f596936-6f23-4cef-bdf1-3806aae57dc0",
+    "net_amount": "0",
+    "qty": "-2",
+    "status": "executed",
+    "symbol": "AAPL230721C00150000"
+  },
+  {
+    "activity_type": "CSD",
+    "date": "2023-07-24",
+    "id": "20230724000000000::6a6a6a6a-0000-4000-8000-0000000cncl1",
+    "net_amount": "1000",
+    "status": "canceled"
+  },
+  {
+    "activity_sub_type": "CMA",
+    "activity_type": "MA",
+    "date": "2023-07-25",
+    "id": "20230725000000000::6a6a6a6a-0000-4000-8000-0000000mrg01",
+    "net_amount": "53.70",
+    "qty": "-10",
+    "status": "executed",
+    "symbol": "GLOP"
+  }
+]
