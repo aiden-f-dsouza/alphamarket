@@ -1,0 +1,29 @@
+{
+  "total": 1,
+  "userAssetDribbletDetails": [
+    {
+      "operateTime": 1790035200000,
+      "totalTransferedAmount": "0.00500000",
+      "totalServiceChargeAmount": "0.00000500",
+      "transId": 45178372831,
+      "userAssetDribbletDetails": [
+        {
+          "transId": 45178372831,
+          "serviceChargeAmount": "0.00000300",
+          "amount": "10.00000000",
+          "operateTime": 1790035200000,
+          "transferedAmount": "0.00300000",
+          "fromAsset": "TRX"
+        },
+        {
+          "transId": 45178372831,
+          "serviceChargeAmount": "0.00000200",
+          "amount": "5.00000000",
+          "operateTime": 1790035200000,
+          "transferedAmount": "0.00200000",
+          "fromAsset": "TRX"
+        }
+      ]
+    }
+  ]
+}

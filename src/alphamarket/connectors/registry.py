@@ -21,6 +21,8 @@ from alphamarket.connectors.base import (
     VenueConnector,
     VenueProfile,
 )
+from alphamarket.connectors.binanceus import BASE_URL as BINANCEUS_BASE_URL
+from alphamarket.connectors.binanceus import BinanceUSConnector, BinanceUSMarketData
 from alphamarket.connectors.coinbase import CoinbaseConnector, CoinbaseMarketData
 from alphamarket.connectors.coinbase import load_private_key as load_coinbase_key
 from alphamarket.connectors.kalshi import KalshiConnector, KalshiMarketData, load_private_key_pem
@@ -201,6 +203,69 @@ PROFILES: dict[str, VenueProfile] = {
         ),
         paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
     ),
+    # ---- venue-binanceus ----
+    "binanceus": VenueProfile(
+        venue="binanceus",
+        display_name="Binance.US",
+        envs=("prod",),
+        credential=CredentialKind.KEY_SECRET,
+        key_label="API key",
+        secret_label="Secret key",
+        key_help=(
+            "In Binance.US: Account -> API Management -> Create API. Enable "
+            "Reading only -- leave Enable Spot & Margin Trading and Enable "
+            "Withdrawals OFF -- and restrict the key to Koine's published IPs."
+        ),
+        balance_observable=True,
+        instrument=InstrumentKind.ASSET,
+        # Binary-era fields, unused for ASSET-instrument venues (v2 prices and
+        # sizes live per-instrument: NormalizedInstrument.qty_step_atoms/
+        # qty_decimals and NormalizedAssetFill.price). Kept at a nominal 1
+        # micro floor so nothing that still reads them divides by zero.
+        tick_micros=1,
+        contract_step_micros=1,
+        # Paper fee: bps_of_notional x notional (see paper_fee_model below).
+        # Binance.US moved every pair to 0% maker / 0.02% taker in April 2026
+        # (0.01% on Tier-0 pairs like BTC/USD, tightening further past $500M
+        # 30-day volume); 2 bps is the general taker rate. Checked
+        # https://www.binance.us/fees 2026-09-26. [VERIFY] per-pair tier at
+        # connect time -- a real account may sit on the finer Tier-0 rate.
+        fee_rate_bps=2,
+        fee_rounding_micros=1,
+        ownership=OwnershipProof.KEY,
+        readonly_proof=ReadOnlyProof.SCOPE_ENDPOINT,
+        transfers_observable=True,
+        # myTrades itself has no documented depth limit (id-space pagination),
+        # but deposit/withdraw/convert/dust histories are windowed to <90d per
+        # call (docs/venues/binanceus.md "known gaps"), so events realistically
+        # only reach back that far without a standing incremental sync.
+        history_depth="90d",
+        quote_asset="USD",
+        tos_doc="docs/venues/binanceus.md",
+        requires_partner_approval=False,
+        daily_resolution=False,
+        rate_budgets=(
+            RateBudget(
+                scope=RateScope.IP,
+                capacity=6000,
+                refill_per_minute=6000,  # REQUEST_WEIGHT bucket refills to 6000/min
+                costs=(
+                    ("account", 10),
+                    ("myTrades", 10),
+                    ("exchangeInfo", 20),
+                    ("apiRestrictions", 1),  # [VERIFY] weight not in fetched docs excerpt
+                    ("depositHistory", 1),  # [VERIFY]
+                    ("withdrawHistory", 1),  # [VERIFY]
+                    ("convertHistory", 1),  # [VERIFY]
+                    ("dustLog", 1),  # [VERIFY]
+                    ("klines", 1),
+                    ("bookTicker", 1),
+                ),
+                default_cost=1,
+            ),
+        ),
+        paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
+    ),
 }
 
 SUPPORTED_VENUES = tuple(PROFILES)
@@ -249,12 +314,20 @@ def _build_coinbase(venue_env: str, key_id: str, secret: str | None) -> VenueCon
     return CoinbaseConnector(key_name=key_id, private_key=private_key, alg=alg)
 
 
+def _build_binanceus(venue_env: str, key_id: str, secret: str | None) -> VenueConnector:
+    if not secret:
+        raise ValueError("Binance.US needs a secret key")
+    return BinanceUSConnector(base_url=BINANCEUS_BASE_URL, api_key=key_id, api_secret=secret)
+
+
 _BUILDERS: dict[str, Callable[[str, str, str | None], VenueConnector]] = {
     "kalshi": _build_kalshi,
     "polymarket": _build_polymarket,
     "kraken": _build_kraken,  # venue-kraken
     "hyperliquid": _build_hyperliquid,
     "coinbase": _build_coinbase,  # ---- venue-coinbase ----
+    # ---- venue-binanceus ----
+    "binanceus": _build_binanceus,
 }
 
 
@@ -290,6 +363,8 @@ _MARKET_DATA_BUILDERS: dict[str, Callable[[str], MarketDataSource]] = {
         info_url=hyperliquid.INFO_URLS[venue_env]
     ),
     "coinbase": lambda venue_env: CoinbaseMarketData(),  # ---- venue-coinbase ----
+    # ---- venue-binanceus ----
+    "binanceus": lambda venue_env: BinanceUSMarketData(base_url=BINANCEUS_BASE_URL),
 }
 
 

@@ -1,0 +1,18 @@
+[
+  {
+    "id": "w_id_456",
+    "amount": "0.10000000",
+    "transactionFee": "0.00050000",
+    "coin": "BTC",
+    "status": 6,
+    "address": "1SomeOtherBitcoinAddress",
+    "txId": "0xdef456",
+    "applyTime": "2026-08-01 10:00:00",
+    "network": "BTC",
+    "transferType": 0,
+    "withdrawOrderId": null,
+    "info": "",
+    "confirmNo": 3,
+    "walletType": 0
+  }
+]
