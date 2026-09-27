@@ -474,33 +474,65 @@ secret store; `scripts/preflight.py` passing.
 ## 8. Status
 
 Branch `platform-v2` (from `main` at 97a1e25). Contract v2 scaffold
-committed at a7cbd6e after a design review; parallel workstreams build on
-`wip/<label>` branches and are merged here by the integrator.
+committed at a7cbd6e after a design review; 14 parallel workstreams built on
+`wip/<label>` branches, each independently reviewed and fixed, then merged
+here (2026-09-26). 744 tests pass (SQLite + Postgres-marked), ruff clean,
+migrations 0009-0012 chain to one head, and a smoke run of the real app and
+worker against a freshly migrated Postgres passed.
 
-Wave 1 (parallel, started 2026-09-26):
+Wave 1 (done 2026-09-26):
 
-- [x] Contract v2 scaffold: `money.to_atoms`, legs/events/balances, `Page`
-      cursors, `Throttle`, `account_ref`, pg test fixture (a7cbd6e)
-- [ ] p0-infra: CI Postgres job, gitleaks, pip-audit, Dependabot, fixture
+- [x] Contract v2 scaffold (a7cbd6e)
+- [x] p0-infra: CI Postgres job, gitleaks, pip-audit, Dependabot, fixture
       recorder, non-root Docker, backups + restore drill, Fly deploy doc
-- [ ] p1-ledger: instruments, `ledger_entries`, `asset_fills`, anchors,
+- [x] p1-ledger: instruments, `ledger_entries`, `asset_fills`, anchors,
       `prices_daily`, binary legs with parity, ingest v2, reconcile v2
-- [ ] p1-valuation: `valuation.py` (holdings, perp entry, daily equity,
-      flow-adjusted TWR, exposure)
-- [ ] p2-jobs: job queue, outbound token buckets, circuit breaker, worker
-      claim loop, resumable backfills
-- [ ] p3-auth: inbound rate limits, TOTP + step-up, DB sessions, email
-      (verify, reset, alerts), breached-password check
-- [ ] p3-web: CSRF origin check, CSP + security headers, inline JS moved out
-- [ ] p3-vault: envelope vault + KMS wrapper, `venue_credentials`,
+- [x] p1-valuation: `valuation.py` (pure; wiring into stats is wave 2)
+- [x] p2-jobs: job queue, outbound token buckets, circuit breaker, claim loop
+- [x] p3-auth: inbound limits, TOTP + step-up, DB sessions, email, HIBP
+- [x] p3-web: CSRF origin check, CSP + security headers
+- [x] p3-vault: envelope vault + AWS KMS wrapper, `venue_credentials`,
       `audit_log`, nightly read-only re-check, log redaction
-- [ ] Connectors: Kraken, Hyperliquid, Coinbase, Binance.US, Alpaca (+ OAuth),
-      IBKR Flex, SnapTrade
+- [x] Connectors: Kraken, Hyperliquid, Coinbase, Binance.US, Alpaca (+ OAuth),
+      IBKR Flex, SnapTrade (private fixtures are docs examples until the
+      founder accounts exist; Hyperliquid fixtures are real public data)
 
-Integration (after wave 1): re-chain migrations 0009-0012, re-lock
-`uv.lock`, register routers and alert hooks, move credentials onto
-`venue_credentials`, wire connectors into `ingest` and the job runner,
-apply the CLAUDE.md invariant amendments (platform_plan section 7).
+Integration (done): migrations re-chained; `uv.lock` re-locked; asset
+ingestion runs as job-queue page runners (connect and manual sync queue
+work instead of importing in the web request); one running job per account;
+OAuth grants stored via `credentials` and revoked on disconnect; OAuth start
+behind the connect gate; auth events audited; suspension alerts emailed;
+CSRF recognises the DB-session cookie; partner-approval connect gate
+(invariant 10); CLAUDE.md invariants amended (1, 3, 4) and added (9-11).
 
-Wave 2 (after integration): P6 paper copy v2, valuation wired into
-`stats`/`analytics`, P8 product surface, P7 streaming.
+Venues awaiting written approval (connect refused in prod until the flag
+flips): **Kraken** (2026-09-14 terms restrict third-party apps), **Coinbase**
+(CDP terms), **Alpaca** (commercial OAuth apps), **IBKR** (Flex third-party
+use unconfirmed), **SnapTrade** (re-packaging end-user data). Open without
+approval: Kalshi*, Polymarket, Hyperliquid, Binance.US. (*Kalshi's written
+permission is still the older open item.)
+
+Wave 2 (next):
+
+- [ ] P6 paper copy v2: signals from `asset_fills`, sizing by equity ratio,
+      fills at the quote at `observed_at` (E5), fee models per profile,
+      perp funding + liquidation, splits/dividends for followers
+- [ ] Wire valuation into stats/analytics; a `prices_daily` job per venue
+      (`pricing_symbol`), CoinGecko fallback; reconcile broker equity
+- [ ] P8 product surface: Hyperliquid sign-message claim UI, SnapTrade
+      portal connect flow, multi-asset strategy and portfolio pages,
+      marketplace venue/asset filters, "importing history" state, surfacing
+      Alpaca "unsupported activity" flags
+- [ ] OAuth refresh job wiring (`oauth_refresh`), credential rotate
+      endpoint (TOTP-gated) for suspended accounts, email-change flow
+- [ ] Housekeeping jobs: prune rate-limit counters, expired sessions/tokens
+- [ ] P7 streaming (after P6)
+
+Needs the founder / outside the repo:
+
+- [ ] Open Kraken, Alpaca, IBKR accounts; run `scripts/<venue>_smoke.py` and
+      re-record fixtures (every `[VERIFY]` in `docs/venues/*.md`)
+- [ ] Written approvals: Kraken, Coinbase (CDP), Alpaca, IBKR, SnapTrade
+- [ ] Fly app + Managed Postgres + static egress IP; AWS KMS key; Cloudflare;
+      SMTP provider; then `scripts/preflight.py`
+- [ ] Counsel check on Hyperliquid for US-facing marketing
