@@ -11,10 +11,66 @@ from sqlalchemy import text
 from alphamarket.config import get_settings
 from alphamarket.db import engine
 
+# Invariant 3: every append-only table has a "<table>_append_only" trigger
+# (migrations 0003, 0007, 0009, 0012).
+EXPECTED_APPEND_ONLY_TRIGGERS = frozenset(
+    f"{table}_append_only"
+    for table in (
+        "fills",
+        "settlements",
+        "signals",
+        "mirror_fills",
+        "mirror_settlements",
+        "ledger_entries",
+        "asset_fills",
+        "ledger_quarantines",
+        "audit_log",
+    )
+)
+
+
+def vault_problems(s) -> list[str]:
+    """p3-vault: prod wraps credential data keys with KMS, and the wrapper
+    must round-trip for real (a live GenerateDataKey + Decrypt)."""
+    from alphamarket import vault
+
+    problems: list[str] = []
+    if s.key_wrapper == "local" and s.kalshi_env == "prod":
+        problems.append("KEY_WRAPPER=local in prod (credential data keys must be KMS-wrapped)")
+    if s.key_wrapper == "aws_kms" and not s.kms_key_id:
+        problems.append("KEY_WRAPPER=aws_kms but KMS_KEY_ID is not set")
+    if s.key_wrapper not in ("local", "aws_kms"):
+        problems.append(f"KEY_WRAPPER={s.key_wrapper!r} is not local | aws_kms")
+    if not problems:
+        try:
+            vault.self_test()
+        except Exception as exc:  # noqa: BLE001
+            problems.append(f"vault self-test failed: {type(exc).__name__}")
+    return problems
+
+
+def security_problems(s) -> list[str]:
+    """P3 account-security settings (p3-auth)."""
+    problems: list[str] = []
+    if s.rate_limiter != "postgres":
+        problems.append(f"RATE_LIMITER={s.rate_limiter} (per-process limits; use postgres in prod)")
+    if s.email_backend != "smtp":
+        problems.append(f"EMAIL_BACKEND={s.email_backend} (no email would reach users)")
+    elif not s.smtp_host or s.email_from.endswith("@localhost>"):
+        problems.append("SMTP_HOST / EMAIL_FROM not configured")
+    if not s.hibp_enabled:
+        problems.append("HIBP_ENABLED is false (breached passwords accepted)")
+    if s.enable_unapproved_venues:
+        problems.append(
+            "ENABLE_UNAPPROVED_VENUES is true (venues awaiting written approval accept connects)"
+        )
+    return problems
+
 
 def main() -> int:
     s = get_settings()
     problems: list[str] = []
+    problems += security_problems(s)
 
     if s.secret_key == "dev-only-change-me" or len(s.secret_key) < 32:
         problems.append("SECRET_KEY is the dev default or too short")
@@ -26,6 +82,7 @@ def main() -> int:
         problems.append("PUBLIC_BASE_URL is http:// in prod")
     if s.demo_mode:
         problems.append("DEMO_MODE is on (sample pages would be served to real users)")
+    problems.extend(vault_problems(s))
 
     try:
         with engine.connect() as conn:
@@ -34,14 +91,14 @@ def main() -> int:
             if dialect != "postgresql":
                 problems.append(f"database is {dialect}, not postgresql")
             else:
-                trig = conn.execute(
-                    text("SELECT count(*) FROM pg_trigger WHERE tgname LIKE '%_append_only'")
-                ).scalar()
-                if trig < 5:
-                    problems.append(
-                        "append-only triggers missing (fills, settlements, signals, "
-                        "mirror_fills, mirror_settlements)"
-                    )
+                installed = set(
+                    conn.execute(
+                        text("SELECT tgname FROM pg_trigger WHERE tgname LIKE '%_append_only'")
+                    ).scalars()
+                )
+                missing = sorted(EXPECTED_APPEND_ONLY_TRIGGERS - installed)
+                if missing:
+                    problems.append(f"append-only triggers missing: {', '.join(missing)}")
     except Exception as exc:  # noqa: BLE001
         problems.append(f"database unreachable: {type(exc).__name__}")
         head = None

@@ -1,0 +1,7 @@
+{
+  "id": "87b24961-b51e-4db8-9226-f198f6518a89",
+  "brokerage": { "name": "Robinhood", "allows_trading": true },
+  "type": "read",
+  "disabled": false,
+  "disabled_date": null
+}

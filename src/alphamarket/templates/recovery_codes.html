@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Recovery codes · Koine{% endblock %}
+{% block nav_active %}dashboard{% endblock %}
+{% block style %}
+  .codes { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px 32px; padding:24px 28px; font:15px var(--mono); }
+  @media (max-width:560px) { .codes { grid-template-columns:1fr; } }
+{% endblock %}
+{% block content %}
+<div class="stack" style="gap:8px;max-width:640px"><span class="label">Security</span>
+  <h1 style="font-size:40px">{{ "Two-factor is on." if fresh else "New recovery codes." }}</h1>
+  <p class="text2" style="line-height:1.55">Save these recovery codes somewhere safe, such as a password manager. Each one works once, in place of an app code, if you lose your phone. This is the only time they are shown.{% if not fresh %} Your previous codes no longer work.{% endif %}</p>
+</div>
+<div class="card" style="max-width:640px">
+  <div class="codes">{% for c in codes %}<span>{{ c }}</span>{% endfor %}</div>
+</div>
+<div><a class="btn" href="/dashboard/security">I saved them</a></div>
+{% endblock %}

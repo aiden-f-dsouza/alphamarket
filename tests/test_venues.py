@@ -10,8 +10,9 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from sqlalchemy import select
 
-from alphamarket.models import Fill, Strategy, VenueAccount
+from alphamarket.models import Fill, Strategy, VenueAccount, VenueCredential
 from alphamarket.money import to_micros
+from authutil import secure_account
 
 BASE = "https://demo-api.kalshi.co/trade-api/v2"
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -37,6 +38,7 @@ def user(client):
         json={"email": "t@example.com", "password": "hunter2hunter2", "display_name": "Trader"},
     )
     assert resp.status_code == 201
+    secure_account(client, "t@example.com")  # P3: email + TOTP + step-up before connect
     return resp.json()
 
 
@@ -92,9 +94,13 @@ def test_connect_stores_encrypted_key_and_imports(client, user, session_factory)
 
     with session_factory() as db:
         account = db.scalars(select(VenueAccount)).one()
-        # Encrypted at rest: stored bytes are a Fernet token, not the PEM.
-        assert account.encrypted_private_key is not None
-        assert pem.encode() not in account.encrypted_private_key
+        # Encrypted at rest (vault v2): an envelope row in venue_credentials,
+        # not the PEM; the legacy column is no longer written.
+        cred = db.scalars(select(VenueCredential)).one()
+        assert cred.venue_account_id == account.id and cred.revoked_at is None
+        assert cred.ciphertext is not None and cred.wrapped_dek is not None
+        assert pem.encode() not in cred.ciphertext
+        assert account.encrypted_private_key is None
         assert account.scope_checked_at is not None
         (fill,) = db.scalars(select(Fill)).all()
         assert fill.venue_fill_id == "e9efc650-5012-75a0-6383-21440fdfc3aa"
@@ -163,6 +169,7 @@ def test_accounts_are_scoped_to_their_owner(client, user, session_factory):
         "/auth/signup",
         json={"email": "other@example.com", "password": "hunter2hunter2", "display_name": "Other"},
     )
+    secure_account(client, "other@example.com")  # P3: DELETE needs a step-up first
     assert client.get("/venues").json() == []
     assert client.delete(f"/venues/{account_id}").status_code == 404
     assert client.post(f"/venues/{account_id}/sync").status_code == 404

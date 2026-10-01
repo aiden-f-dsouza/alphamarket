@@ -1,0 +1,4 @@
+# Design pack artifacts and mockups: large generated HTML, not app code
+design/
+# Binary/long-form references; read directly when needed
+*.pdf

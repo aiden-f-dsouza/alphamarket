@@ -1,0 +1,747 @@
+"""Multi-asset valuation: holdings, perp entries, daily equity, flow-adjusted
+returns and exposure (platform_plan 2.2, implementation_plan P1 item 5).
+
+PURE functions over small input dataclasses: no DB, no I/O, no clock. The
+ledger tables feed them at integration time; this module never imports the
+models, so the two can evolve independently.
+
+Units (invariant 1, amended by platform_plan D3):
+- quantities are integer ATOMS at a stated `decimals` (one whole unit =
+  10**decimals atoms), exactly as money.to_atoms parsed them;
+- USD values are integer MICROS;
+- closes are USD micros per ONE WHOLE unit (`PriceIn.usd_micros_per_unit`);
+- intermediate arithmetic is exact (int / Fraction); floats never appear.
+
+Precision rule (connectors/base.py "Precision"): atoms of one asset are never
+summed across scales. Every quantity of an asset is first rescaled up to the
+largest `decimals` seen for that asset in the inputs (scaling up is exact).
+
+THE rounding rule: each position's USD value (and each day's per-asset flow
+value) is computed exactly and then truncated TOWARD ZERO to whole micros,
+once, at the position. Equity is the exact integer sum of those position
+values. So a position is never over-stated in either direction, and the
+error of a day's equity is below 1 micro per position.
+
+Documented for the public page in docs/methodology.md, sections "Asset
+valuation" and "External flows (time-weighted return)"; every formula is
+pinned by tests/test_valuation.py with hand-computed values.
+"""
+
+from bisect import bisect_right
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
+from enum import StrEnum
+from fractions import Fraction
+from typing import Protocol
+
+from alphamarket.connectors.base import EXTERNAL_FLOW_KINDS, LegKind, MarketDataSource
+from alphamarket.money import MAX_DECIMALS, MICROS_PER_UNIT
+
+PERP_SUFFIX = "-PERP"
+"""Perp positions are the asset "<COIN>-PERP" (connectors/base.py asset codes)."""
+
+CASH_AT_PAR: frozenset[str] = MarketDataSource.STABLECOINS_AT_PAR
+"""Assets valued at exactly 1.00 USD per unit, never looked up in prices."""
+
+
+# ---- validation helpers -------------------------------------------------------
+
+
+def _require_int(value: object, what: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{what} must be an int, got {type(value).__name__}")
+
+
+def _require_decimals(decimals: object) -> None:
+    _require_int(decimals, "decimals")
+    if not 0 <= decimals <= MAX_DECIMALS:  # type: ignore[operator]
+        raise ValueError(f"decimals must be within 0..{MAX_DECIMALS}, got {decimals}")
+
+
+def _require_aware(ts: datetime, what: str) -> None:
+    if ts.tzinfo is None or ts.utcoffset() is None:
+        raise ValueError(f"{what} must be timezone-aware (invariant 2)")
+
+
+def _utc_day(ts: datetime) -> date:
+    return ts.astimezone(UTC).date()
+
+
+def parse_price(value: str) -> Fraction:
+    """A venue decimal price string as an exact Fraction. Strings only: a float
+    price has already lost exactness, and an int is ambiguous about scale."""
+    if not isinstance(value, str):
+        raise TypeError(f"prices are decimal strings, got {type(value).__name__}")
+    parsed = Decimal(value)
+    if not parsed.is_finite():
+        raise ValueError(f"price {value!r} is not a finite decimal")
+    return Fraction(parsed)
+
+
+def _trunc_micros(value: Fraction) -> int:
+    """THE rounding rule: truncate toward zero to whole micros (int() on a
+    Fraction truncates toward zero: -333333.3 -> -333333, not -333334)."""
+    return int(value)
+
+
+# ---- inputs -------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class LegIn:
+    """One ledger leg: a signed change of `asset`, in atoms at `decimals`."""
+
+    asset: str
+    delta_atoms: int
+    decimals: int
+    kind: LegKind
+    occurred_at: datetime
+    instrument_symbol: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_int(self.delta_atoms, "delta_atoms")
+        _require_decimals(self.decimals)
+        _require_aware(self.occurred_at, "occurred_at")
+        LegKind(self.kind)
+
+
+@dataclass(frozen=True)
+class PriceIn:
+    """UTC daily close of one WHOLE unit of `asset`, in USD micros. Closes are
+    as traded (not split-adjusted): the ledger's SPLIT leg changes the
+    quantity on the split day, and the close changes with it."""
+
+    asset: str
+    day: date
+    usd_micros_per_unit: int
+
+    def __post_init__(self) -> None:
+        _require_int(self.usd_micros_per_unit, "usd_micros_per_unit")
+        if self.usd_micros_per_unit < 0:
+            raise ValueError(f"close for {self.asset} on {self.day} is negative")
+
+
+@dataclass(frozen=True)
+class PerpFillIn:
+    """One change of a perp position ("BTC-PERP"): signed quantity (+ buys,
+    - sells) at `decimals`, and the fill price as the venue's decimal string
+    (USD per one whole unit). Liquidations are fills too: every change of a
+    perp position must appear here, or the PERP_QTY_MISMATCH flag fires."""
+
+    asset: str
+    occurred_at: datetime
+    qty_delta_atoms: int
+    decimals: int
+    price: str
+
+    def __post_init__(self) -> None:
+        if not self.asset.endswith(PERP_SUFFIX):
+            raise ValueError(f"perp assets end in {PERP_SUFFIX!r}, got {self.asset!r}")
+        _require_int(self.qty_delta_atoms, "qty_delta_atoms")
+        _require_decimals(self.decimals)
+        _require_aware(self.occurred_at, "occurred_at")
+        parse_price(self.price)
+
+
+@dataclass(frozen=True)
+class AnchorIn:
+    """The venue's own holding of `asset` at the anchor (connect) time. Legs
+    passed alongside an anchor are the legs AFTER it. `entry_price` (decimal
+    string) is the venue's average entry for a perp position opened before
+    the anchor; it is ignored for every other asset."""
+
+    asset: str
+    atoms: int
+    decimals: int
+    entry_price: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_int(self.atoms, "atoms")
+        _require_decimals(self.decimals)
+        if self.entry_price is not None:
+            parse_price(self.entry_price)
+
+
+# ---- holdings -----------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Qty:
+    """A quantity: `atoms` at `decimals` (one unit = 10**decimals atoms)."""
+
+    atoms: int
+    decimals: int
+
+    @property
+    def units(self) -> Fraction:
+        return Fraction(self.atoms, 10**self.decimals)
+
+    def rescale(self, decimals: int) -> "Qty":
+        """Same quantity at a finer scale. Scaling down could lose atoms, so it raises."""
+        if decimals < self.decimals:
+            raise ValueError(f"cannot rescale {self.decimals} dp down to {decimals} dp exactly")
+        return Qty(self.atoms * 10 ** (decimals - self.decimals), decimals)
+
+
+def _rescale(atoms: int, decimals: int, target: int) -> int:
+    return atoms * 10 ** (target - decimals)
+
+
+def _max_decimals(pairs: Iterable[tuple[str, int]]) -> dict[str, int]:
+    scales: dict[str, int] = {}
+    for asset, decimals in pairs:
+        scales[asset] = max(decimals, scales.get(asset, 0))
+    return scales
+
+
+def _check_anchor(anchor: Sequence[AnchorIn]) -> None:
+    seen: set[str] = set()
+    for row in anchor:
+        if row.asset in seen:
+            raise ValueError(f"anchor has two rows for {row.asset!r}; one row per asset")
+        seen.add(row.asset)
+
+
+def _asset_scales(anchor: Sequence[AnchorIn], legs: Sequence[LegIn]) -> dict[str, int]:
+    return _max_decimals(
+        [(a.asset, a.decimals) for a in anchor] + [(leg.asset, leg.decimals) for leg in legs]
+    )
+
+
+def holdings_at(anchor: Sequence[AnchorIn], legs: Sequence[LegIn], t: datetime) -> dict[str, Qty]:
+    """Per-asset holdings at time `t` (inclusive):
+
+        holding(asset, t) = anchor(asset) + sum of delta_atoms of legs with occurred_at <= t
+
+    every term first rescaled to the max decimals seen for that asset across
+    the anchor and ALL the legs given (so the scale does not depend on `t`).
+    Assets whose holding is exactly zero are omitted. Perp quantities
+    ("BTC-PERP") are holdings like any other asset here."""
+    _require_aware(t, "t")
+    _check_anchor(anchor)
+    scales = _asset_scales(anchor, legs)
+    totals: dict[str, int] = {}
+    for row in anchor:
+        totals[row.asset] = _rescale(row.atoms, row.decimals, scales[row.asset])
+    for leg in legs:
+        if leg.occurred_at <= t:
+            scale = scales[leg.asset]
+            totals[leg.asset] = totals.get(leg.asset, 0) + _rescale(
+                leg.delta_atoms, leg.decimals, scale
+            )
+    return {asset: Qty(atoms, scales[asset]) for asset, atoms in totals.items() if atoms}
+
+
+# ---- perps: average entry, unrealized P&L ---------------------------------------
+
+
+@dataclass(frozen=True)
+class PerpPosition:
+    """An open perp position: signed quantity (+ long, - short) and the
+    average entry in USD per unit, exact. `entry` is None when unknown (an
+    anchor position the venue reported without an entry price)."""
+
+    asset: str
+    qty: Qty
+    entry: Fraction | None
+
+
+class _PerpBook:
+    """Average-cost state machine, one position per perp asset.
+
+    With q the signed position, e its entry, and a fill of signed d at price p:
+      q == 0                   open:    q' = d,     e' = p
+      sign(d) == sign(q)       add:     q' = q + d, e' = (|q| e + |d| p) / (|q| + |d|)
+      opposite, |d| <  |q|     reduce:  q' = q + d, e' = e      (entry kept)
+      opposite, |d| == |q|     close:   q' = 0,     no entry
+      opposite, |d| >  |q|     flip:    q' = q + d, e' = p      (entry resets to the flip price)
+    An unknown entry stays unknown through adds and reductions; a flip or a
+    fresh open makes it known."""
+
+    def __init__(self, scales: dict[str, int]) -> None:
+        self.scales = scales
+        self.qty: dict[str, int] = {}
+        self.entry: dict[str, Fraction | None] = {}
+
+    def seed(self, row: AnchorIn) -> None:
+        atoms = _rescale(row.atoms, row.decimals, self.scales[row.asset])
+        self.qty[row.asset] = atoms
+        known = atoms != 0 and row.entry_price is not None
+        self.entry[row.asset] = parse_price(row.entry_price) if known else None  # type: ignore[arg-type]
+
+    def apply(self, fill: PerpFillIn) -> None:
+        d = _rescale(fill.qty_delta_atoms, fill.decimals, self.scales[fill.asset])
+        if d == 0:
+            return
+        p = parse_price(fill.price)
+        q = self.qty.get(fill.asset, 0)
+        e = self.entry.get(fill.asset)
+        q2 = q + d
+        if q == 0:
+            e2: Fraction | None = p
+        elif (q > 0) == (d > 0):
+            e2 = None if e is None else (abs(q) * e + abs(d) * p) / (abs(q) + abs(d))
+        elif q2 == 0:
+            e2 = None
+        elif (q2 > 0) == (q > 0):
+            e2 = e
+        else:
+            e2 = p
+        self.qty[fill.asset] = q2
+        self.entry[fill.asset] = e2
+
+    def positions(self) -> dict[str, PerpPosition]:
+        return {
+            asset: PerpPosition(asset, Qty(q, self.scales[asset]), self.entry.get(asset))
+            for asset, q in self.qty.items()
+            if q
+        }
+
+
+def _perp_scales(anchor: Sequence[AnchorIn], perp_fills: Sequence[PerpFillIn]) -> dict[str, int]:
+    return _max_decimals(
+        [(a.asset, a.decimals) for a in anchor if a.asset.endswith(PERP_SUFFIX)]
+        + [(f.asset, f.decimals) for f in perp_fills]
+    )
+
+
+def _new_book(anchor: Sequence[AnchorIn], perp_fills: Sequence[PerpFillIn]) -> _PerpBook:
+    book = _PerpBook(_perp_scales(anchor, perp_fills))
+    for row in anchor:
+        if row.asset.endswith(PERP_SUFFIX):
+            book.seed(row)
+    return book
+
+
+def perp_positions_at(
+    anchor: Sequence[AnchorIn], perp_fills: Sequence[PerpFillIn], t: datetime
+) -> dict[str, PerpPosition]:
+    """Open perp positions at `t` (inclusive) under the average-cost method
+    (see _PerpBook). Anchor positions start at their `entry_price`. Fills are
+    applied in occurred_at order (ties keep input order)."""
+    _require_aware(t, "t")
+    _check_anchor(anchor)
+    book = _new_book(anchor, perp_fills)
+    for fill in sorted(perp_fills, key=lambda f: f.occurred_at):
+        if fill.occurred_at <= t:
+            book.apply(fill)
+    return book.positions()
+
+
+def unrealized_pnl_micros(position: PerpPosition, close_micros: int) -> int:
+    """qty x (close - entry), in USD micros, truncated toward zero. Positive
+    for a long above entry and for a short below it. Realized P&L is NOT
+    computed here: the venue's REALIZED_PNL leg is the truth, already in cash."""
+    if position.entry is None:
+        raise ValueError(f"{position.asset}: entry price unknown, cannot value")
+    return _trunc_micros(position.qty.units * (close_micros - position.entry * MICROS_PER_UNIT))
+
+
+# ---- prices ---------------------------------------------------------------------
+
+
+class _PriceIndex:
+    def __init__(self, prices: Iterable[PriceIn]) -> None:
+        rows: dict[str, dict[date, int]] = {}
+        for price in prices:
+            by_day = rows.setdefault(price.asset, {})
+            if price.day in by_day:
+                raise ValueError(f"two closes for {price.asset} on {price.day}")
+            by_day[price.day] = price.usd_micros_per_unit
+        self._days = {asset: sorted(by_day) for asset, by_day in rows.items()}
+        self._rows = rows
+
+    def has(self, asset: str) -> bool:
+        return asset in self._rows
+
+    def close(self, asset: str, day: date) -> tuple[int, date] | None:
+        """Last known close on or before `day`: (usd micros per unit, day of that close)."""
+        days = self._days.get(asset)
+        if not days:
+            return None
+        i = bisect_right(days, day)
+        if i == 0:
+            return None
+        found = days[i - 1]
+        return self._rows[asset][found], found
+
+    def perp_close(self, perp_asset: str, day: date) -> tuple[int, date] | None:
+        """A perp is valued at closes of its own asset code ("BTC-PERP") when
+        any exist, else at closes of the underlying coin ("BTC")."""
+        if self.has(perp_asset):
+            return self.close(perp_asset, day)
+        return self.close(perp_asset.removesuffix(PERP_SUFFIX), day)
+
+
+# ---- daily equity ------------------------------------------------------------
+
+
+class FlagReason(StrEnum):
+    CARRIED_FORWARD = "carried_forward"  # no close that day: the last known close was used
+    UNPRICED = "unpriced"  # no close on or before that day: excluded from equity/flows
+    PERP_ENTRY_UNKNOWN = "perp_entry_unknown"  # open perp without an entry: excluded
+    PERP_QTY_MISMATCH = "perp_qty_mismatch"  # perp fills disagree with the ledger's perp legs
+
+
+@dataclass(frozen=True)
+class ValuationFlag:
+    day: date
+    asset: str
+    reason: FlagReason
+    price_day: date | None = None  # for CARRIED_FORWARD: the day of the close used
+
+
+class PositionKind(StrEnum):
+    CASH = "cash"  # an asset in CASH_AT_PAR, 1.00 USD per unit
+    ASSET = "asset"  # spot coin or equity share: qty x close
+    PERP = "perp"  # perp position: qty x (close - entry)
+
+
+@dataclass(frozen=True)
+class PositionValue:
+    asset: str
+    kind: PositionKind
+    qty: Qty
+    close_micros: int  # USD micros per unit used (1_000_000 for cash)
+    price_day: date | None  # day of the close used; None for cash at par
+    value_micros: int  # contribution to equity
+    notional_micros: int  # signed qty x close (equal to value except for perps)
+    entry: Fraction | None = None  # perps only
+
+
+@dataclass(frozen=True)
+class DayValuation:
+    """End-of-day (UTC) valuation. `flow_micros` is the USD value of the
+    external flows (base.EXTERNAL_FLOW_KINDS) attributed to this day, at
+    this day's closes; + for money in, - for money out."""
+
+    day: date
+    equity_micros: int
+    flow_micros: int
+    positions: tuple[PositionValue, ...] = ()
+    flags: tuple[ValuationFlag, ...] = ()
+
+
+class _Flags:
+    def __init__(self, day: date) -> None:
+        self.day = day
+        self._items: dict[tuple[str, FlagReason], ValuationFlag] = {}
+
+    def add(self, asset: str, reason: FlagReason, price_day: date | None = None) -> None:
+        self._items.setdefault(
+            (asset, reason), ValuationFlag(self.day, asset, reason, price_day=price_day)
+        )
+
+    def tuple(self) -> tuple[ValuationFlag, ...]:
+        return tuple(self._items.values())
+
+
+def _unit_close(
+    asset: str, day: date, prices: _PriceIndex, flags: _Flags
+) -> tuple[int, date | None] | None:
+    """USD micros per unit for a non-perp asset on `day`, with the carry-forward
+    and unpriced rules applied (and flagged). None means: exclude it."""
+    if asset in CASH_AT_PAR:
+        return MICROS_PER_UNIT, None
+    found = prices.close(asset, day)
+    if found is None:
+        flags.add(asset, FlagReason.UNPRICED)
+        return None
+    close, price_day = found
+    if price_day != day:
+        flags.add(asset, FlagReason.CARRIED_FORWARD, price_day)
+    return close, price_day
+
+
+def _value_day(
+    day: date,
+    holdings: dict[str, Qty],
+    perps: dict[str, PerpPosition],
+    flows: dict[str, Qty],
+    prices: _PriceIndex,
+) -> DayValuation:
+    flags = _Flags(day)
+    positions: list[PositionValue] = []
+    for asset in sorted(holdings):
+        qty = holdings[asset]
+        if asset.endswith(PERP_SUFFIX):
+            continue  # valued from the perp book below
+        found = _unit_close(asset, day, prices, flags)
+        if found is None:
+            continue
+        close, price_day = found
+        value = _trunc_micros(qty.units * close)
+        kind = PositionKind.CASH if asset in CASH_AT_PAR else PositionKind.ASSET
+        positions.append(PositionValue(asset, kind, qty, close, price_day, value, value))
+
+    perp_assets = {a for a in holdings if a.endswith(PERP_SUFFIX)} | set(perps)
+    for asset in sorted(perp_assets):
+        ledger_units = holdings[asset].units if asset in holdings else Fraction(0)
+        book_units = perps[asset].qty.units if asset in perps else Fraction(0)
+        if ledger_units != book_units:
+            flags.add(asset, FlagReason.PERP_QTY_MISMATCH)
+        if asset not in perps:
+            continue
+        position = perps[asset]
+        found = prices.perp_close(asset, day)
+        if found is None:
+            flags.add(asset, FlagReason.UNPRICED)
+            continue
+        close, price_day = found
+        if price_day != day:
+            flags.add(asset, FlagReason.CARRIED_FORWARD, price_day)
+        if position.entry is None:
+            flags.add(asset, FlagReason.PERP_ENTRY_UNKNOWN)
+            continue
+        positions.append(
+            PositionValue(
+                asset,
+                PositionKind.PERP,
+                position.qty,
+                close,
+                price_day,
+                unrealized_pnl_micros(position, close),
+                _trunc_micros(position.qty.units * close),
+                entry=position.entry,
+            )
+        )
+
+    flow_micros = 0
+    for asset in sorted(flows):
+        found = _unit_close(asset, day, prices, flags)
+        if found is not None:
+            flow_micros += _trunc_micros(flows[asset].units * found[0])
+
+    return DayValuation(
+        day=day,
+        equity_micros=sum(p.value_micros for p in positions),
+        flow_micros=flow_micros,
+        positions=tuple(positions),
+        flags=flags.tuple(),
+    )
+
+
+def daily_equity_series(
+    anchor: Sequence[AnchorIn],
+    legs: Sequence[LegIn],
+    prices: Iterable[PriceIn],
+    perp_fills: Sequence[PerpFillIn],
+    days: Sequence[date],
+) -> list[DayValuation]:
+    """End-of-day (UTC) equity for each of `days` (strictly increasing), in USD micros:
+
+        E_d = sum over cash assets (CASH_AT_PAR)   of  qty x 1.00
+            + sum over spot/equity assets          of  qty x close_d
+            + sum over open perp positions         of  qty x (close_d - entry)
+
+    each term truncated toward zero to whole micros. Holdings at end of day d
+    are the anchor plus every leg whose UTC day is <= d. Perps are valued from
+    `perp_fills` (average-cost entry); their margin, fees, funding and
+    realized P&L are already cash legs. A perp's close is its own asset code's
+    close if `prices` has any, else the underlying coin's.
+
+    Missing prices: no close on day d uses the last known close before d and
+    flags CARRIED_FORWARD; no close on or before d excludes the asset from
+    E_d (and from F_d) and flags UNPRICED.
+
+    Flows: F_d = sum per asset of (net external-flow atoms attributed to d) x
+    close_d, same pricing and rounding. A flow leg is attributed to the first
+    listed day on or after its UTC day; flows on or before days[0] are part of
+    the starting capital and are not attributed (F of days[0] counts only
+    days[0]'s own flows)."""
+    if any(b <= a for a, b in zip(days, days[1:], strict=False)):
+        raise ValueError("days must be strictly increasing")
+    _check_anchor(anchor)
+    index = _PriceIndex(prices)
+    scales = _asset_scales(anchor, legs)
+    held: dict[str, int] = {
+        row.asset: _rescale(row.atoms, row.decimals, scales[row.asset]) for row in anchor
+    }
+    book = _new_book(anchor, perp_fills)
+    ordered_legs = sorted(legs, key=lambda leg: leg.occurred_at)
+    ordered_fills = sorted(perp_fills, key=lambda f: f.occurred_at)
+    li = fi = 0
+    out: list[DayValuation] = []
+    for n, day in enumerate(days):
+        flow_from = days[n - 1] + timedelta(days=1) if n else day
+        flow_atoms: dict[str, int] = {}
+        while li < len(ordered_legs) and _utc_day(ordered_legs[li].occurred_at) <= day:
+            leg = ordered_legs[li]
+            atoms = _rescale(leg.delta_atoms, leg.decimals, scales[leg.asset])
+            held[leg.asset] = held.get(leg.asset, 0) + atoms
+            if leg.kind in EXTERNAL_FLOW_KINDS and _utc_day(leg.occurred_at) >= flow_from:
+                flow_atoms[leg.asset] = flow_atoms.get(leg.asset, 0) + atoms
+            li += 1
+        while fi < len(ordered_fills) and _utc_day(ordered_fills[fi].occurred_at) <= day:
+            book.apply(ordered_fills[fi])
+            fi += 1
+        holdings = {a: Qty(atoms, scales[a]) for a, atoms in held.items() if atoms}
+        flows = {a: Qty(atoms, scales[a]) for a, atoms in flow_atoms.items() if atoms}
+        out.append(_value_day(day, holdings, book.positions(), flows, index))
+    return out
+
+
+def valuation_on(
+    anchor: Sequence[AnchorIn],
+    legs: Sequence[LegIn],
+    prices: Iterable[PriceIn],
+    perp_fills: Sequence[PerpFillIn],
+    day: date,
+) -> DayValuation:
+    """End-of-day valuation of a single day (daily_equity_series for one day)."""
+    return daily_equity_series(anchor, legs, prices, perp_fills, [day])[0]
+
+
+# ---- returns --------------------------------------------------------------------
+
+
+class EquityPointLike(Protocol):
+    @property
+    def day(self) -> date: ...
+    @property
+    def equity_micros(self) -> int: ...
+    @property
+    def flow_micros(self) -> int: ...
+
+
+@dataclass(frozen=True)
+class EquityPoint:
+    """A stored equity point (for callers that persist the series)."""
+
+    day: date
+    equity_micros: int
+    flow_micros: int = 0
+
+
+@dataclass(frozen=True)
+class DailyReturn:
+    day: date
+    r: Fraction | None  # None: no capital at risk the day before (E_(d-1) <= 0) or first point
+
+
+def _window(
+    series: Sequence[EquityPointLike], start: date | None, end: date | None
+) -> list[EquityPointLike]:
+    if any(b.day <= a.day for a, b in zip(series, series[1:], strict=False)):
+        raise ValueError("series days must be strictly increasing")
+    return [
+        p for p in series if (start is None or p.day >= start) and (end is None or p.day <= end)
+    ]
+
+
+def daily_returns(series: Sequence[EquityPointLike]) -> list[DailyReturn]:
+    """Flow-adjusted daily return, flows assumed at END of day:
+
+        r_d = (E_d - F_d) / E_(d-1) - 1
+
+    so a deposit raises E_d and F_d equally and is never a gain. A day whose
+    previous equity is zero or negative has no defined return (None): the
+    first funded day starts the series, and the chain resumes after an
+    account is emptied and refunded. Exact (Fraction)."""
+    points = _window(series, None, None)
+    out: list[DailyReturn] = []
+    for n, point in enumerate(points):
+        prev = points[n - 1].equity_micros if n else 0
+        r = Fraction(point.equity_micros - point.flow_micros, prev) - 1 if prev > 0 else None
+        out.append(DailyReturn(point.day, r))
+    return out
+
+
+def time_weighted_return(
+    series: Sequence[EquityPointLike], start: date | None = None, end: date | None = None
+) -> Fraction | None:
+    """Flow-adjusted TWR over the window [start, end] (days inclusive; the
+    first point in the window is the base, its own return is not counted):
+
+        TWR = prod over d in (start, end] of (1 + r_d)  - 1
+
+    Days with an undefined r_d are skipped. None when no day in the window
+    has a defined return."""
+    points = _window(series, start, end)
+    growth = Fraction(1)
+    defined = False
+    for daily in daily_returns(points)[1:]:
+        if daily.r is not None:
+            growth *= 1 + daily.r
+            defined = True
+    return growth - 1 if defined else None
+
+
+def modified_dietz_return(
+    series: Sequence[EquityPointLike], start: date | None = None, end: date | None = None
+) -> Fraction | None:
+    """Modified Dietz money-weighted return over [start, end], for comparison
+    with the TWR. With E_0 the first point's equity, E_N the last's, N the
+    number of days between them, and each flow F_d (days after the first)
+    weighted by the share of the window left after it (flows at end of day):
+
+        MD = (E_N - E_0 - sum F_d) / (E_0 + sum w_d F_d),   w_d = (end - d) / N
+
+    None for a window shorter than one day or a non-positive denominator."""
+    points = _window(series, start, end)
+    if len(points) < 2:
+        return None
+    first, last = points[0], points[-1]
+    n_days = (last.day - first.day).days
+    flows = points[1:]
+    total_flow = sum(p.flow_micros for p in flows)
+    weighted = sum(Fraction((last.day - p.day).days, n_days) * p.flow_micros for p in flows)
+    denominator = first.equity_micros + weighted
+    if denominator <= 0:
+        return None
+    return Fraction(last.equity_micros - first.equity_micros - total_flow) / denominator
+
+
+# ---- exposure -------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Exposure:
+    """Risk shape of one day's valuation. Cash is not exposure.
+
+    gross        = sum over spot/equity/perp positions of |notional|
+    share(u)     = sum of |notional| of positions whose underlying is u / gross
+                   (underlying: "BTC-PERP" -> "BTC", so spot and perp BTC add up)
+    top          = the largest share (ties: alphabetical first)
+    perp leverage= sum over perps of |qty x close| / equity   (None if equity <= 0)"""
+
+    day: date
+    equity_micros: int
+    gross_micros: int
+    by_underlying_micros: dict[str, int] = field(default_factory=dict)
+    shares: dict[str, Fraction] = field(default_factory=dict)
+    top_asset: str | None = None
+    top_share: Fraction | None = None
+    perp_gross_micros: int = 0
+    perp_gross_leverage: Fraction | None = None
+
+
+def exposure(valuation: DayValuation) -> Exposure:
+    """Exposure of a DayValuation (see Exposure). Excluded (unpriced or
+    entry-unknown) positions carry no exposure, as they carry no value."""
+    by_underlying: dict[str, int] = {}
+    perp_gross = 0
+    for p in valuation.positions:
+        if p.kind is PositionKind.CASH:
+            continue
+        underlying = p.asset.removesuffix(PERP_SUFFIX)
+        by_underlying[underlying] = by_underlying.get(underlying, 0) + abs(p.notional_micros)
+        if p.kind is PositionKind.PERP:
+            perp_gross += abs(p.notional_micros)
+    gross = sum(by_underlying.values())
+    shares = {u: Fraction(v, gross) for u, v in by_underlying.items()} if gross else {}
+    top = min(shares, key=lambda u: (-shares[u], u)) if shares else None
+    equity = valuation.equity_micros
+    return Exposure(
+        day=valuation.day,
+        equity_micros=equity,
+        gross_micros=gross,
+        by_underlying_micros=by_underlying,
+        shares=shares,
+        top_asset=top,
+        top_share=shares[top] if top is not None else None,
+        perp_gross_micros=perp_gross,
+        perp_gross_leverage=Fraction(perp_gross, equity) if equity > 0 else None,
+    )

@@ -1,0 +1,11 @@
+title = "koine gitleaks config"
+
+# Start from gitleaks' default rule set; only add an allowlist on top.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Recorded venue fixtures and their synthetic ids/keys (invariant #6: no live calls in tests; provenance in each tests/fixtures/<venue>/README.md)"
+paths = [
+  '''tests/fixtures/.*''',
+]

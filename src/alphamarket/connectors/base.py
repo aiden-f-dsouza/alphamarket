@@ -12,11 +12,12 @@ Rules:
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import UTC, date, datetime
 from enum import StrEnum
+from typing import Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 
 class BalanceUnavailable(Exception):
@@ -27,7 +28,67 @@ class BalanceUnavailable(Exception):
 class CredentialKind(StrEnum):
     RSA_PEM = "rsa_pem"  # key id + private key PEM (Kalshi)
     ADDRESS = "address"  # public identifier, no secret (Polymarket wallet)
-    KEY_SECRET = "key_secret"  # key id + secret string (brokerage APIs)
+    KEY_SECRET = "key_secret"  # key id + secret string (Kraken, Binance.US)
+    # v2 (platform_plan 2.3). What `key_id` / `secret` mean per kind:
+    KEY_SECRET_PASSPHRASE = "key_secret_passphrase"  # secret is JSON {"secret","passphrase"}
+    OAUTH2 = "oauth2"  # key_id = venue account id; secret = access token (vault holds refresh)
+    REPORT_TOKEN = "report_token"  # key_id = report/query id; secret = reporting token (IBKR Flex)
+    AGGREGATOR = "aggregator"  # key_id = aggregator user id; secret = aggregator user secret
+
+
+class InstrumentType(StrEnum):
+    """Per-instrument type (v2). InstrumentKind above stays the venue-level
+    shape the M6/M7 code branches on; this is what one ledger instrument is."""
+
+    BINARY = "binary"  # settles at $1/$0
+    SPOT = "spot"  # crypto spot pair, valued qty x close
+    EQUITY = "equity"  # stock/ETF share, valued qty x close
+    PERP = "perp"  # perpetual future: position valued qty x (mark - entry)
+    OPTION = "option"  # out of scope this pass; rejected at ingest
+
+
+class ReadOnlyProof(StrEnum):
+    """How Koine knows a credential cannot trade or withdraw (platform_plan D4).
+    Shown per venue on the methodology page."""
+
+    SCOPE_ENDPOINT = "scope_endpoint"  # venue describes the key's permissions
+    ORDER_PROBE = "order_probe"  # a validate-only order / withdraw query is refused
+    TOKEN_TYPE = "token_type"  # the credential type is reporting-only by construction
+    AGGREGATOR_FLAG = "aggregator_flag"  # the aggregator's read-only connection type
+    NONE = "none"  # nothing to prove: no secret is held (public address)
+
+
+class RateScope(StrEnum):
+    CREDENTIAL = "credential"  # the venue counts per key/account
+    IP = "ip"  # the venue counts per caller IP (shared by every account we poll)
+
+
+@dataclass(frozen=True)
+class RateBudget:
+    """One token bucket a venue enforces. The outbound limiter (P2) keeps a
+    bucket per (venue, credential) or per (venue, egress IP) and charges
+    `cost(endpoint)` before every request the connector makes through
+    `VenueConnector.throttle`. Integers only so budgets compare exactly.
+
+    Example, Kraken Starter tier: capacity 15, refill 20/min (0.33/s decay),
+    TradesHistory and Ledgers cost 2."""
+
+    scope: RateScope
+    capacity: int  # tokens in a full bucket
+    refill_per_minute: int  # tokens restored per minute
+    costs: tuple[tuple[str, int], ...] = ()  # (endpoint name, tokens); others cost default_cost
+    default_cost: int = 1
+
+    def cost(self, endpoint: str) -> int:
+        return dict(self.costs).get(endpoint, self.default_cost)
+
+
+class PaperFeeModel(StrEnum):
+    """How the paper mirror charges a simulated fill (P6)."""
+
+    BINARY_PXQ = "binary_pxq"  # rate x count x p x (1-p) (Kalshi, Polymarket)
+    BPS_OF_NOTIONAL = "bps_of_notional"  # fee_rate_bps x notional (crypto taker rate)
+    US_EQUITY_REGULATORY = "us_equity_regulatory"  # $0 commission + SEC fee + FINRA TAF on sells
 
 
 class InstrumentKind(StrEnum):
@@ -60,6 +121,16 @@ class VenueProfile:
     fee_rate_bps: int  # paper fee: rate x count x p x (1-p) for binary venues
     fee_rounding_micros: int  # the venue reports fees to this precision
     ownership: OwnershipProof
+    # ---- v2 fields (platform_plan 2.3); defaults keep M7 profiles valid ----
+    readonly_proof: ReadOnlyProof = ReadOnlyProof.SCOPE_ENDPOINT
+    transfers_observable: bool = False  # deposits/withdrawals arrive as events
+    history_depth: str = "all"  # "all" | "90d" | "10k_fills" | ...
+    quote_asset: str = "USD"  # the account's cash asset ("USD", "USDC")
+    tos_doc: str | None = None  # "docs/venues/<venue>.md" (invariant 10)
+    requires_partner_approval: bool = False  # connect refused in prod until True->False
+    daily_resolution: bool = False  # EOD data only -> "daily_verified" tier
+    rate_budgets: tuple[RateBudget, ...] = ()
+    paper_fee_model: PaperFeeModel = PaperFeeModel.BINARY_PXQ
 
     @property
     def needs_secret(self) -> bool:
@@ -115,10 +186,284 @@ class NormalizedBalance(BaseModel):
     as_of: datetime
 
 
-class VenueConnector(ABC):
+# ---- v2 normalized models: instruments, legs, events (platform_plan 2.1/2.3) ----
+#
+# Asset codes: spot/equity/cash use the canonical upper-case code ("BTC",
+# "USDC", "USD", "AAPL"; map venue aliases like Kraken "XXBT"/"ZUSD").
+# Perp positions are "<COIN>-PERP". Binary contracts depend on the venue:
+#   - netting venues (Kalshi): ONE asset per market, "<ticker>", signed like
+#     NormalizedPosition.position_micros (+yes / -no). Buy YES = +count, sell
+#     YES = -count, buy NO = -count, sell NO = +count; settlement leg =
+#     -(yes_count - no_count). The replayed vector then equals the venue's.
+#   - tokenised venues (Polymarket): a wallet can hold both outcome tokens, so
+#     "<conditionId>:yes" and "<conditionId>:no", unsigned; REDEEM burns each.
+# Ledger rows are per venue account, so codes need no venue prefix.
+#
+# Precision: a connector should use one `decimals` per asset (the finest the
+# venue reports for it) and parses every quantity with
+# money.to_atoms(value_string, decimals), never a float. The LEDGER must not
+# rely on that: venues change precision, and one venue can report the same
+# asset at different scales (Kraken fills 8 dp, Ledgers 10 dp, ZUSD 4 dp).
+# Consumers never sum raw atoms across rows; they rescale each value to the
+# max decimals seen for that (account, asset) first (scaling up is exact).
+# NormalizedAssetFill.qty_atoms (instrument.qty_decimals) and its FILL_BASE
+# leg (asset decimals) can legitimately differ in scale for the same reason.
+# Suggested scales: crypto as the venue reports (<= 10), equities 9 (Alpaca
+# fractional shares), cash <= 8.
+#
+# Identity: venue_fill_id / venue_ref are unique PER VENUE ACCOUNT. Prefix
+# ids that are only unique per symbol (Binance myTrades.id -> f"{symbol}:{id}"),
+# and include the instrument when a venue emits one row per instrument at the
+# same timestamp (Hyperliquid funding -> f"{time}:{coin}").
+#
+# Timestamps: date-only venue rows (IBKR Flex cash transactions, SnapTrade
+# daily activities) use 23:59:59 UTC of the reported date, so every consumer
+# assigns them to the same day.
+#
+# Zero-delta legs (a losing settlement's $0 revenue) are allowed here; the
+# ledger drops them on write.
+
+
+class LegKind(StrEnum):
+    FILL_BASE = "fill_base"  # the instrument/asset bought (+) or sold (-)
+    FILL_QUOTE = "fill_quote"  # the cash/quote asset paid (-) or received (+)
+    FEE = "fee"  # always negative, in whatever asset the venue charged
+    SETTLEMENT = "settlement"  # binary payout / contract removal
+    DEPOSIT = "deposit"
+    WITHDRAWAL = "withdrawal"
+    # TRANSFER_* only when value leaves or enters THIS venue account (e.g. to a
+    # sub-account); same-account conversions are CONVERT legs of one event.
+    TRANSFER_IN = "transfer_in"
+    TRANSFER_OUT = "transfer_out"
+    DIVIDEND = "dividend"
+    INTEREST = "interest"  # incl. margin interest (negative)
+    STAKING = "staking"
+    FUNDING = "funding"  # perp funding payment (+/-); instrument_symbol = the coin
+    TAX = "tax"  # withholding (Alpaca DIVNRA, IBKR); not a trading cost, never counted as fee
+    CONVERT = "convert"  # same-account conversion (Binance convert/dust, staking wrappers)
+    REALIZED_PNL = "realized_pnl"  # perp close: cash P&L credited to margin
+    LIQUIDATION = "liquidation"
+    SPLIT = "split"  # quantity change with no cash
+    ADJUSTMENT = "adjustment"  # venue correction or admin classification (audited)
+
+
+EXTERNAL_FLOW_KINDS = frozenset(
+    {LegKind.DEPOSIT, LegKind.WITHDRAWAL, LegKind.TRANSFER_IN, LegKind.TRANSFER_OUT}
+)
+"""Legs that move capital in or out rather than earn a return; the
+flow-adjusted TWR chains across them (methodology "External flows")."""
+
+
+class NormalizedLeg(BaseModel):
+    asset: str
+    delta_atoms: int  # signed change in the account's holding of `asset`
+    decimals: int = Field(ge=0, le=12)
+    kind: LegKind
+    instrument_symbol: str | None = None  # venue symbol the leg belongs to, if any
+    # Venue-reported running balance of `asset` right after this leg, at the
+    # same decimals (Kraken Ledgers `balance`). Reconciliation checks it
+    # exactly, in ingestion order, on legs where it is not None.
+    balance_after_atoms: int | None = None
+
+
+def _no_duplicate_legs(legs: list[NormalizedLeg]) -> list[NormalizedLeg]:
+    """The ledger's identity is (account, venue_ref, kind, asset): two legs of
+    one fill/event with the same (kind, asset) would collide and one would be
+    lost. Connectors must merge (sum) them before returning."""
+    seen: set[tuple[str, str]] = set()
+    for leg in legs:
+        key = (leg.kind, leg.asset)
+        if key in seen:
+            raise ValueError(f"duplicate leg {key}: merge legs with the same kind and asset")
+        seen.add(key)
+    return legs
+
+
+class NormalizedInstrument(BaseModel):
+    symbol: str  # exactly as the venue reports it ("XXBTZUSD", "BTC-USD", "AAPL", "BTC")
+    type: InstrumentType
+    base_asset: str  # canonical code of what the quantity counts ("BTC", "AAPL", "BTC-PERP")
+    quote_asset: str  # canonical code prices are in ("USD", "USDC", "BTC")
+    qty_decimals: int = Field(ge=0, le=12)
+    qty_step_atoms: int = 1  # smallest tradable increment (lot size), in atoms
+    min_qty_atoms: int = 0
+    min_notional: str | None = None  # decimal string in quote asset, if the venue has one
+    multiplier: int = 1  # options: 100
+    expiry: datetime | None = None
+
+
+class NormalizedAssetFill(BaseModel):
+    """One execution on a non-binary venue. `legs` carry the ledger truth;
+    the other fields are what signals and paper copying read.
+
+    Spot/equity buy: FILL_BASE +qty base, FILL_QUOTE -(qty x price) quote,
+    FEE -fee in the fee asset. Perp: FILL_BASE +/-qty of "<COIN>-PERP",
+    REALIZED_PNL on a reducing fill, FEE; no FILL_QUOTE (margin, not spot)."""
+
+    venue_fill_id: str  # stable + unique per account (idempotency)
+    order_id: str | None = None
+    instrument: NormalizedInstrument
+    action: Action
+    qty_atoms: int = Field(gt=0)  # unsigned, at instrument.qty_decimals
+    price: str  # decimal string, quote asset per one base unit, as reported
+    legs: list[NormalizedLeg]
+    filled_at: datetime
+    liquidity: str | None = None  # "maker" | "taker" | None
+
+    @model_validator(mode="after")
+    def _legs_unique(self) -> "NormalizedAssetFill":
+        _no_duplicate_legs(self.legs)
+        return self
+
+
+class NormalizedEvent(BaseModel):
+    """Any non-fill ledger activity: deposits, withdrawals, dividends,
+    interest, staking, funding, splits, adjustments."""
+
+    venue_ref: str  # stable + unique per account and kind
+    kind: LegKind  # the event's primary kind
+    legs: list[NormalizedLeg]
+    occurred_at: datetime
+    description: str | None = None
+    # True when venue_ref is a content hash because the venue's ids are not
+    # stable (SnapTrade reprocessing); dedupe then relies on the hash. Two
+    # identical same-day activities collapse into one: acceptable only on the
+    # daily_verified tier, and stated there.
+    ref_is_content_hash: bool = False
+
+    @model_validator(mode="after")
+    def _legs_unique(self) -> "NormalizedEvent":
+        _no_duplicate_legs(self.legs)
+        return self
+
+
+class AssetAmount(BaseModel):
+    asset: str
+    atoms: int
+    decimals: int = Field(ge=0, le=12)
+    # Quote asset per base unit, as reported. Needed to value positions the
+    # ledger never saw open (anchors; Hyperliquid serves only 10k fills):
+    # a perp is worth qty x (mark - entry). Alpaca avg_entry_price, IBKR
+    # costBasisPrice and Hyperliquid entryPx all land in entry_price.
+    entry_price: str | None = None
+    mark_price: str | None = None
+
+
+class NormalizedBalances(BaseModel):
+    """The venue's own view of the account as a vector. Reconciliation v2
+    compares it per asset with the replayed ledger. Perp positions appear as
+    "<COIN>-PERP" entries (with entry_price) next to the margin asset, and the
+    margin asset is cash EXCLUDING unrealized P&L (Hyperliquid: accountValue
+    minus the sum of unrealizedPnl), with equity_usd_micros = accountValue."""
+
+    as_of: datetime
+    assets: list[AssetAmount]
+    # Broker-reported total account value in USD micros (Alpaca `equity`,
+    # IBKR NAV), when the venue computes one; reconciled with a tolerance.
+    equity_usd_micros: int | None = None
+
+
+class ReadOnlyEvidence(BaseModel):
+    """Result of VenueConnector.prove_read_only(). Stored on the account and
+    re-checked nightly; read_only=False means reject at connect, suspend later."""
+
+    method: ReadOnlyProof
+    read_only: bool | None  # True confirmed, False writable, None undeterminable
+    checked_at: datetime
+    details: dict[str, str | bool | int | None] = {}  # raw flags; never secrets
+
+
+@dataclass
+class Page[T]:
+    """One page of a resumable backfill.
+
+    Rules for every *_page method:
+    - one venue HTTP request per page, so BudgetExhausted/RateLimited never
+      lose fetched work (the job persists `next_cursor` and retries);
+    - items oldest-first within the page (reverse venues that return newest
+      first, like Kraken);
+    - when `cursor` is not None, `since` is ignored;
+    - a backfill pins its upper bound (e.g. Kraken `end`) in the first cursor,
+      because offset pagination shifts as new rows arrive.
+
+    `next_cursor` None means this pass is done. `resume_cursor`, set only on
+    that final page, is opaque state the job stores on the account and passes
+    back as `cursor` on the NEXT incremental sync (Binance: discovered symbol
+    set + per-symbol fromId; Kraken: last seen time/refid). None means "use
+    `since`"."""
+
+    items: list[T] = field(default_factory=list)
+    next_cursor: str | None = None
+    resume_cursor: str | None = None
+
+
+class RateLimited(Exception):
+    """The venue answered 429/418. The job re-schedules after `retry_after`."""
+
+    def __init__(self, retry_after_seconds: float, endpoint: str = "") -> None:
+        super().__init__(f"rate limited on {endpoint or 'venue'}; retry in {retry_after_seconds}s")
+        self.retry_after_seconds = retry_after_seconds
+        self.endpoint = endpoint
+
+
+class BudgetExhausted(Exception):
+    """Raised by the injected throttle when Koine's own budget for this venue
+    is spent; nothing was sent. Same handling as RateLimited."""
+
+    def __init__(self, retry_after_seconds: float, endpoint: str = "") -> None:
+        super().__init__(
+            f"budget exhausted for {endpoint or 'venue'}; retry in {retry_after_seconds}s"
+        )
+        self.retry_after_seconds = retry_after_seconds
+        self.endpoint = endpoint
+
+
+class CredentialExpired(Exception):
+    """OAuth access token expired or revoked; the vault must refresh it (or the
+    user must reconnect) before the next call."""
+
+
+class Throttle(Protocol):
+    """The outbound limiter (P2) as connectors see it. Default: none (tests,
+    scripts)."""
+
+    def before(self, endpoint: str) -> None:
+        """Charge the endpoint's cost; raise BudgetExhausted to stop the request."""
+
+    def after(self, endpoint: str, extra_cost: int = 0, used: int | None = None) -> None:
+        """Charge response-dependent cost (Hyperliquid +1 per 20 items) and/or
+        sync to the venue's reported usage (Binance X-MBX-USED-WEIGHT-1M)."""
+
+
+class _Throttled:
+    """Mixin: the throttle hook shared by connectors and market data sources.
+    Call throttle() before EVERY HTTP request, with an endpoint name matching
+    the profile's RateBudget.costs keys, and throttle_after() once the
+    response is in when cost depends on it."""
+
+    _throttle: Throttle | None = None
+
+    def set_throttle(self, throttle: Throttle | None) -> None:
+        self._throttle = throttle
+
+    def throttle(self, endpoint: str) -> None:
+        if self._throttle is not None:
+            self._throttle.before(endpoint)
+
+    def throttle_after(self, endpoint: str, extra_cost: int = 0, used: int | None = None) -> None:
+        if self._throttle is not None:
+            self._throttle.after(endpoint, extra_cost, used)
+
+
+class VenueConnector(_Throttled, ABC):
     """One instance per connected venue account."""
 
     venue: str
+    # Which venue account this instance reads when one credential spans several
+    # (SnapTrade user -> many brokerage accounts, IBKR Flex query -> several
+    # accountIds, Coinbase portfolio uuid). None when key and account are 1:1.
+    # Also how a second connect of the same venue account is detected.
+    account_ref: str | None = None
 
     @abstractmethod
     def check_connection(self) -> NormalizedBalance:
@@ -149,6 +494,96 @@ class VenueConnector(ABC):
         in the account's public profile, False if not, None if the venue
         could not be asked. Key-based venues never need this."""
         return None
+
+    # ---- v2 (platform_plan 2.3): additive, with defaults for M7 venues ----
+
+    def fetch_asset_fills_page(
+        self, cursor: str | None = None, since: datetime | None = None
+    ) -> Page[NormalizedAssetFill]:
+        """One page of asset fills, oldest first within the page. Binary venues
+        return nothing (their fills go through fetch_fills)."""
+        return Page()
+
+    def fetch_asset_fills(self, since: datetime | None = None) -> list[NormalizedAssetFill]:
+        out: list[NormalizedAssetFill] = []
+        cursor: str | None = None
+        while True:
+            page = self.fetch_asset_fills_page(cursor, since)
+            out.extend(page.items)
+            if page.next_cursor is None:
+                return out
+            cursor = page.next_cursor
+
+    def fetch_events_page(
+        self, cursor: str | None = None, since: datetime | None = None
+    ) -> Page[NormalizedEvent]:
+        """One page of non-fill ledger events (transfers, dividends, funding...).
+        Venues without observable transfers return nothing."""
+        return Page()
+
+    def fetch_events(self, since: datetime | None = None) -> list[NormalizedEvent]:
+        out: list[NormalizedEvent] = []
+        cursor: str | None = None
+        while True:
+            page = self.fetch_events_page(cursor, since)
+            out.extend(page.items)
+            if page.next_cursor is None:
+                return out
+            cursor = page.next_cursor
+
+    def fetch_balances(self) -> NormalizedBalances:
+        """Balance vector. Default wraps the single USD balance (6 dp micros)."""
+        bal = self.fetch_balance()
+        return NormalizedBalances(
+            as_of=bal.as_of,
+            assets=[AssetAmount(asset="USD", atoms=bal.balance_micros, decimals=6)],
+        )
+
+    def prove_read_only(self) -> ReadOnlyEvidence:
+        """Default derives from check_write_scope(); venues override with
+        their own method and details."""
+        writable = self.check_write_scope()
+        return ReadOnlyEvidence(
+            method=ReadOnlyProof.SCOPE_ENDPOINT if writable is not None else ReadOnlyProof.NONE,
+            read_only=None if writable is None else not writable,
+            checked_at=datetime.now(UTC),
+        )
+
+
+class AssetVenueConnector(VenueConnector):
+    """Base for non-binary venues (crypto, equities). Implements the binary
+    M7 methods as empty so core code can treat every connector alike;
+    subclasses implement the v2 methods plus check_connection,
+    check_write_scope/prove_read_only and fetch_balances."""
+
+    def fetch_fills(self, since: datetime | None = None) -> list[NormalizedFill]:
+        return []
+
+    def fetch_settlements(self, since: datetime | None = None) -> list[NormalizedSettlement]:
+        return []
+
+    def fetch_positions(self) -> list[NormalizedPosition]:
+        return []
+
+    def fetch_balance(self) -> NormalizedBalance:
+        """USD-equivalent cash for M7 callers: the quote asset's amount in
+        micros. Raises BalanceUnavailable if the account has none."""
+        balances = self.fetch_balances()
+        if balances.equity_usd_micros is not None:
+            return NormalizedBalance(
+                balance_micros=balances.equity_usd_micros, as_of=balances.as_of
+            )
+        for amount in balances.assets:
+            if amount.asset in ("USD", "USDC") and amount.decimals <= 6:
+                micros = amount.atoms * 10 ** (6 - amount.decimals)
+                return NormalizedBalance(balance_micros=micros, as_of=balances.as_of)
+        raise BalanceUnavailable(f"{self.venue}: no USD/USDC cash asset in balances")
+
+    @abstractmethod
+    def fetch_balances(self) -> NormalizedBalances: ...
+
+    def check_connection(self) -> NormalizedBalance:
+        return self.fetch_balance()
 
 
 # ---- market data (public, unauthenticated) ----------------------------------
@@ -188,9 +623,10 @@ class NormalizedMarket(BaseModel):
         return None
 
 
-class MarketDataSource(ABC):
+class MarketDataSource(_Throttled, ABC):
     """Public market data for one venue. Needs no credentials, so one
-    instance serves every account and every follower."""
+    instance serves every account and every follower. Public endpoints count
+    against the venue's IP bucket, so they call throttle() like connectors."""
 
     venue: str
 
@@ -205,3 +641,97 @@ class MarketDataSource(ABC):
             if market is not None:
                 out[ticker] = market
         return out
+
+    # ---- v2: asset market data (defaults: nothing available) ----
+
+    def fetch_instruments(self) -> list[NormalizedInstrument]:
+        """Every instrument the venue lists (symbols, decimals, lot sizes)."""
+        return []
+
+    PRICING_QUOTES: tuple[str, ...] = ("USD", "USDC", "USDT")
+    STABLECOINS_AT_PAR: frozenset[str] = frozenset({"USD", "USDC", "USDT"})
+
+    def pricing_symbol(
+        self, asset: str, instruments: list[NormalizedInstrument] | None = None
+    ) -> str | None:
+        """The venue symbol whose daily close values one unit of `asset` in
+        USD terms: the first spot/equity instrument with base_asset == asset
+        and quote in PRICING_QUOTES order. None for cash/stablecoins (valued
+        at 1.00, see STABLECOINS_AT_PAR) and for assets the venue cannot
+        price (fall back to CoinGecko). One rule so every consumer values the
+        same way."""
+        if asset in self.STABLECOINS_AT_PAR:
+            return None
+        listed = instruments if instruments is not None else self.fetch_instruments()
+        for quote in self.PRICING_QUOTES:
+            for inst in listed:
+                if (
+                    inst.base_asset == asset
+                    and inst.quote_asset == quote
+                    and inst.type in (InstrumentType.SPOT, InstrumentType.EQUITY)
+                ):
+                    return inst.symbol
+        return None
+
+    def fetch_daily_closes(self, symbol: str, start: date, end: date) -> list["DailyClose"]:
+        """UTC daily closes for [start, end], oldest first. Fills prices_daily."""
+        return []
+
+    def fetch_quote(self, symbol: str) -> "Quote | None":
+        """Current top of book; the paper mirror fills at it (plan E5)."""
+        return None
+
+    def fetch_funding_history(
+        self, symbol: str, start: datetime, end: datetime
+    ) -> list["FundingRate"]:
+        """Perp funding rates in [start, end]; paper perps accrue them (P6)."""
+        return []
+
+    def fetch_corporate_actions(self, start: date, end: date) -> list["CorporateAction"]:
+        """Splits, dividends and symbol changes in [start, end] (equities)."""
+        return []
+
+
+class AssetMarketData(MarketDataSource):
+    """Base for non-binary market data: there are no binary markets to fetch."""
+
+    def fetch_market(self, ticker: str) -> NormalizedMarket | None:
+        return None
+
+
+class DailyClose(BaseModel):
+    symbol: str
+    day: date
+    close: str  # decimal string, quote asset per one base unit
+
+
+class Quote(BaseModel):
+    symbol: str
+    bid: str | None = None  # decimal strings, quote asset per unit
+    ask: str | None = None
+    last: str | None = None
+    as_of: datetime
+
+
+class FundingRate(BaseModel):
+    symbol: str
+    at: datetime
+    rate: str  # decimal string per funding interval, e.g. "0.0000125"
+    mark_price: str | None = None
+
+
+class CorporateActionKind(StrEnum):
+    SPLIT = "split"  # also reverse splits (ratio < 1)
+    CASH_DIVIDEND = "cash_dividend"
+    SYMBOL_CHANGE = "symbol_change"
+
+
+class CorporateAction(BaseModel):
+    symbol: str
+    kind: CorporateActionKind
+    ex_date: date
+    pay_date: date | None = None
+    ratio_new: int | None = None  # split: new shares per ratio_old old shares
+    ratio_old: int | None = None
+    cash_per_share: str | None = None  # dividend, decimal string USD
+    new_symbol: str | None = None  # symbol change

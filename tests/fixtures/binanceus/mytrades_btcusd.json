@@ -1,0 +1,32 @@
+[
+  {
+    "symbol": "BTCUSD",
+    "id": 28457,
+    "orderId": 100234,
+    "orderListId": -1,
+    "price": "84300.00000000",
+    "qty": "0.01000000",
+    "quoteQty": "843.00000000",
+    "commission": "0.00001000",
+    "commissionAsset": "BTC",
+    "time": 1790035200000,
+    "isBuyer": true,
+    "isMaker": false,
+    "isBestMatch": true
+  },
+  {
+    "symbol": "BTCUSD",
+    "id": 28458,
+    "orderId": 100240,
+    "orderListId": -1,
+    "price": "84500.00000000",
+    "qty": "0.00500000",
+    "quoteQty": "422.50000000",
+    "commission": "0.42250000",
+    "commissionAsset": "USD",
+    "time": 1790038800000,
+    "isBuyer": false,
+    "isMaker": true,
+    "isBestMatch": true
+  }
+]

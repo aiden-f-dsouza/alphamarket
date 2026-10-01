@@ -245,3 +245,400 @@ Each valuation is stored, and the series of valuations is the follower's
 curve. Live mirroring into a real account is not offered: it requires a
 licensed party in the loop, and the platform refuses it structurally rather
 than behind a setting.
+
+## Ledger legs
+
+Every fill, settlement and account event is stored as a group of **legs**.
+A leg is the signed change of one asset in one venue account: a contract, a
+coin, a share, or cash. An account's holding of any asset is the sum of its
+legs, and the cash ledger above is the special case "sum of the USD legs
+after the anchor". Legs are append-only like fills.
+
+A binary fill of `count` contracts at `price` with `fee` becomes three legs,
+all in micro-units:
+
+```
+fill_base   contract   +count or -count (see below)
+fill_quote  USD        -count × price (buy)   or  +count × price (sell)
+fee         USD        -fee
+```
+
+`fill_quote + fee` is exactly `fill_cash_flow` above. How contracts are
+counted depends on the venue:
+
+- **Netting venues (Kalshi)** hold one signed position per market, as the
+  venue reports it: `+` is YES, `-` is NO. Buying YES or selling NO adds
+  `count`; buying NO or selling YES subtracts it. Settlement removes the
+  position: `-(yes_count - no_count)`.
+- **Tokenised venues (Polymarket)** can hold both outcome tokens at once, so
+  each is its own asset (`<market>:yes`, `<market>:no`). Buying adds, selling
+  subtracts, and a redemption burns the tokens redeemed.
+
+A settlement adds one more leg, `+revenue` in USD. Its fee field is not a
+leg, for the reason given under "The cash ledger".
+
+Worked example (the live demo account): cash 1101.8980. Buy 0.84 NO at 0.57
+with fee 0.0145: legs `-0.84` contract, `-0.4788` USD, `-0.0145` USD. The
+market resolves YES: legs `+0.84` contract, `+0` USD. Result: contract
+position `-0.84 + 0.84 = 0`, cash `1101.8980 - 0.4788 - 0.0145 = 1101.4047`,
+the venue's balance to the micro-dollar.
+
+A leg that moves nothing (a zero fee, a losing side's $0 payout) is not
+stored. A settlement with no contracts and no payout therefore leaves no
+trace, and the cash curve at every moment is unchanged.
+
+**Re-reads are checked, not trusted.** Koine re-reads recent venue history
+on every sync, so it sees events it has already stored. An event is either
+stored whole or not at all. If any leg of an event is already stored, every
+leg the venue now reports must match it exactly (compared at the finer of
+the two precisions). A partial or different duplicate is not written. It
+quarantines the strategy, with the reason recorded for review.
+
+Before the legs path replaced the old formula, every recorded Kalshi and
+Polymarket history, plus a generated 200-event history, was replayed both
+ways and gave identical cash curves to the micro-dollar.
+
+## Precision by asset
+
+Coins and shares are not counted in micro-units. Each quantity is an integer
+number of **atoms** at a stated number of decimal places, at most 12: 0.5
+BTC at 8 decimals is `50000000` atoms. Quantities are parsed only from the
+venue's decimal text, never from a floating-point number, and a value finer
+than its stated precision is refused rather than rounded.
+
+Venues change precision, and one venue can report the same asset at
+different precisions (for example 8 decimals on fills and 10 on its ledger).
+So before any sum, every value of an asset is rescaled to the finest
+precision seen for that asset. Rescaling to more decimals is exact:
+
+```
+BTC:  +0.5 (8 dp)  and  -0.1234567891 (10 dp)
+      -> 5000000000 - 1234567891 = 3765432109 atoms at 10 dp  (0.3765432109 BTC)
+USD:  +100.25 (2 dp)  and  -0.0001 (4 dp)
+      -> 1002500 - 1 = 1002499 atoms at 4 dp  (100.2499 USD)
+```
+
+Nothing is ever rescaled to fewer decimals unless the value is exact at the
+coarser precision.
+
+## Reconciliation v2 (coins and shares)
+
+Binary venues are reconciled exactly as described under "Reconciliation".
+Venues that hold coins or shares are reconciled asset by asset:
+
+```
+anchor vector   = every asset balance the venue reported at connection
+ledger vector   = anchor vector + every leg after the anchor, per asset
+for each asset in either vector (a missing side counts as 0),
+at the finer of the two precisions:
+    divergence  = venue amount - ledger amount
+    tolerance   = max(0.1% × venue amount, 1 atom)
+                  (USD keeps the one-cent floor: max(0.1% × venue, $0.01))
+```
+
+Examples: USD 1000.0000 has a tolerance of $1.00. USD 5.00 gets one cent,
+because 0.1% is only half a cent. 0.5 BTC gets 0.0005 BTC (50000 atoms at 8
+dp). 0.000001 BTC gets one atom (0.1% rounds down to zero). A ledger
+holding 0.3765432109 BTC against a venue report of 0.37654321 BTC differs by
+9 atoms at 10 dp, well inside its tolerance of 3765432 atoms.
+
+**Running balances.** Some venues report the balance after each ledger row.
+Koine checks these exactly, with no tolerance, in the order it stored them.
+For each asset, the first reported balance starts the chain. Every later one
+must equal the previous reported balance plus every leg of that asset in
+between:
+
+```
++100.0000  balance 100.0000   (chain starts)
+ -30.0000  (no balance)
+ -20.0000  balance  50.0000   100 - 30 - 20 = 50: ok
+```
+
+Had the venue reported 49.0000 on the last row, the chain would break
+(expected 50.0000).
+
+Any asset outside its tolerance, or any running balance that does not
+follow, quarantines the strategy, as today. Every asset of every check is
+stored, so the history of "did the ledger explain each balance?" is
+auditable per asset.
+
+## Asset valuation
+
+Crypto and equity accounts hold more than one asset, so their equity is a sum
+of positions, each valued in US dollars at a daily close. Pinned by
+`tests/test_valuation.py`; the code is `alphamarket/valuation.py`.
+
+**Holdings.** An account's holding of an asset at time `t` is the venue's own
+balance at connect time (the anchor) plus every ledger leg in that asset up
+to and including `t`. Quantities are exact integers at the precision the
+venue reported. When a venue reports one asset at different precisions (Kraken
+reports USD at 4 decimals in one place and 6 in another), every amount is
+first rescaled to the finest precision seen before anything is added. Example:
+12.3456 USD at 4 decimals plus 0.000001 USD at 6 decimals is 12.345601 USD.
+
+**Equity at the end of each UTC day `d`:**
+
+```
+E_d = Σ cash assets (USD, USDC, USDT)   qty × 1.00
+    + Σ coins and shares                qty × close_d
+    + Σ open perpetual positions        qty × (close_d − entry)
+```
+
+- Stablecoins are valued at exactly 1.00. Every other asset uses its UTC daily
+  close in US dollars. A perp uses its own contract's close when Koine has
+  one, and otherwise the underlying coin's close.
+- Closes are as-traded prices, not split-adjusted ones. A 2-for-1 split adds
+  shares on the split day, the day the close halves, so equity does not move:
+  10 shares × $200 = $2,000 before the split, 20 × $100 = $2,000 after it.
+- Fees, funding, dividends, interest and tax withholding are ledger legs in
+  whatever asset the venue booked them in, so they are already in the
+  holdings. A fee paid in BNB is valued at BNB's close: an account holding
+  1,000 USDT and 1 BNB (close $600) buys 0.01 BTC for 600 USDT with a fee of
+  0.0075 BNB, and at closes BTC $60,000 and BNB $600 its equity is
+  400 + 0.01 × 60,000 + 0.9925 × 600 = **$1,595.50** (it was $1,600; the fee
+  cost 0.0075 × 600 = $4.50).
+- A cross pair is valued through both closes: buying 10 ETH for 0.5 BTC
+  leaves 0.5 BTC and 10 ETH, which is 0.5 × 60,000 + 10 × 3,100 = $61,000
+  and, the next day, 0.5 × 62,000 + 10 × 3,050 = $61,500.
+- A dividend is a return, not a deposit: 20 shares paying $0.25, with $0.75
+  withheld, add $4.25 to equity ($2,000 → $2,004.25, a 0.2125% day).
+
+**Missing prices.** If an asset has no close for day `d`, the last known close
+before `d` is used and the day is flagged "carried forward". An asset with no
+close on or before `d` is left out of that day's equity and flagged
+"unpriced". Nothing is ever valued at a price Koine does not have. Example: 10
+SOL and $50 cash with SOL closes of $150 on day 1 and $160 on day 3 give
+$1,550, $1,550 (day 1's close carried forward, flagged) and $1,650.
+
+**Rounding.** Every figure is computed exactly. Rounding happens once per
+position per day: its dollar value is truncated toward zero to whole
+micro-dollars (1 satoshi at $50,000.123456 is 500.00123456 micro-dollars,
+counted as 500; a short of 1 satoshi counts −500, not −501). Equity is the
+exact sum of those positions, so a day's equity is off by less than one
+micro-dollar per position, and no position is ever shown larger than it is.
+
+**Perpetual positions: average entry.** A perp position is valued as
+`qty × (close − entry)`, where `entry` is the average-cost entry price:
+
+```
+opening from flat           entry = fill price
+adding in the same direction entry = (|q| × entry + |fill| × price) / (|q| + |fill|)
+reducing                    entry unchanged
+closing exactly             no position
+flipping through zero       entry = the flip fill's price
+```
+
+A position already open at connect time starts at the entry price the venue
+reports. If the venue reports none, the position is left out of equity and
+flagged until it closes or flips. Realized P&L is not recomputed. The
+venue's own realized P&L, funding and fees are cash legs, and the formula
+above values only what is still open. Worked example (BTC perp, $10,000 USDC
+margin):
+
+| Day | Fill | Position, entry | Cash legs | Close | Unrealized | Equity |
+|---|---|---|---|---|---|---|
+| 1 | buy 0.1 @ 60,000 | +0.1 @ 60,000 | fee −2.40 | 61,000 | 0.1 × 1,000 = 100 | 10,097.60 |
+| 2 | buy 0.1 @ 62,000 | +0.2 @ 61,000 | funding −1.50 | 61,500 | 0.2 × 500 = 100 | 10,096.10 |
+| 3 | sell 0.15 @ 63,000 | +0.05 @ 61,000 | realized +300 | 62,000 | 0.05 × 1,000 = 50 | 10,346.10 |
+| 4 | sell 0.15 @ 60,000 | −0.1 @ 60,000 | realized −50, funding +0.80 | 59,000 | −0.1 × −1,000 = 100 | 10,346.90 |
+
+Rounding applies the same way: after buying 1 @ $10 and 2 @ $11 and selling 1
+@ $12, the entry is 32/3. At $10.50 two units are worth 2 × (10.5 − 32/3) =
+−$1/3, counted as −333,333 micro-dollars.
+
+**Exposure.** For each day: gross exposure is the sum of `|qty × close|` over
+coins, shares and perps (cash is not exposure). Each underlying's share is
+its part of gross exposure, with spot BTC and the BTC perp counted together.
+Concentration is the largest share. Perp leverage is the sum of
+`|perp qty × close|` divided by equity. Example: $10,000 USDC, 0.1 BTC and
+1 ETH at $50,000 / $3,000, short 0.2 BTC perp entered at $51,000. Equity is
+10,000 + 5,000 + 3,000 + 200 = $18,200. Gross exposure is 5,000 + 3,000 +
+10,000 = $18,000. BTC is 5/6 of it and ETH 1/6. Perp leverage is
+10,000 / 18,200 = 0.55×.
+
+## External flows (time-weighted return)
+
+Deposits, withdrawals and transfers in or out of the account move capital.
+They do not earn anything, so they must not show up as gains or losses.
+Koine uses a time-weighted return that takes them out.
+
+Each day's external flow `F_d` is the dollar value of that day's deposit,
+withdrawal and transfer legs at that day's closes, with the same pricing,
+missing-price and rounding rules as equity (in `+`, out `−`). Flows are
+assumed to arrive at the **end** of the day, so they never count as that
+day's performance:
+
+```
+r_d = (E_d − F_d) / E_(d−1) − 1
+TWR = Π (1 + r_d) − 1        over the days of the window after its first
+```
+
+A day whose previous equity is zero or negative has no return: the first
+funded day starts the series, and an account that is emptied and refunded
+resumes chaining on the next day. When the series skips calendar days, a
+flow on a skipped day counts toward the next listed day.
+
+Worked example: an account holds 1 BTC, BTC closes at $50,000, $55,000 and
+$49,500, and the trader deposits 0.5 BTC on day 2.
+
+| Day | Equity | Flow | Daily return |
+|---|---|---|---|
+| 1 | 50,000 | | |
+| 2 | 1.5 × 55,000 = 82,500 | 0.5 × 55,000 = 27,500 | (82,500 − 27,500) / 50,000 − 1 = +10% |
+| 3 | 1.5 × 49,500 = 74,250 | | 74,250 / 82,500 − 1 = −10% |
+
+TWR = 1.10 × 0.90 − 1 = **−1%**, exactly the return of simply holding 1 BTC
+(49,500 / 50,000 − 1). A cash deposit works the same way: $1,000 plus a $500
+deposit and later a $200 withdrawal, with no trading, is a 0% return every
+day.
+
+For comparison Koine can also compute the **Modified Dietz** money-weighted
+return. It answers a different question ("how did the dollars actually
+invested do?") and is shown only beside the TWR, never in its place:
+
+```
+MD = (E_end − E_start − Σ F_d) / (E_start + Σ w_d × F_d),   w_d = (end − d) / (end − start)
+```
+
+In the example: (74,250 − 50,000 − 27,500) / (50,000 + ½ × 27,500) =
+−3,250 / 63,750 = **−5.1%**. Adding capital just before a loss makes the
+money-weighted figure worse, while the time-weighted figure, which measures
+the trader's decisions, stays at −1%.
+
+Returns are computed exactly (as fractions) and are only rounded for display.
+
+## Kraken (spot)
+
+**Where each number comes from.** Kraken's `Ledgers` endpoint lists every
+change to every asset balance, with the balance after it. Kraken defines
+
+```
+balance = previous balance + amount - fee          (per asset, per ledger row)
+```
+
+so each row becomes a leg of `amount` plus a fee leg of `-fee`, and the
+reported `balance` is checked exactly against our replay after that row.
+
+**Trades.** A trade's legs are its ledger rows (the rows whose `refid` is the
+trade id), not the trade's own `cost` and `fee` fields: Kraken prints trade
+cost to the pair's cost precision (5 decimals for USD pairs) but moves the
+USD balance at 4 decimals, so only the ledger rows reproduce the balance. The
+asset that moves with the trade direction (up on a buy, down on a sell) is the
+base, the other is the quote, and every row's fee is a fee leg in that row's
+asset (Kraken fee credits, KFEE, included). The trade's own price, volume and
+side describe the fill; they are cross-checked against the ledger rows and a
+disagreement beyond one unit of the last decimal is logged.
+
+Worked example (tested): buy 0.02 BTC at 30010.0, ledger rows BTC +0.0200000000
+and USD -600.2000 with fee 1.5605: legs BTC +0.02, USD -600.2000, fee USD
+-1.5605, and 2000.0000 - 600.2000 - 1.5605 = 1398.2395 is the USD balance
+Kraken reports after it.
+
+**Everything else** is one event per ledger row: deposits and withdrawals are
+external flows; staking rewards are income; moving coins into or out of a
+staked or earning balance (ETH to ETH2.S, Earn allocations) is a conversion
+inside the account, not a flow; transfers to Kraken Futures and unlabelled
+transfers (airdrops) are external flows, so they never count as a return;
+margin rollover is interest; anything unrecognised is an audited adjustment.
+
+**Assets.** Kraken's codes are renamed to the common ones (XXBT is BTC, ZUSD is
+USD). Staked and earning balances (ETH2.S, DOT28.S, BTC.M) are kept as their
+own assets because Kraken keeps a separate running balance for each, and are
+valued at the price of the underlying coin. USD, USDC and USDT (and their held
+or earning variants) are valued at 1.00.
+
+**Read-only check.** Kraken cannot describe a key's permissions, so we ask it
+to validate an order that is never placed (`validate=true`) and to list
+withdrawal methods; both must be refused with "Permission denied", while
+balance, trade and ledger reads succeed. The check reruns nightly.
+
+## Hyperliquid accounts
+
+Hyperliquid is an on-chain exchange: every account is a public address, and
+we read it through Hyperliquid's public API without any key. Terms, consent
+and limits: `docs/venues/hyperliquid.md`.
+
+**Ownership.** Anyone can paste an address, so the page stays hidden until
+the trader signs a Koine message with the wallet (EIP-191 `personal_sign`)
+and the signature recovers that address, the master of a sub-account, or
+the leader of a vault. Signing is not a transaction.
+
+**What becomes a ledger row.** Quantities are stored exactly, in the
+venue's own decimals (perp sizes at the coin's `szDecimals`, spot tokens at
+their `weiDecimals`, USDC at 8 places).
+
+```
+perp fill      position  "<COIN>-PERP"  +size (buy) / -size (sell)
+               cash      +closedPnl                 (realized P&L, USDC)
+               fee       -fee in feeToken           (includes any builder fee;
+                                                     a maker rebate is positive)
+spot fill      base      +size / -size
+               quote     -size x price / +size x price   (exact product)
+               fee       -fee in feeToken
+funding        cash      +usdc (negative when paid), one row per hour and coin
+transfers      deposits, withdrawals (+ the $1 fee), sends to or from other
+               addresses, vault and staking moves: external flows, so the
+               time-weighted return is chained across them, never a gain
+own moves      spot <-> perp between your own balances: no change at all
+liquidation    recorded as an event; the cash moves in the liquidation fills
+```
+
+Worked example (recorded fill, 2026-09-25): closing 73,874 XPL long at
+0.11013 with `closedPnl` -286.852742 and fee 1.220361 books the position
+-73,874 XPL-PERP and cash -286.852742 - 1.220361 = -288.073103 USDC.
+
+**Balance check.** The venue's own view is rebuilt as a vector: spot token
+totals, plus (for accounts in standard mode) each perp venue's account value
+minus the unrealized P&L of its open positions, plus the open positions
+themselves with their entry prices. Accounts in Hyperliquid's unified or
+portfolio-margin mode keep all cash in the spot balances, so the perp account
+value is not used for them. The USDC account value we compare equity with is
+USDC cash plus the unrealized P&L of USDC-margined positions.
+
+**Limits.** Hyperliquid serves only the 10,000 most recent fills of an
+address. Older history is represented by the balance we record when the
+account connects (the anchor), and the page says from which date fills are
+individually verified. Staking rewards and borrow/lend interest are treated
+as flows, not returns (a small understatement), until they are verified
+against a real account.
+
+## Alpaca accounts (US stocks and ETFs)
+
+**Source.** Alpaca's account activities (every fill and every non-trade cash
+or share movement, each with a stable id), the account's cash and equity,
+and its open positions, read with a read-only OAuth grant.
+
+**Units.** Shares are counted to 9 decimal places (Alpaca sells fractional
+shares); dollars to 6 (micro-dollars). A fill moves two amounts:
+
+```
+buy  q shares at price p :  shares +q ,  cash -(q x p)
+sell q shares at price p :  shares -q ,  cash +(q x p)
+q x p is rounded half-even to $0.000001; it is exact for every whole-share
+fill at a cent price. Example: 0.123456789 x 174.78 = 21.57777758142
+-> $21.577778.
+```
+
+Regulatory fees (SEC fee, FINRA trading activity fee) are not part of the
+fill: Alpaca books them as separate fee entries, usually the next day, and
+they are counted as fees on that day. Dividend withholding (non-resident or
+backup withholding, foreign tax) is recorded as tax, never as a trading
+cost. Deposits, withdrawals and journals are external flows: they change the
+capital, not the return. A stock split changes the share count with no cash;
+cash paid in lieu of a fractional share is recorded with it. Non-trade
+entries that Alpaca dates without a time are placed at 23:59:59 UTC of that
+date.
+
+**What is not supported yet.** Short sales, options, crypto, stock
+dividends, mergers, spin-offs and symbol changes on the account are not put
+into the ledger. When one appears the account carries a visible
+"unsupported activity" flag, because numbers after it may not reconcile;
+nothing is estimated in its place.
+
+**Reconciliation.** Nightly, the ledger's cash and share counts are compared
+with Alpaca's reported cash and positions, and the valuation with Alpaca's
+reported account equity.
+
+**Prices.** Daily closes are Alpaca's unadjusted daily bars (share counts
+are adjusted by the split entries themselves, so prices must not be
+adjusted twice). A bar belongs to its New York trading date.

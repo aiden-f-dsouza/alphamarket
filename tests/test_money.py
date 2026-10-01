@@ -10,9 +10,12 @@ import pytest
 
 from alphamarket.money import (
     MICROS_PER_UNIT,
+    format_atoms,
     format_micros,
+    from_atoms,
     from_micros,
     notional_micros,
+    to_atoms,
     to_micros,
 )
 
@@ -84,3 +87,36 @@ def test_cents_would_not_reconcile():
 
 def test_scale_constant():
     assert MICROS_PER_UNIT == 1_000_000
+
+
+# ---- atoms (asset quantities at per-asset precision) ---------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "decimals", "expected"),
+    [
+        ("0.5", 8, 50_000_000),  # half a BTC at 8 dp
+        ("0.0000000100", 10, 100),  # Kraken reports 10 dp; one satoshi = 100 atoms
+        ("1.25", 6, 1_250_000),  # fractional shares at 6 dp
+        ("-3", 0, -3),  # whole units, negative (a debit leg)
+        ("12.000000000000", 12, 12_000_000_000_000),  # the maximum precision
+    ],
+)
+def test_to_atoms_exact(text, decimals, expected):
+    assert to_atoms(text, decimals) == expected
+    assert from_atoms(expected, decimals) == Decimal(text)
+
+
+def test_to_atoms_rejects_excess_precision_and_bad_types():
+    with pytest.raises(ValueError):
+        to_atoms("0.123456789", 8)
+    with pytest.raises(ValueError):
+        to_atoms("1", 13)
+    for bad in (0.5, 1, True):
+        with pytest.raises(TypeError):
+            to_atoms(bad, 8)
+
+
+def test_format_atoms_pads_to_decimals():
+    assert format_atoms(50_000_000, 8) == "0.50000000"
+    assert format_atoms(-3, 0) == "-3"

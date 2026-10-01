@@ -1,0 +1,45 @@
+{
+ "balances": [
+  {
+   "coin": "USDC",
+   "token": 0,
+   "total": "101401.18075769",
+   "hold": "61800.813683",
+   "entryNtl": "0.0"
+  },
+  {
+   "coin": "USDE",
+   "token": 235,
+   "total": "0.0",
+   "hold": "0.0",
+   "entryNtl": "0.0"
+  },
+  {
+   "coin": "USDT0",
+   "token": 268,
+   "total": "0.0",
+   "hold": "0.0",
+   "entryNtl": "0.0"
+  },
+  {
+   "coin": "UXPL",
+   "token": 343,
+   "total": "300528.382792",
+   "hold": "0.0",
+   "entryNtl": "35125.586101"
+  },
+  {
+   "coin": "USDH",
+   "token": 360,
+   "total": "0.0",
+   "hold": "0.0",
+   "entryNtl": "0.0"
+  }
+ ],
+ "tokenToAvailableAfterMaintenance": [
+  [
+   0,
+   "83482.84256069"
+  ]
+ ]
+}

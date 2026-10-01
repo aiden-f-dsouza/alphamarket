@@ -1,0 +1,224 @@
+{
+  "data": [
+    {
+      "id": "e0000001-0000-0000-0000-000000000001",
+      "symbol": null,
+      "price": null,
+      "units": null,
+      "amount": 500.0,
+      "currency": { "code": "USD" },
+      "type": "CONTRIBUTION",
+      "description": "ACH deposit",
+      "trade_date": null,
+      "settlement_date": "2026-09-01T00:00:00.000Z",
+      "fee": 0,
+      "institution": "Robinhood",
+      "external_reference_id": "ext-c1"
+    },
+    {
+      "id": "e0000002-0000-0000-0000-000000000002",
+      "symbol": null,
+      "price": null,
+      "units": null,
+      "amount": -200.0,
+      "currency": { "code": "USD" },
+      "type": "WITHDRAWAL",
+      "description": "ACH withdrawal",
+      "trade_date": null,
+      "settlement_date": "2026-09-02T00:00:00.000Z",
+      "fee": 0,
+      "institution": "Robinhood",
+      "external_reference_id": "ext-w1"
+    },
+    {
+      "id": "e0000003-0000-0000-0000-000000000003",
+      "symbol": {
+        "id": "pos-aapl",
+        "symbol": { "symbol": "AAPL", "description": "Apple Inc.", "currency": { "code": "USD" } }
+      },
+      "price": null,
+      "units": null,
+      "amount": 12.34,
+      "currency": { "code": "USD" },
+      "type": "DIVIDEND",
+      "description": "AAPL cash dividend",
+      "trade_date": null,
+      "settlement_date": "2026-09-03T00:00:00.000Z",
+      "fee": 0,
+      "institution": "Robinhood",
+      "external_reference_id": "ext-d1"
+    },
+    {
+      "id": "e0000004-0000-0000-0000-000000000004",
+      "symbol": null,
+      "price": null,
+      "units": null,
+      "amount": 0.05,
+      "currency": { "code": "USD" },
+      "type": "INTEREST",
+      "description": "Cash sweep interest",
+      "trade_date": null,
+      "settlement_date": "2026-09-04T00:00:00.000Z",
+      "fee": 0,
+      "institution": "Robinhood",
+      "external_reference_id": "ext-i1"
+    },
+    {
+      "id": "e0000005-0000-0000-0000-000000000005",
+      "symbol": null,
+      "price": null,
+      "units": null,
+      "amount": -2.5,
+      "currency": { "code": "USD" },
+      "type": "FEE",
+      "description": "Account fee",
+      "trade_date": null,
+      "settlement_date": "2026-09-05T00:00:00.000Z",
+      "fee": 0,
+      "institution": "Robinhood",
+      "external_reference_id": "ext-f1"
+    },
+    {
+      "id": "e0000006-0000-0000-0000-000000000006",
+      "symbol": null,
+      "price": null,
+      "units": null,
+      "amount": -1.85,
+      "currency": { "code": "USD" },
+      "type": "TAX",
+      "description": "NRA withholding",
+      "trade_date": null,
+      "settlement_date": "2026-09-06T00:00:00.000Z",
+      "fee": 0,
+      "institution": "Robinhood",
+      "external_reference_id": "ext-t1"
+    },
+    {
+      "id": "e0000007-0000-0000-0000-000000000007",
+      "symbol": {
+        "id": "pos-tsla",
+        "symbol": { "symbol": "TSLA", "description": "Tesla Inc.", "currency": { "code": "USD" } }
+      },
+      "price": 0,
+      "units": 15,
+      "amount": 0,
+      "currency": { "code": "USD" },
+      "type": "SPLIT",
+      "description": "TSLA 2-for-1 split",
+      "trade_date": null,
+      "settlement_date": "2026-09-07T00:00:00.000Z",
+      "fee": 0,
+      "institution": "Robinhood",
+      "external_reference_id": "ext-sp1"
+    },
+    {
+      "id": "e0000008-0000-0000-0000-000000000008",
+      "symbol": {
+        "id": "pos-aapl",
+        "symbol": { "symbol": "AAPL", "description": "Apple Inc.", "currency": { "code": "USD" } }
+      },
+      "price": 152.35,
+      "units": 0.081,
+      "amount": 12.34,
+      "currency": { "code": "USD" },
+      "type": "REI",
+      "description": "AAPL dividend reinvestment",
+      "trade_date": "2026-09-08T00:00:00.000Z",
+      "settlement_date": "2026-09-08T00:00:00.000Z",
+      "fee": 0,
+      "institution": "Robinhood",
+      "external_reference_id": "ext-rei1"
+    },
+    {
+      "id": "e0000009-0000-0000-0000-000000000009",
+      "symbol": {
+        "id": "pos-aapl",
+        "symbol": { "symbol": "AAPL", "description": "Apple Inc.", "currency": { "code": "USD" } }
+      },
+      "price": 0,
+      "units": 2,
+      "amount": 0,
+      "currency": { "code": "USD" },
+      "type": "STOCK_DIVIDEND",
+      "description": "AAPL bonus shares",
+      "trade_date": null,
+      "settlement_date": "2026-09-09T00:00:00.000Z",
+      "fee": 0,
+      "institution": "Robinhood",
+      "external_reference_id": "ext-sd1"
+    },
+    {
+      "id": "e000000a-0000-0000-0000-00000000000a",
+      "symbol": {
+        "id": "pos-googl",
+        "symbol": { "symbol": "GOOGL", "description": "Alphabet Inc.", "currency": { "code": "USD" } }
+      },
+      "price": null,
+      "units": 5,
+      "amount": null,
+      "currency": { "code": "USD" },
+      "type": "EXTERNAL_ASSET_TRANSFER_IN",
+      "description": "ACATS transfer in from another broker",
+      "trade_date": null,
+      "settlement_date": "2026-09-14T00:00:00.000Z",
+      "fee": 0,
+      "institution": "Robinhood",
+      "external_reference_id": "ext-tin1"
+    },
+    {
+      "id": "e000000b-0000-0000-0000-00000000000b",
+      "symbol": {
+        "id": "pos-googl",
+        "symbol": { "symbol": "GOOGL", "description": "Alphabet Inc.", "currency": { "code": "USD" } }
+      },
+      "price": null,
+      "units": -3,
+      "amount": null,
+      "currency": { "code": "USD" },
+      "type": "EXTERNAL_ASSET_TRANSFER_OUT",
+      "description": "ACATS transfer out to another broker",
+      "trade_date": null,
+      "settlement_date": "2026-09-15T00:00:00.000Z",
+      "fee": 0,
+      "institution": "Robinhood",
+      "external_reference_id": "ext-tout1"
+    },
+    {
+      "id": "e000000c-0000-0000-0000-00000000000c",
+      "symbol": {
+        "id": "pos-aapl",
+        "symbol": { "symbol": "AAPL", "description": "Apple Inc.", "currency": { "code": "USD" } }
+      },
+      "price": null,
+      "units": 0.001,
+      "amount": 0,
+      "currency": { "code": "USD" },
+      "type": "ADJUSTMENT",
+      "description": "Broker rounding correction",
+      "trade_date": null,
+      "settlement_date": "2026-09-16T00:00:00.000Z",
+      "fee": 0,
+      "institution": "Robinhood",
+      "external_reference_id": "ext-adj1"
+    },
+    {
+      "id": "e000000d-0000-0000-0000-00000000000d",
+      "symbol": {
+        "id": "pos-aapl-opt",
+        "symbol": { "symbol": "AAPL 250117C00150000", "description": "AAPL Call", "currency": { "code": "USD" } }
+      },
+      "price": 1.5,
+      "units": -1,
+      "amount": 0,
+      "currency": { "code": "USD" },
+      "type": "OPTIONEXPIRATION",
+      "description": "Option expired worthless",
+      "trade_date": null,
+      "settlement_date": "2026-09-17T00:00:00.000Z",
+      "fee": 0,
+      "institution": "Robinhood",
+      "external_reference_id": "ext-opt1"
+    }
+  ],
+  "pagination": { "offset": 0, "limit": 1000, "total": 13 }
+}

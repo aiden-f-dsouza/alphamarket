@@ -1,0 +1,544 @@
+[
+ {
+  "time": 1732371419449,
+  "hash": "0x73dfdef26e7dc15a2fffd49ec0caf4c78eb8d7695ca0cf15f97a15b992d01ed7",
+  "delta": {
+   "type": "deposit",
+   "usdc": "2999.04"
+  }
+ },
+ {
+  "time": 1739257155343,
+  "hash": "0x7831b196fad0c4e62a25bb8d49e3866b4303cb05c7f8a987fcf35e1dc4d2786c",
+  "delta": {
+   "type": "deposit",
+   "usdc": "2889.08"
+  }
+ },
+ {
+  "time": 1754590616085,
+  "hash": "0x7bde56372e32362191161a3e807f591c104c6753a39d3a49cec4a2583a75077c",
+  "delta": {
+   "type": "deposit",
+   "usdc": "20002.761471"
+  }
+ },
+ {
+  "time": 1755114257671,
+  "hash": "0x42a9789f7e444af3540ef87e0c50d0b791c37323d764284cf6fcf51afc7d0c6e",
+  "delta": {
+   "type": "deposit",
+   "usdc": "49951.91"
+  }
+ },
+ {
+  "time": 1759138843417,
+  "hash": "0xc47214a9c6cef3bd15d478941ca9349790f8cc6e34c4ad2ceeaa8b2dea83e1dc",
+  "delta": {
+   "type": "deposit",
+   "usdc": "14981.58"
+  }
+ },
+ {
+  "time": 1759144239180,
+  "hash": "0x18c63ba3419bbb91a3be96b6b90c4adc3eb9eab4ddb2bcab47ac234585671a65",
+  "delta": {
+   "type": "deposit",
+   "usdc": "5825.88"
+  }
+ },
+ {
+  "time": 1761998120256,
+  "hash": "0x6ee71510e1c386d9d504a086526dc48e1a8da8c3761d79174bfaa7c05cdf661a",
+  "delta": {
+   "type": "withdraw",
+   "usdc": "499.0",
+   "nonce": 1761997877669000,
+   "fee": "1.0"
+  }
+ },
+ {
+  "time": 1765997567188,
+  "hash": "0xf923b34aa0c10f06394e3936c87e2d81c0b706324fc1cb9b5bf1cdd68319a16a",
+  "delta": {
+   "type": "withdraw",
+   "usdc": "999.0",
+   "nonce": 1765997335282000,
+   "fee": "1.0"
+  }
+ },
+ {
+  "time": 1766769475884,
+  "hash": "0xde0dc384c1838b7952686f155a8e99d7ab2e2109fccc93aa5cb152b5cec4e109",
+  "delta": {
+   "type": "withdraw",
+   "usdc": "2074.501967",
+   "nonce": 1766769235809000,
+   "fee": "1.0"
+  }
+ },
+ {
+  "time": 1766769502270,
+  "hash": "0x0c36a3e914ec67498a191d64bd2ed43dd94ba686a9104866a027812900687f6b",
+  "delta": {
+   "type": "withdraw",
+   "usdc": "53.476861",
+   "nonce": 1766769258003000,
+   "fee": "1.0"
+  }
+ },
+ {
+  "time": 1767641108228,
+  "hash": "0xbfe7199b4aa251ee41f8a77d362808251ac39267cfe97621856b45df14ae3bb1",
+  "delta": {
+   "type": "deposit",
+   "usdc": "10044.64"
+  }
+ },
+ {
+  "time": 1772197315620,
+  "hash": "0x5a9e3cecb0a72d99e0a3cb57e5c6a9bcd033695da523bb8aab1929cce54a85cc",
+  "delta": {
+   "type": "deposit",
+   "usdc": "7591.281487"
+  }
+ },
+ {
+  "time": 1772818654596,
+  "hash": "0x391873637ce1179f454d763b44a2ca02edbbe4505246d94e8f91b77e2b3fa5ec",
+  "delta": {
+   "type": "deposit",
+   "usdc": "20914.26"
+  }
+ },
+ {
+  "time": 1772828908910,
+  "hash": "0xe203cbd21527a4ff4475b78ba49aa2b24d62194cbca37e1dbdacc5b70db07d9a",
+  "delta": {
+   "type": "deposit",
+   "usdc": "19983.13"
+  }
+ },
+ {
+  "time": 1772828976676,
+  "hash": "0x91c96a629d23d9709343043690f7c40203a600483826f842359215b55c27b35b",
+  "delta": {
+   "type": "send",
+   "user": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "destination": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "sourceDex": "",
+   "destinationDex": "spot",
+   "token": "USDC",
+   "amount": "19983.17",
+   "usdcValue": "19983.17",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1772828970838,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1773395938019,
+  "hash": "0xcb4950c1068b509bf5065456430c37e1f257df395a3391031e64dc6523aba34a",
+  "delta": {
+   "type": "deposit",
+   "usdc": "9992.0"
+  }
+ },
+ {
+  "time": 1773755498966,
+  "hash": "0x4fa5ed72546f9c66511f04373b383e0203580057ef62bb38f36e98c513637650",
+  "delta": {
+   "type": "send",
+   "user": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "destination": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "sourceDex": "spot",
+   "destinationDex": "",
+   "token": "USDC",
+   "amount": "20498.66",
+   "usdcValue": "20498.66",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1773755492570,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1777388770145,
+  "hash": "0x5d57b3fcef5735fee5701bde5a6b7617af779c1635d7ba84fef062ad80443b5d",
+  "delta": {
+   "type": "deposit",
+   "usdc": "19984.823234"
+  }
+ },
+ {
+  "time": 1779273381363,
+  "hash": "0xe5ce54f546a85164e748043bd27ed90201d500dae1ab70368997004805ac2b4f",
+  "delta": {
+   "type": "send",
+   "user": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "destination": "0x2b2149f1212b662b09658f9241a6a3d6e7d7438f",
+   "sourceDex": "",
+   "destinationDex": "",
+   "token": "USDC",
+   "amount": "500.0",
+   "usdcValue": "500.0",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1779273373731,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1779284052812,
+  "hash": "0x5a1bb40154b6889cede623f938e7addf978765c30760285b57e5a73a7b9ff43e",
+  "delta": {
+   "type": "withdraw",
+   "usdc": "1999.0",
+   "nonce": 1779283817228000,
+   "fee": "1.0"
+  }
+ },
+ {
+  "time": 1779343659086,
+  "hash": "0xeb5aa18459660dc6ecd4043be20d8e0201980069f4692c988f234cd71869e7b1",
+  "delta": {
+   "type": "send",
+   "user": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "destination": "0x27f0f640a40fa906bde931d1a5eb298503ab017f",
+   "sourceDex": "spot",
+   "destinationDex": "spot",
+   "token": "USDC",
+   "amount": "5000.0",
+   "usdcValue": "5000.0",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1779343651862,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1779343669154,
+  "hash": "0x68b010851501d88e6a29043be20e230203b9006ab004f7600c78bbd7d405b279",
+  "delta": {
+   "type": "send",
+   "user": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "destination": "0x84b047ac9406de501e236b466eb329d0aaf62e53",
+   "sourceDex": "spot",
+   "destinationDex": "spot",
+   "token": "USDC",
+   "amount": "500.0",
+   "usdcValue": "500.0",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1779343663771,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1779901153918,
+  "hash": "0x9b312dcca3bb938d9caa043c5da3d90201ce00b23ebeb25f3ef9d91f62bf6d78",
+  "delta": {
+   "type": "send",
+   "user": "0x84b047ac9406de501e236b466eb329d0aaf62e53",
+   "destination": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "sourceDex": "spot",
+   "destinationDex": "spot",
+   "token": "USDC",
+   "amount": "472.13871779",
+   "usdcValue": "472.138717",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1779901146372,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1779901169883,
+  "hash": "0x548a7eff58678e195604043c5da4c10201c900e4f36aacebf8532a52176b6803",
+  "delta": {
+   "type": "send",
+   "user": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "destination": "0x2b2149f1212b662b09658f9241a6a3d6e7d7438f",
+   "sourceDex": "spot",
+   "destinationDex": "spot",
+   "token": "USDC",
+   "amount": "5000.0",
+   "usdcValue": "5000.0",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1779901164186,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1779901449429,
+  "hash": "0xdd29c4c7110f392bdea3043c5db47402042400acac0257fd80f27019d0031316",
+  "delta": {
+   "type": "send",
+   "user": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "destination": "0x2b2149f1212b662b09658f9241a6a3d6e7d7438f",
+   "sourceDex": "spot",
+   "destinationDex": "spot",
+   "token": "USDC",
+   "amount": "2500.0",
+   "usdcValue": "2500.0",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1779901441706,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1779901464421,
+  "hash": "0xaacdc781362f8e42ac47043c5db5470202e70066d122ad144e9672d3f523682d",
+  "delta": {
+   "type": "send",
+   "user": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "destination": "0x27f0f640a40fa906bde931d1a5eb298503ab017f",
+   "sourceDex": "spot",
+   "destinationDex": "spot",
+   "token": "USDC",
+   "amount": "5000.0",
+   "usdcValue": "5000.0",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1779901459559,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1781035096903,
+  "hash": "0xdd72c07e252d8e30deec043d590e470202570063c020ad02813b6bd0e421681b",
+  "delta": {
+   "type": "send",
+   "user": "0x2b2149f1212b662b09658f9241a6a3d6e7d7438f",
+   "destination": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "sourceDex": "spot",
+   "destinationDex": "spot",
+   "token": "USDC",
+   "amount": "8038.9500489",
+   "usdcValue": "8038.950048",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1781035086949,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1781035112273,
+  "hash": "0xa88811fdbd0f1d9daa01043d590f2702062500e358023c6f4c50bd507c02f788",
+  "delta": {
+   "type": "send",
+   "user": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "destination": "0x27f0f640a40fa906bde931d1a5eb298503ab017f",
+   "sourceDex": "spot",
+   "destinationDex": "spot",
+   "token": "USDC",
+   "amount": "1000.0",
+   "usdcValue": "1000.0",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1781035104914,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1781035131528,
+  "hash": "0x8da569974075ff458f1f043d591040020737007cdb791e17316e14e9ff79d930",
+  "delta": {
+   "type": "send",
+   "user": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "destination": "0x27f0f640a40fa906bde931d1a5eb298503ab017f",
+   "sourceDex": "spot",
+   "destinationDex": "spot",
+   "token": "USDC",
+   "amount": "9000.0",
+   "usdcValue": "9000.0",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1781035119031,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1781614276041,
+  "hash": "0x42c5023bc53a7cc4443e043dda21460209c50021603d9b96e68dad8e843e56ae",
+  "delta": {
+   "type": "send",
+   "user": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "destination": "0x27f0f640a40fa906bde931d1a5eb298503ab017f",
+   "sourceDex": "spot",
+   "destinationDex": "spot",
+   "token": "USDC",
+   "amount": "15000.0",
+   "usdcValue": "15000.0",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1781614268997,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1783427812740,
+  "hash": "0x8356ca56b6bc5a4984d0043f68a8eb0201a4003c51bf791b271f75a975b03434",
+  "delta": {
+   "type": "send",
+   "user": "0x27f0f640a40fa906bde931d1a5eb298503ab017f",
+   "destination": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "sourceDex": "spot",
+   "destinationDex": "spot",
+   "token": "USDC",
+   "amount": "38243.493563",
+   "usdcValue": "38243.493563",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1783427805837,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1787139430042,
+  "hash": "0x78927cc2bcc9d15d7a0c04428198c702036100a857ccf02f1c5b28157bcdab48",
+  "delta": {
+   "type": "send",
+   "user": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "destination": "0x27f0f640a40fa906bde931d1a5eb298503ab017f",
+   "sourceDex": "spot",
+   "destinationDex": "spot",
+   "token": "USDC",
+   "amount": "20000.0",
+   "usdcValue": "20000.0",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1787139420357,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1788634203608,
+  "hash": "0xd6db402978bb338cd8540443c1c755020132000f13be525e7aa3eb7c37bf0d77",
+  "delta": {
+   "type": "send",
+   "user": "0x27f0f640a40fa906bde931d1a5eb298503ab017f",
+   "destination": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "sourceDex": "spot",
+   "destinationDex": "spot",
+   "token": "USDC",
+   "amount": "12018.259834",
+   "usdcValue": "12018.259834",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1788634186736,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1788688830348,
+  "hash": "0x5dd4152bd0bc7d655f4d0443cd745f00000f2d116bbf9c37019cc07e8fb05750",
+  "delta": {
+   "type": "send",
+   "user": "0x6b9e773128f453f5c2c60935ee2de2cbc5390a24",
+   "destination": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "sourceDex": "spot",
+   "destinationDex": "",
+   "token": "USDC",
+   "amount": "33244.98",
+   "usdcValue": "33244.98",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 3165535,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1788710835026,
+  "hash": "0x71b37b6aeb1c8ce1732d0443d2302b02029a0050861fabb3157c26bdaa1066cc",
+  "delta": {
+   "type": "send",
+   "user": "0x27f0f640a40fa906bde931d1a5eb298503ab017f",
+   "destination": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "sourceDex": "spot",
+   "destinationDex": "spot",
+   "token": "USDC",
+   "amount": "3088.2353748",
+   "usdcValue": "3088.235374",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1788710828619,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1788959397893,
+  "hash": "0xcc5e7f5860191696cdd8044407289f020126003dfb1c356870272aab1f1cf081",
+  "delta": {
+   "type": "send",
+   "user": "0x27f0f640a40fa906bde931d1a5eb298503ab017f",
+   "destination": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "sourceDex": "spot",
+   "destinationDex": "spot",
+   "token": "USDC",
+   "amount": "13766.810974",
+   "usdcValue": "13766.810974",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1788959389175,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1789477392425,
+  "hash": "0xb84667c963d1a992b9c004447521480205b500aefed4c8645c0f131c22d5837d",
+  "delta": {
+   "type": "send",
+   "user": "0x27f0f640a40fa906bde931d1a5eb298503ab017f",
+   "destination": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "sourceDex": "spot",
+   "destinationDex": "spot",
+   "token": "USDC",
+   "amount": "4890.532902",
+   "usdcValue": "4890.532902",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1789477385864,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1790143849983,
+  "hash": "0x1f6e36235960af1720e70445036fe702021b0008f463cde9c336e17618648901",
+  "delta": {
+   "type": "send",
+   "user": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "destination": "0x2b2149f1212b662b09658f9241a6a3d6e7d7438f",
+   "sourceDex": "spot",
+   "destinationDex": "spot",
+   "token": "USDC",
+   "amount": "2000.0",
+   "usdcValue": "2000.0",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1790143842413,
+   "feeToken": ""
+  }
+ },
+ {
+  "time": 1790143870799,
+  "hash": "0xf441362bc075a961f5ba04450370fc02028b00115b78c8349809e17e7f79834c",
+  "delta": {
+   "type": "send",
+   "user": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "destination": "0x84b047ac9406de501e236b466eb329d0aaf62e53",
+   "sourceDex": "spot",
+   "destinationDex": "spot",
+   "token": "USDC",
+   "amount": "2000.0",
+   "usdcValue": "2000.0",
+   "fee": "0.0",
+   "nativeTokenFee": "0.0",
+   "nonce": 1790143864679,
+   "feeToken": ""
+  }
+ }
+]

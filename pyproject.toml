@@ -19,6 +19,12 @@ dependencies = [
     "jinja2>=3.1",
     "markdown>=3.6",
     "python-multipart>=0.0.9",
+    "boto3>=1.43.103",
+    "pyotp>=2.10.0",
+    "segno>=1.6.6",
+    "eth-account>=0.14.0",
+    "pyjwt>=2.15.0",
+    "defusedxml>=0.7.1",
 ]
 
 [dependency-groups]
@@ -52,3 +58,4 @@ extend-immutable-calls = ["fastapi.Depends"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["pg: needs the Postgres test DB (docker compose up -d db_test); skipped when absent"]

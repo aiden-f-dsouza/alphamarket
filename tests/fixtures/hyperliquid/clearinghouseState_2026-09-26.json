@@ -1,0 +1,134 @@
+{
+ "marginSummary": {
+  "accountValue": "59326.788075",
+  "totalNtlPos": "342625.6866",
+  "totalRawUsd": "-283298.898525",
+  "totalMarginUsed": "61810.539079"
+ },
+ "crossMarginSummary": {
+  "accountValue": "59326.788075",
+  "totalNtlPos": "342625.6866",
+  "totalRawUsd": "-283298.898525",
+  "totalMarginUsed": "61810.539079"
+ },
+ "crossMaintenanceMarginUsed": "17921.018039",
+ "withdrawable": "0.0",
+ "assetPositions": [
+  {
+   "type": "oneWay",
+   "position": {
+    "coin": "ETH",
+    "szi": "11.5669",
+    "leverage": {
+     "type": "cross",
+     "value": 10
+    },
+    "entryPx": "2593.2",
+    "positionValue": "31140.40818",
+    "unrealizedPnl": "1145.1231",
+    "returnOnEquity": "0.3817677001",
+    "liquidationPx": null,
+    "marginUsed": "3114.040818",
+    "maxLeverage": 25,
+    "cumFunding": {
+     "allTime": "242.231921",
+     "sinceOpen": "86.368995",
+     "sinceChange": "86.368995"
+    }
+   }
+  },
+  {
+   "type": "oneWay",
+   "position": {
+    "coin": "LDO",
+    "szi": "72066.8",
+    "leverage": {
+     "type": "cross",
+     "value": 5
+    },
+    "entryPx": "0.4618",
+    "positionValue": "34478.919124",
+    "unrealizedPnl": "1198.470884",
+    "returnOnEquity": "0.1800563014",
+    "liquidationPx": null,
+    "marginUsed": "6895.783824",
+    "maxLeverage": 5,
+    "cumFunding": {
+     "allTime": "69.611332",
+     "sinceOpen": "69.611332",
+     "sinceChange": "69.611332"
+    }
+   }
+  },
+  {
+   "type": "oneWay",
+   "position": {
+    "coin": "LINK",
+    "szi": "2149.6",
+    "leverage": {
+     "type": "cross",
+     "value": 6
+    },
+    "entryPx": "13.22142",
+    "positionValue": "30294.3128",
+    "unrealizedPnl": "1873.536",
+    "returnOnEquity": "0.3955281053",
+    "liquidationPx": null,
+    "marginUsed": "5049.052133",
+    "maxLeverage": 10,
+    "cumFunding": {
+     "allTime": "21.13604",
+     "sinceOpen": "21.13604",
+     "sinceChange": "21.13604"
+    }
+   }
+  },
+  {
+   "type": "oneWay",
+   "position": {
+    "coin": "ONDO",
+    "szi": "405960.0",
+    "leverage": {
+     "type": "cross",
+     "value": 5
+    },
+    "entryPx": "0.410841",
+    "positionValue": "217566.1428",
+    "unrealizedPnl": "50780.97787",
+    "returnOnEquity": "1.5223469633",
+    "liquidationPx": "0.3193332796",
+    "marginUsed": "43513.22856",
+    "maxLeverage": 10,
+    "cumFunding": {
+     "allTime": "1338.50812",
+     "sinceOpen": "1267.220383",
+     "sinceChange": "900.441165"
+    }
+   }
+  },
+  {
+   "type": "oneWay",
+   "position": {
+    "coin": "PUMP",
+    "szi": "6672597.0",
+    "leverage": {
+     "type": "cross",
+     "value": 9
+    },
+    "entryPx": "0.004493",
+    "positionValue": "29145.903696",
+    "unrealizedPnl": "-836.883566",
+    "returnOnEquity": "-0.2512092031",
+    "liquidationPx": null,
+    "marginUsed": "3238.433744",
+    "maxLeverage": 10,
+    "cumFunding": {
+     "allTime": "7.891762",
+     "sinceOpen": "7.891762",
+     "sinceChange": "7.891762"
+    }
+   }
+  }
+ ],
+ "time": 1790463930949
+}

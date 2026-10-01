@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}{{ title }} · Koine{% endblock %}
+{% block style %}
+  .auth { width:100%; max-width:480px; margin:24px auto 0; }
+{% endblock %}
+{% block content %}
+<div class="auth stack" style="gap:20px">
+  <h1 style="font-size:36px">{{ heading }}</h1>
+  <p class="text2" style="line-height:1.55">{{ body }}</p>
+  {% if cta %}<div><a class="btn" href="{{ cta[0] }}">{{ cta[1] }}</a></div>{% endif %}
+</div>
+{% endblock %}

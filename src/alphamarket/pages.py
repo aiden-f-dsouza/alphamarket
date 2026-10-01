@@ -21,13 +21,12 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from alphamarket import auth, demo
+from alphamarket import auth, credentials, demo, mfa, ratelimit
 from alphamarket.analytics import latest_stats
 from alphamarket.charts import drawdown_window, polyline, ticks
 from alphamarket.config import get_settings
 from alphamarket.connectors.registry import PROFILES, get_profile
 from alphamarket.db import get_db
-from alphamarket.ingest import sync_account
 from alphamarket.marks import sigil, tag_color
 from alphamarket.models import (
     EquitySnapshot,
@@ -35,7 +34,6 @@ from alphamarket.models import (
     StrategyStatus,
     User,
     VenueAccount,
-    VenueAccountStatus,
 )
 from alphamarket.public import (
     all_tags,
@@ -51,6 +49,8 @@ from alphamarket.venues import (
     _owned_account,
     claim_account,
     connect_account,
+    import_now,
+    venue_closed_reason,
     verification_tier,
 )
 
@@ -61,8 +61,7 @@ templates.env.globals.update(sigil=sigil, tag_color=tag_color)
 
 
 def _user(request: Request, db: Session) -> User | None:
-    user_id = request.session.get("user_id")
-    return db.get(User, user_id) if user_id else None
+    return auth.optional_user(request, db)  # DB session cookie (sessions.py)
 
 
 def _demo() -> bool:
@@ -210,15 +209,23 @@ def login_form(
     db: Session = Depends(get_db),
 ):
     try:
-        auth.login(auth.LoginIn(email=email, password=password), request, db)
-    except (HTTPException, ValueError):
+        result = auth.login(auth.LoginIn(email=email, password=password), request, db)
+    except HTTPException as exc:
+        if exc.status_code == 429:
+            resp = _auth(request, db, "login", "Too many attempts. Wait a minute and try again.")
+            resp.status_code = 429
+            return resp
         return _auth(request, db, "login", "Invalid credentials")
+    except ValueError:
+        return _auth(request, db, "login", "Invalid credentials")
+    if result.get("mfa_required"):
+        return RedirectResponse("/login/2fa", status_code=303)
     return RedirectResponse("/dashboard", status_code=303)
 
 
 @router.post("/logout-form")
-def logout_form(request: Request):
-    request.session.clear()
+def logout_form(request: Request, db: Session = Depends(get_db)):
+    auth.logout_current(request, db)
     return RedirectResponse("/", status_code=303)
 
 
@@ -252,7 +259,13 @@ def _dashboard_ctx(db: Session, user: User) -> dict:
                 "reconcilable": reconcilable(account),
             }
         )
-    return {"user": user, "rows": rows, "profiles": list(PROFILES.values())}
+    return {
+        "user": user,
+        "rows": rows,
+        "profiles": list(PROFILES.values()),
+        "totp_on": auth.totp_enabled(db, user),
+        "email_verified": user.email_verified_at is not None,
+    }
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
@@ -271,6 +284,7 @@ def _connect_ctx(venue: str) -> dict:
         "profile": profile,
         "profiles": list(PROFILES.values()),
         "venue_env": get_settings().venue_env(venue),
+        "closed_reason": venue_closed_reason(venue),
     }
 
 
@@ -279,7 +293,14 @@ def connect_page(request: Request, venue: str = "kalshi", db: Session = Depends(
     user = _user(request, db)
     if user is None:
         return RedirectResponse("/login", status_code=303)
-    return _render(request, "connect.html", user=user, error=None, **_connect_ctx(venue))
+    return _render(
+        request,
+        "connect.html",
+        user=user,
+        error=None,
+        gate=mfa.connect_block(request, db, user),
+        **_connect_ctx(venue),
+    )
 
 
 @router.post("/dashboard/connect")
@@ -295,14 +316,20 @@ def connect_form(
     if user is None:
         return RedirectResponse("/login", status_code=303)
     ctx = _connect_ctx(venue)
+    gate = mfa.connect_block(request, db, user)
+    if gate is not None:
+        resp = _render(request, "connect.html", user=user, error=gate[1], gate=gate, **ctx)
+        resp.status_code = 403
+        return resp
     try:
+        ratelimit.check(request, "venues_user", user.id)
         connect_account(
             db,
             user,
             ConnectIn(venue=venue, key_id=key_id, secret=secret, strategy_name=strategy_name),
         )
     except HTTPException as exc:
-        return _render(request, "connect.html", user=user, error=exc.detail, **ctx)
+        return _render(request, "connect.html", user=user, error=exc.detail, gate=None, **ctx)
     return RedirectResponse("/dashboard", status_code=303)
 
 
@@ -339,19 +366,19 @@ def account_action_form(
     error = None
     try:
         if action == "sync":
-            sync_account(db, account)
+            import_now(db, account)
         elif action == "reconcile":
             reconcile_account(db, account)
         elif action == "claim":
+            ratelimit.check(request, "venues_user", user.id)
             claim_account(db, user, account.id)
         elif action == "disconnect":
-            account.encrypted_private_key = None
-            account.status = VenueAccountStatus.DISCONNECTED
-            db.commit()
+            mfa.ensure_step_up(request, db, user)
+            credentials.disconnect(db, account, actor_user_id=user.id)
         else:
             raise HTTPException(status_code=404)
     except HTTPException as exc:
-        if action != "claim":
+        if action not in ("claim", "disconnect"):
             raise
         error = str(exc.detail)
     except Exception as exc:  # recorded on the account row by sync/reconcile

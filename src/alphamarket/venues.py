@@ -25,15 +25,33 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from alphamarket import audit, credentials
+from alphamarket.audit import AuditAction
 from alphamarket.auth import current_user
 from alphamarket.config import get_settings
-from alphamarket.connectors.base import OwnershipProof
+from alphamarket.connectors.base import CredentialKind, OwnershipProof
 from alphamarket.connectors.registry import SUPPORTED_VENUES, build_connector, get_profile
 from alphamarket.db import get_db
-from alphamarket.ingest import sync_account
-from alphamarket.models import Strategy, User, VenueAccount, VenueAccountStatus, utcnow
-from alphamarket.reconcile import reconcilable, reconcile_account, take_anchor
-from alphamarket.vault import encrypt_secret
+from alphamarket.email import send_security_alert
+from alphamarket.ingest import SyncResult, is_asset_venue, sync_account
+from alphamarket.jobs import PRIORITY_URGENT, JobKind, enqueue
+from alphamarket.mfa import require_connect_ready, require_step_up
+from alphamarket.models import (
+    AccountSchedule,
+    Strategy,
+    User,
+    VenueAccount,
+    VenueAccountStatus,
+    utcnow,
+)
+from alphamarket.ratelimit import rate_limit
+from alphamarket.reconcile import (
+    reconcilable,
+    reconcile_account,
+    store_anchor_balances,
+    take_anchor,
+)
+from alphamarket.scopecheck import apply_evidence, evidence_json, prove
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/venues", tags=["venues"])
@@ -48,6 +66,9 @@ class ConnectIn(BaseModel):
     secret: str | None = None
     private_key_pem: str | None = None
     strategy_name: str = Field(min_length=2, max_length=120)
+    # Which venue account to read when one credential spans several
+    # (VenueConnector.account_ref); None when key and account are 1:1.
+    account_ref: str | None = Field(default=None, max_length=120)
 
     @model_validator(mode="after")
     def _merge_secret(self) -> "ConnectIn":
@@ -115,19 +136,50 @@ def slugify(name: str) -> str:
     return base[:100] or "strategy"
 
 
-def connect_account(db: Session, user: User, payload: ConnectIn) -> dict:
+def venue_closed_reason(venue: str) -> str | None:
+    """Why `venue` cannot be connected yet, or None. Invariant 10: a venue
+    whose terms need written approval stays closed until the approval is on
+    file (the profile flag flips) or a non-prod deployment opts in."""
+    profile = get_profile(venue)
+    if profile.requires_partner_approval and not get_settings().enable_unapproved_venues:
+        return (
+            f"{profile.display_name} is not open for connections yet: Koine is waiting "
+            f"for {profile.display_name}'s written approval to show account data."
+        )
+    return None
+
+
+def ensure_venue_open(venue: str) -> None:
+    reason = venue_closed_reason(venue)
+    if reason is not None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=reason)
+
+
+def connect_account(
+    db: Session, user: User, payload: ConnectIn, *, oauth_grant: bool = False
+) -> dict:
     """Validate, scope-check, encrypt, anchor, create the strategy, first
-    import. Raises HTTPException with user-safe detail on any failure."""
+    import. Raises HTTPException with user-safe detail on any failure.
+    `oauth_grant` is set only by oauth.callback: OAuth venues never accept a
+    pasted token."""
     if payload.venue not in SUPPORTED_VENUES:
         raise HTTPException(status_code=422, detail=f"Unsupported venue: {payload.venue}")
     profile = get_profile(payload.venue)
+    ensure_venue_open(payload.venue)
+    if profile.credential is CredentialKind.OAUTH2 and not oauth_grant:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Connect {profile.display_name} with its Connect button (OAuth).",
+        )
     if profile.needs_secret and not payload.secret:
         raise HTTPException(status_code=422, detail=f"{profile.secret_label} is required.")
     secret = payload.secret if profile.needs_secret else None
 
     venue_env = get_settings().venue_env(payload.venue)
     try:
-        connector = build_connector(payload.venue, venue_env, payload.key_id, secret)
+        connector = build_connector(
+            payload.venue, venue_env, payload.key_id, secret, account_ref=payload.account_ref
+        )
         connector.check_connection()
     except HTTPException:
         raise
@@ -143,8 +195,19 @@ def connect_account(db: Session, user: User, payload: ConnectIn) -> dict:
             ),
         ) from None
 
-    writable = connector.check_write_scope()
-    if writable:
+    evidence = prove(connector)
+    if evidence.read_only is False:
+        # Audited and committed before refusing: a writable key offered to
+        # Koine is a security event even though nothing is stored.
+        audit.record(
+            db,
+            AuditAction.CREDENTIAL_REJECTED,
+            actor_user_id=user.id,
+            target_type="venue",
+            target_id=payload.venue,
+            details={"reason": "scope_writable", **evidence_json(evidence)},
+        )
+        db.commit()
         raise HTTPException(
             status_code=422,
             detail=(
@@ -163,18 +226,38 @@ def connect_account(db: Session, user: User, payload: ConnectIn) -> dict:
         venue=payload.venue,
         venue_env=venue_env,
         key_id=payload.key_id.lower() if not profile.needs_secret else payload.key_id,
-        encrypted_private_key=encrypt_secret(secret) if secret else None,
+        # The key goes to venue_credentials (credentials.store below); the
+        # legacy column is no longer written.
+        encrypted_private_key=None,
         status=VenueAccountStatus.ACTIVE,
-        # None from the probe means "undetermined", recorded as unchecked.
-        scope_checked_at=utcnow() if writable is False else None,
         anchor_balance_micros=anchor.balance_micros,
         anchor_at=anchor.at,
         anchor_positions=anchor.positions,
         claim_code=None if key_proves_ownership else new_claim_code(),
         claimed_at=utcnow() if key_proves_ownership else None,
     )
+    # Undetermined evidence leaves scope_checked_at unset ("scope unverified").
+    apply_evidence(account, evidence)
     db.add(account)
     db.flush()
+    store_anchor_balances(db, account, anchor)  # asset venues: the anchor vector (P1)
+    if secret:
+        credentials.store(
+            db,
+            account,
+            secret,
+            kind=profile.credential,
+            account_ref=payload.account_ref,
+            actor_user_id=user.id,
+        )
+    audit.record(
+        db,
+        AuditAction.SCOPE_CHECK,
+        actor_user_id=user.id,
+        target_type="venue_account",
+        target_id=account.id,
+        details={"trigger": "connect", "venue": account.venue, **evidence_json(evidence)},
+    )
     strategy = Strategy(
         user_id=user.id, venue_account_id=account.id, name=payload.strategy_name, slug="pending"
     )
@@ -182,8 +265,10 @@ def connect_account(db: Session, user: User, payload: ConnectIn) -> dict:
     db.flush()
     strategy.slug = f"{slugify(payload.strategy_name)}-{strategy.id}"
     db.commit()
+    if secret:  # p3-auth: tell the owner whenever a key is added (never the key itself)
+        send_security_alert(user, "key_connected", {"Venue": profile.display_name})
 
-    result = sync_account(db, account)
+    result = import_now(db, account)
     return {
         **_to_out(account, strategy),
         "imported_fills": result.new_fills,
@@ -191,7 +276,13 @@ def connect_account(db: Session, user: User, payload: ConnectIn) -> dict:
     }
 
 
-@router.post("", response_model=ConnectOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=ConnectOut,
+    status_code=status.HTTP_201_CREATED,
+    # p3-auth: TOTP on + email verified + step-up within 10 min, then 10/hour.
+    dependencies=[Depends(require_connect_ready), Depends(rate_limit("venues_user", by="user"))],
+)
 def connect(payload: ConnectIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return connect_account(db, user, payload)
 
@@ -232,7 +323,11 @@ def claim_account(db: Session, user: User, account_id: int) -> dict:
     return _to_out(account, strategy)
 
 
-@router.post("/{account_id}/claim", response_model=VenueAccountOut)
+@router.post(
+    "/{account_id}/claim",
+    response_model=VenueAccountOut,
+    dependencies=[Depends(rate_limit("venues_user", by="user"))],  # p3-auth
+)
 def claim(account_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
     return claim_account(db, user, account_id)
 
@@ -242,8 +337,10 @@ def manual_sync(account_id: int, db: Session = Depends(get_db), user: User = Dep
     account = _owned_account(db, account_id, user)
     if account.status == VenueAccountStatus.DISCONNECTED:
         raise HTTPException(status_code=409, detail="Account is disconnected")
+    if account.status == VenueAccountStatus.SUSPENDED:
+        raise HTTPException(status_code=409, detail="Account is suspended; connect a read-only key")
     try:
-        result = sync_account(db, account)
+        result = import_now(db, account)
     except Exception:
         logger.exception("manual sync failed for account %s", account.id)
         raise HTTPException(status_code=502, detail="Sync failed; see connection status.") from None
@@ -275,6 +372,8 @@ def manual_reconcile(
     account = _owned_account(db, account_id, user)
     if account.status == VenueAccountStatus.DISCONNECTED:
         raise HTTPException(status_code=409, detail="Account is disconnected")
+    if account.status == VenueAccountStatus.SUSPENDED:
+        raise HTTPException(status_code=409, detail="Account is suspended; connect a read-only key")
     if not reconcilable(account):
         raise HTTPException(
             status_code=409, detail="This venue exposes no balance to reconcile against."
@@ -286,15 +385,35 @@ def manual_reconcile(
         raise HTTPException(status_code=502, detail="Reconcile failed; see status.") from None
 
 
-@router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{account_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_step_up)],  # p3-auth
+)
 def disconnect(account_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
     """Disconnect erases the encrypted key immediately (invariant #4). The
     already-ingested ledger stays: it is append-only history the track record
     was built on, and the methodology page says exactly that."""
     account = _owned_account(db, account_id, user)
-    account.encrypted_private_key = None
-    account.status = VenueAccountStatus.DISCONNECTED
+    credentials.disconnect(db, account, actor_user_id=user.id)
+
+
+def import_now(db: Session, account: VenueAccount) -> SyncResult:
+    """Binary venues import inline (a few requests). Asset venues can need
+    hundreds of paged, rate-limited requests (Binance.US per-symbol windows),
+    so the worker does it: a first connect queues a full backfill, a manual
+    sync an urgent incremental sync. Returns zero counts for queued work."""
+    if not is_asset_venue(account.venue):
+        return sync_account(db, account)
+    done = db.scalar(
+        select(AccountSchedule.backfill_done_at).where(
+            AccountSchedule.venue_account_id == account.id
+        )
+    )
+    kind = JobKind.SYNC if done is not None else JobKind.BACKFILL
+    enqueue(db, kind, account_id=account.id, priority=PRIORITY_URGENT)
     db.commit()
+    return SyncResult(new_fills=0, new_settlements=0)
 
 
 def _owned_account(db: Session, account_id: int, user: User) -> VenueAccount:

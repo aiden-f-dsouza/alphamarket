@@ -1,0 +1,5 @@
+<FlexStatementResponse timestamp="26 September, 2026 06:00 PM EST">
+  <Status>Fail</Status>
+  <ErrorCode>1018</ErrorCode>
+  <ErrorMessage>Too many requests have been made from this token, please try again later.</ErrorMessage>
+</FlexStatementResponse>

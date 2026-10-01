@@ -1,0 +1,42 @@
+[
+  {
+    "asset_class": "us_equity",
+    "asset_id": "904837e3-3b76-47ec-b432-046db621571b",
+    "asset_marginable": true,
+    "avg_entry_price": "100.0",
+    "change_today": "0.0084",
+    "cost_basis": "500.0",
+    "current_price": "120.0",
+    "exchange": "NASDAQ",
+    "lastday_price": "119.0",
+    "market_value": "600.0",
+    "qty": "5",
+    "qty_available": "4",
+    "side": "long",
+    "symbol": "AAPL",
+    "unrealized_intraday_pl": "10.0",
+    "unrealized_intraday_plpc": "0.0084",
+    "unrealized_pl": "100.0",
+    "unrealized_plpc": "0.20"
+  },
+  {
+    "asset_class": "us_equity",
+    "asset_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+    "asset_marginable": false,
+    "avg_entry_price": "174.78",
+    "change_today": "-0.0018326556325525",
+    "cost_basis": "349.56",
+    "current_price": "174.29",
+    "exchange": "NASDAQ",
+    "lastday_price": "174.61",
+    "market_value": "348.58",
+    "qty": "2.123456789",
+    "qty_available": "2.123456789",
+    "side": "long",
+    "symbol": "SPY",
+    "unrealized_intraday_pl": "-0.98",
+    "unrealized_intraday_plpc": "-0.0028035244307129",
+    "unrealized_pl": "-0.98",
+    "unrealized_plpc": "-0.0028035244307129"
+  }
+]

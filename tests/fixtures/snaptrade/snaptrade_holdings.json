@@ -1,0 +1,24 @@
+{
+  "balances": [
+    {
+      "currency": { "id": "87b24961-b51e-4db8-9226-f198f6518a89", "code": "USD", "name": "US Dollar" },
+      "cash": 300.71,
+      "buying_power": 410.71
+    }
+  ],
+  "positions": [
+    {
+      "symbol": {
+        "id": "pos-aapl",
+        "symbol": { "symbol": "AAPL", "description": "Apple Inc.", "currency": { "code": "USD" } }
+      },
+      "units": 40,
+      "price": 113.15,
+      "average_purchase_price": 108.3353,
+      "open_pnl": 0.44,
+      "fractional_units": null,
+      "currency": { "code": "USD" },
+      "cash_equivalent": false
+    }
+  ]
+}

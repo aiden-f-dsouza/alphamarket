@@ -1,0 +1,17 @@
+[
+  {
+    "id": "d_id_123",
+    "amount": "0.50000000",
+    "coin": "BTC",
+    "network": "BTC",
+    "status": 1,
+    "address": "1SomeBitcoinAddress",
+    "addressTag": "",
+    "txId": "0xabc123",
+    "insertTime": 1790035200000,
+    "transferType": 0,
+    "confirmTimes": "1/1",
+    "unlockConfirm": 0,
+    "walletType": 0
+  }
+]

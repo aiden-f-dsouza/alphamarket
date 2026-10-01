@@ -1,0 +1,18 @@
+[
+ {
+  "time": 1787172675479,
+  "hash": "0xac77640a3dad44f0adf1044288b45d0131007befd8a063c250400f5cfca11edb",
+  "delta": {
+   "type": "liquidation",
+   "liquidatedNtlPos": "85.44958",
+   "accountValue": "0.268296",
+   "leverageType": "Cross",
+   "liquidatedPositions": [
+    {
+     "coin": "ETH",
+     "szi": "-0.0382"
+    }
+   ]
+  }
+ }
+]
