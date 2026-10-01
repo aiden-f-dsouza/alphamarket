@@ -28,7 +28,7 @@ jobs:
       KOINE_TEST_PG_URL: postgresql+psycopg://alphamarket:alphamarket@localhost:5432/alphamarket_test
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
       - run: uv sync --all-groups
@@ -67,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
       - run: uv export --no-hashes --no-emit-project --format requirements-txt -o requirements.txt
