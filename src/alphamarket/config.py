@@ -176,6 +176,19 @@ class Settings(BaseSettings):
     snaptrade_client_id: str = ""
     snaptrade_consumer_key: str = ""
 
+    # ---- wave2 scaffold ----
+    # CoinGecko: fallback daily prices for assets no connected venue prices
+    # (connectors/coingecko.py; demo key header x-cg-demo-api-key).
+    coingecko_api_key: str = ""
+    coingecko_base_url: str = "https://api.coingecko.com/api/v3"
+    # A quote older than this is not a mark (follower valuation, liquidation).
+    quote_max_age_seconds: int = 900
+    # Housekeeping (housekeeping.py).
+    pending_connect_ttl_hours: int = 24  # unfinished SnapTrade connects are abandoned
+    session_retention_days: int = 30  # dead sessions kept this long, then deleted
+    token_retention_days: int = 7  # expired/used email tokens kept this long
+    quote_retention_days: int = 30  # asset_quotes kept this long
+
 
 @lru_cache
 def get_settings() -> Settings:

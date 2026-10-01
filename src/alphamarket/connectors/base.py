@@ -99,6 +99,35 @@ class InstrumentKind(StrEnum):
 class OwnershipProof(StrEnum):
     KEY = "key"  # holding a valid read-only key proves the account is yours
     PROFILE_CODE = "profile_code"  # put a Koine code in the venue profile bio
+    # wave2: sign a Koine message (the claim code is the nonce) with the
+    # account's wallet; see VenueConnector.claim_text / claim_payload.
+    SIGNED_MESSAGE = "signed_message"
+
+
+@dataclass(frozen=True)
+class RegulatoryFees:
+    """US equity sell-side regulatory fees the paper mirror charges under
+    PaperFeeModel.US_EQUITY_REGULATORY (decimal strings, USD).
+
+    SEC Section 31 fee: notional x sec_fee_per_million / 1e6 on sells.
+    FINRA TAF: shares x taf_per_share on sells, capped at taf_max.
+    `effective` is the date the values were checked against the sources
+    (docs/methodology.md "Paper copying v2"); rates change by SEC order."""
+
+    sec_fee_per_million: str
+    taf_per_share: str
+    taf_max: str
+    effective: str
+
+
+@dataclass(frozen=True)
+class MarginTier:
+    """One perp maintenance-margin tier: positions with notional >=
+    lower_bound (USD, decimal string) may use at most max_leverage.
+    Maintenance margin rate = 1 / (2 x max_leverage) [VERIFY per venue]."""
+
+    lower_bound: str
+    max_leverage: int
 
 
 @dataclass(frozen=True)
@@ -131,6 +160,18 @@ class VenueProfile:
     daily_resolution: bool = False  # EOD data only -> "daily_verified" tier
     rate_budgets: tuple[RateBudget, ...] = ()
     paper_fee_model: PaperFeeModel = PaperFeeModel.BINARY_PXQ
+    # ---- wave2 fields ----
+    # Venue whose public market data prices this venue's assets when it has
+    # none of its own (IBKR, SnapTrade -> "alpaca"). None = this venue.
+    pricing_venue: str | None = None
+    # Paper fill when no quote at observed_at exists: creator price moved
+    # against the follower by this many bps (methodology "Paper copying v2").
+    paper_fallback_penalty_bps: int = 50
+    # A signal observed later than this after its fill is not copied
+    # ("stale_signal"): a follower could not have traded near that price.
+    max_copy_lag_seconds: int = 6 * 3600
+    regulatory_fees: RegulatoryFees | None = None  # US_EQUITY_REGULATORY only
+    asset_classes: tuple[str, ...] = ()  # "prediction" | "crypto" | "equities"
 
     @property
     def needs_secret(self) -> bool:
@@ -492,8 +533,28 @@ class VenueConnector(_Throttled, ABC):
     def verify_claim(self, code: str) -> bool | None:
         """For OwnershipProof.PROFILE_CODE venues: True if `code` is visible
         in the account's public profile, False if not, None if the venue
-        could not be asked. Key-based venues never need this."""
+        could not be asked. Key-based venues never need this.
+        SIGNED_MESSAGE venues receive claim_payload(code, signature)."""
         return None
+
+    # ---- wave2: ownership by signed message, unsupported activity ----
+
+    def claim_text(self, code: str) -> str | None:
+        """SIGNED_MESSAGE venues: the exact text the user signs for claim
+        code `code`. None for venues that do not claim by signature."""
+        return None
+
+    def claim_payload(self, code: str, signature: str) -> str:
+        """What verify_claim receives for a signature over claim_text(code).
+        The caller passes the account's STORED claim code, never one the user
+        submitted (replay protection). Default: the bare code."""
+        return code
+
+    def drain_unsupported(self) -> list["UnsupportedActivity"]:
+        """Activities skipped by page methods since the last call, oldest
+        first, then forgotten. The page runner persists them after every
+        page (venue_activity_flags). Default: the venue skips nothing."""
+        return []
 
     # ---- v2 (platform_plan 2.3): additive, with defaults for M7 venues ----
 
@@ -691,6 +752,10 @@ class MarketDataSource(_Throttled, ABC):
         """Splits, dividends and symbol changes in [start, end] (equities)."""
         return []
 
+    def fetch_margin_tiers(self, symbol: str) -> list[MarginTier]:
+        """Perp maintenance-margin tiers, ascending by lower_bound (wave2)."""
+        return []
+
 
 class AssetMarketData(MarketDataSource):
     """Base for non-binary market data: there are no binary markets to fetch."""
@@ -735,3 +800,18 @@ class CorporateAction(BaseModel):
     ratio_old: int | None = None
     cash_per_share: str | None = None  # dividend, decimal string USD
     new_symbol: str | None = None  # symbol change
+
+
+class UnsupportedActivity(BaseModel):
+    """An activity Koine cannot yet put in the ledger. It is skipped (never
+    guessed at) and surfaced so the account shows a visible "unsupported
+    activity" flag: numbers after it may not reconcile. Persisted as
+    venue_activity_flags rows (wave2; moved here from alpaca.py)."""
+
+    venue_ref: str
+    activity_type: str
+    activity_sub_type: str | None = None
+    symbol: str | None = None
+    occurred_at: datetime
+    reason: str  # short_sale | option | crypto | stock_dividend | canceled | unsupported_type
+    description: str | None = None

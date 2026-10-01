@@ -375,7 +375,15 @@ def test_ticks_enqueue_idempotently(session_factory, db, monkeypatch):
     worker.tick_nightly(session_factory)  # a second process ticking the same night
     with session_factory() as s:
         kinds = sorted(j.kind for j in s.scalars(select(Job)).all())
-    assert kinds == ["mirror", "prices", "reconcile", "scope_recheck", "stats", "sync"]
+    assert kinds == [
+        "housekeeping",  # wave2
+        "mirror",
+        "prices",
+        "reconcile",
+        "scope_recheck",
+        "stats",
+        "sync",
+    ]
     with session_factory() as s:
         [rec] = s.scalars(select(Job).where(Job.kind == "reconcile")).all()
         assert rec.venue_account_id == acct.id

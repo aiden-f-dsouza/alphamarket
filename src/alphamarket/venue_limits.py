@@ -417,10 +417,12 @@ class PostgresBuckets:
 
 
 def _profile_budgets(venue: str) -> tuple[RateBudget, ...]:
-    from alphamarket.connectors.registry import PROFILES
+    from alphamarket.connectors.registry import DATA_SOURCE_BUDGETS, PROFILES
 
     profile = PROFILES.get(venue)
-    return profile.rate_budgets if profile is not None else ()
+    if profile is not None:
+        return profile.rate_budgets
+    return DATA_SOURCE_BUDGETS.get(venue, ())  # wave2: non-venue data sources
 
 
 class VenueLimiter:

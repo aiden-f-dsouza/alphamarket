@@ -51,7 +51,6 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
-from pydantic import BaseModel
 
 from alphamarket.connectors.base import (
     Action,
@@ -75,6 +74,7 @@ from alphamarket.connectors.base import (
     ReadOnlyEvidence,
     ReadOnlyProof,
 )
+from alphamarket.connectors.base import UnsupportedActivity as _BaseUnsupportedActivity
 from alphamarket.money import to_atoms, to_micros
 
 logger = logging.getLogger(__name__)
@@ -123,18 +123,8 @@ OPTION_TYPES = frozenset({"OPASN", "OPEXP", "OPXRC", "OPEXC", "OPTRD", "OPCA", "
 CRYPTO_TYPES = frozenset({"CFEE", "OCT"})
 
 
-class UnsupportedActivity(BaseModel):
-    """An activity Koine cannot yet put in the ledger. It is skipped (never
-    guessed at) and surfaced so the account shows a visible "unsupported
-    activity" flag: numbers after it may not reconcile."""
-
-    venue_ref: str
-    activity_type: str
-    activity_sub_type: str | None = None
-    symbol: str | None = None
-    occurred_at: datetime
-    reason: str  # short_sale | option | crypto | stock_dividend | canceled | unsupported_type
-    description: str | None = None
+# Moved to the contract in wave2 (connectors.base); the name stays importable here.
+UnsupportedActivity = _BaseUnsupportedActivity
 
 
 # ---- parsing helpers -------------------------------------------------------------
@@ -420,6 +410,10 @@ class AlpacaConnector(AssetVenueConnector):
         if clear:
             self._unsupported.clear()
         return items
+
+    def drain_unsupported(self) -> list[UnsupportedActivity]:
+        """Contract hook (wave2): the page runner persists these per page."""
+        return self.unsupported_activities(clear=True)
 
     # ---- read-only proof -------------------------------------------------
 

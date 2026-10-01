@@ -12,7 +12,7 @@ from alphamarket.config import get_settings
 from alphamarket.db import engine
 
 # Invariant 3: every append-only table has a "<table>_append_only" trigger
-# (migrations 0003, 0007, 0009, 0012).
+# (migrations 0003, 0007, 0009, 0012, 0013).
 EXPECTED_APPEND_ONLY_TRIGGERS = frozenset(
     f"{table}_append_only"
     for table in (
@@ -25,6 +25,12 @@ EXPECTED_APPEND_ONLY_TRIGGERS = frozenset(
         "asset_fills",
         "ledger_quarantines",
         "audit_log",
+        # wave2 (0013)
+        "mirror_asset_fills",
+        "mirror_ledger_entries",
+        "venue_activity_flags",
+        "consent_texts",
+        "venue_consents",
     )
 )
 

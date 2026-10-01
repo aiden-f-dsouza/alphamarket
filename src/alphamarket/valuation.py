@@ -745,3 +745,44 @@ def exposure(valuation: DayValuation) -> Exposure:
         perp_gross_micros=perp_gross,
         perp_gross_leverage=Fraction(perp_gross, equity) if equity > 0 else None,
     )
+
+
+# ---- wave2: creator equity at a fill (signals v2) ---------------------------------
+
+
+def equity_before(
+    anchor: Sequence[AnchorIn],
+    legs: Sequence[LegIn],
+    prices: Iterable[PriceIn],
+    perp_fills: Sequence[PerpFillIn],
+    t: datetime,
+) -> DayValuation:
+    """Equity just BEFORE instant `t`, for sizing a follower against a fill at `t`:
+
+        E(t-) = cash + spot/equity holdings x last close + perp qty x (close - entry)
+
+    where holdings and perp positions include every leg and perp fill with
+    occurred_at < t (strictly: the fill at t is what is being sized), and
+    only closes of complete UTC days BEFORE t's day are used (day D-1,
+    carried back further if missing), so no intraday price is assumed.
+
+    Returns the valuation of day D = t's UTC day built from those inputs.
+    Every priced asset therefore carries a CARRIED_FORWARD flag (expected:
+    day D has no close yet); UNPRICED assets are excluded, as in the daily
+    series. The day whose closes were used is the max `price_day` over the
+    returned positions (equity_basis_day on the signal)."""
+    _require_aware(t, "t")
+    day = _utc_day(t)
+    return valuation_on(
+        anchor,
+        [leg for leg in legs if leg.occurred_at < t],
+        [price for price in prices if price.day < day],
+        [fill for fill in perp_fills if fill.occurred_at < t],
+        day,
+    )
+
+
+def basis_day(valuation: DayValuation) -> date | None:
+    """Latest close day used by a valuation (None when only cash was valued)."""
+    days = [p.price_day for p in valuation.positions if p.price_day is not None]
+    return max(days) if days else None

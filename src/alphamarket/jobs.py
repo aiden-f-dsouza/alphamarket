@@ -76,6 +76,8 @@ class JobKind(StrEnum):
     OAUTH_REFRESH = "oauth_refresh"  # refresh an OAuth access token (P3/P5)
     KEY_ROTATE = "key_rotate"  # re-encrypt credentials under a new data key (P3)
     SCOPE_RECHECK = "scope_recheck"  # re-prove a credential is read-only (P3)
+    PRICES_DAILY = "prices_daily"  # wave2: daily closes, margin tiers, corp actions per venue
+    HOUSEKEEPING = "housekeeping"  # wave2: prune counters, sessions, tokens, quotes
 
 
 # Lower runs first. Copy lag matters for creators with followers, so their
@@ -83,7 +85,12 @@ class JobKind(StrEnum):
 # OAuth token would fail every sync of that account, so it goes before them.
 # Accounts the worker never touches: disconnected, or suspended because the
 # key became writable (p3-vault; the credential is already erased).
-INACTIVE_ACCOUNT_STATUSES = (VenueAccountStatus.DISCONNECTED, VenueAccountStatus.SUSPENDED)
+# wave2: a PENDING account (connect not finished) is never touched either.
+INACTIVE_ACCOUNT_STATUSES = (
+    VenueAccountStatus.DISCONNECTED,
+    VenueAccountStatus.SUSPENDED,
+    VenueAccountStatus.PENDING,
+)
 
 PRIORITY_URGENT = 5
 PRIORITY_SYNC_FOLLOWED = 10
@@ -101,6 +108,8 @@ DEFAULT_PRIORITY: dict[str, int] = {
     JobKind.PRICES: PRIORITY_MAINTENANCE,
     JobKind.SCOPE_RECHECK: PRIORITY_MAINTENANCE,
     JobKind.KEY_ROTATE: PRIORITY_MAINTENANCE,
+    JobKind.PRICES_DAILY: PRIORITY_MAINTENANCE,
+    JobKind.HOUSEKEEPING: PRIORITY_MAINTENANCE,
     JobKind.BACKFILL: PRIORITY_BACKFILL,
 }
 

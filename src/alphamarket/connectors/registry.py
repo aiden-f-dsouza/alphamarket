@@ -27,6 +27,7 @@ from alphamarket.connectors.base import (
     RateBudget,
     RateScope,
     ReadOnlyProof,
+    RegulatoryFees,
     VenueConnector,
     VenueProfile,
 )
@@ -39,6 +40,23 @@ from alphamarket.connectors.kalshi import KalshiConnector, KalshiMarketData, loa
 from alphamarket.connectors.kraken import KRAKEN_API_URL, KrakenConnector, KrakenMarketData
 from alphamarket.connectors.polymarket import PolymarketConnector, PolymarketMarketData
 from alphamarket.connectors.snaptrade import SnapTradeConnector, SnapTradeMarketData
+
+# ---- wave2 scaffold ----
+# US equity sell-side regulatory fees for paper followers (PaperFeeModel.
+# US_EQUITY_REGULATORY). [VERIFY] every value before launch: the SEC Section
+# 31 rate was set to $0.00 per million from 2025-05-14 and the FY2026 rate
+# is not confirmed here; FINRA TAF $0.000166/share capped at $8.30 are the
+# 2024 schedule values. Rounding (methodology): each fee rounds UP to the cent.
+US_EQUITY_REGULATORY_FEES = RegulatoryFees(
+    sec_fee_per_million="0.00",
+    taf_per_share="0.000166",
+    taf_max="8.30",
+    effective="2026-10-01 [VERIFY]",
+)
+
+# Daily-resolution venues see fills a day late: copying them stays allowed
+# (with the lag shown) for three days, then they are stale.
+DAILY_MAX_COPY_LAG_SECONDS = 3 * 24 * 3600
 
 PROFILES: dict[str, VenueProfile] = {
     "kalshi": VenueProfile(
@@ -59,6 +77,7 @@ PROFILES: dict[str, VenueProfile] = {
         fee_rate_bps=700,  # 7% x count x p x (1-p), verified against a live fill
         fee_rounding_micros=100,  # fee_cost has four decimals
         ownership=OwnershipProof.KEY,
+        asset_classes=("prediction",),  # wave2
     ),
     "polymarket": VenueProfile(
         venue="polymarket",
@@ -79,6 +98,7 @@ PROFILES: dict[str, VenueProfile] = {
         fee_rate_bps=500,  # 5% x size x p x (1-p), verified against activity rows
         fee_rounding_micros=1,  # usdcSize carries six decimals
         ownership=OwnershipProof.PROFILE_CODE,
+        asset_classes=("prediction",),  # wave2
     ),
     # ---- venue-kraken ----
     "kraken": VenueProfile(
@@ -130,6 +150,7 @@ PROFILES: dict[str, VenueProfile] = {
             RateBudget(scope=RateScope.IP, capacity=1, refill_per_minute=60),
         ),
         paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
+        asset_classes=("crypto",),  # wave2
     ),
     # ---- venue-hyperliquid ----
     "hyperliquid": VenueProfile(
@@ -158,10 +179,9 @@ PROFILES: dict[str, VenueProfile] = {
         # (paper followers are charged slightly more, never less).
         fee_rate_bps=5,
         fee_rounding_micros=1,  # fees print 6 dp in USDC
-        # No OwnershipProof value fits a signed message yet (contract request):
-        # PROFILE_CODE routes the account through the claim flow, where
-        # verify_claim checks an EIP-191 signature instead of a bio.
-        ownership=OwnershipProof.PROFILE_CODE,
+        # SIGNED_MESSAGE routes the account through the claim flow, where
+        # verify_claim checks an EIP-191 signature over claim_text(code).
+        ownership=OwnershipProof.SIGNED_MESSAGE,  # wave2: EIP-191 claim message
         readonly_proof=ReadOnlyProof.NONE,
         transfers_observable=True,
         history_depth="10k_fills",
@@ -171,6 +191,7 @@ PROFILES: dict[str, VenueProfile] = {
         daily_resolution=False,
         rate_budgets=(hyperliquid.RATE_BUDGET,),
         paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
+        asset_classes=("crypto",),  # wave2
     ),
     # ---- venue-coinbase ----
     "coinbase": VenueProfile(
@@ -213,6 +234,7 @@ PROFILES: dict[str, VenueProfile] = {
             RateBudget(scope=RateScope.IP, capacity=10, refill_per_minute=600),
         ),
         paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
+        asset_classes=("crypto",),  # wave2
     ),
     # ---- venue-binanceus ----
     "binanceus": VenueProfile(
@@ -276,6 +298,7 @@ PROFILES: dict[str, VenueProfile] = {
             ),
         ),
         paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
+        asset_classes=("crypto",),  # wave2
     ),
     "alpaca": VenueProfile(
         venue="alpaca",
@@ -334,6 +357,8 @@ PROFILES: dict[str, VenueProfile] = {
             ),
         ),
         paper_fee_model=PaperFeeModel.US_EQUITY_REGULATORY,
+        regulatory_fees=US_EQUITY_REGULATORY_FEES,  # wave2
+        asset_classes=("equities",),
     ),
     # ---- venue-ibkr ----
     "ibkr": VenueProfile(
@@ -389,6 +414,10 @@ PROFILES: dict[str, VenueProfile] = {
             ),
         ),
         paper_fee_model=PaperFeeModel.US_EQUITY_REGULATORY,
+        regulatory_fees=US_EQUITY_REGULATORY_FEES,  # wave2
+        asset_classes=("equities",),
+        pricing_venue="alpaca",  # no public market data of its own
+        max_copy_lag_seconds=DAILY_MAX_COPY_LAG_SECONDS,
     ),
     # ---- venue-snaptrade ----
     "snaptrade": VenueProfile(
@@ -448,6 +477,10 @@ PROFILES: dict[str, VenueProfile] = {
             ),
         ),
         paper_fee_model=PaperFeeModel.US_EQUITY_REGULATORY,
+        regulatory_fees=US_EQUITY_REGULATORY_FEES,  # wave2
+        asset_classes=("equities",),
+        pricing_venue="alpaca",  # no public market data of its own
+        max_copy_lag_seconds=DAILY_MAX_COPY_LAG_SECONDS,
     ),
 }
 
@@ -571,6 +604,15 @@ def build_connector(
     connector.account_ref = account_ref
     return connector
 
+
+# ---- wave2 scaffold ----
+# Outbound budgets for market data sources that are not venues (no profile,
+# never connectable), e.g. the CoinGecko fallback price source. The limiter
+# falls back to this table (venue_limits._profile_budgets).
+DATA_SOURCE_BUDGETS: dict[str, tuple[RateBudget, ...]] = {
+    # CoinGecko demo plan: 30 calls/min [VERIFY against the account's plan].
+    "coingecko": (RateBudget(scope=RateScope.IP, capacity=30, refill_per_minute=30),),
+}
 
 _MARKET_DATA_BUILDERS: dict[str, Callable[[str], MarketDataSource]] = {
     "kalshi": lambda venue_env: KalshiMarketData(base_url=KALSHI_BASE_URLS[venue_env]),

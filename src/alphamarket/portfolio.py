@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from alphamarket.marketdata import latest_marks
-from alphamarket.mirror import allocation_ledger, replay_allocation
+from alphamarket.mirror import allocation_ledger, is_asset_allocation, replay_allocation
 from alphamarket.models import (
     Allocation,
     AllocationSnapshot,
@@ -45,6 +45,8 @@ class AllocationValue:
     positions: list[OpenPosition]
     n_fills: int
     n_settlements: int
+    # wave2: asset allocations' positions, in paper.asset_view_extras' shape.
+    asset_positions: tuple = ()
 
     @property
     def equity_micros(self) -> int:
@@ -60,6 +62,10 @@ def _venue_of(db: Session, allocation: Allocation) -> tuple[str, str]:
 def value_allocation(
     db: Session, allocation: Allocation, marks: dict[str, int | None] | None = None
 ) -> AllocationValue:
+    if is_asset_allocation(db, allocation):  # wave2
+        from alphamarket.paper import value_asset_allocation
+
+        return value_asset_allocation(db, allocation, marks)
     rep = replay_allocation(db, allocation)
     cash = rep.points[-1].cash_micros if rep.points else allocation.allocation_micros
     if marks is None:
@@ -134,7 +140,7 @@ def allocation_view(db: Session, allocation: Allocation) -> dict:
         .where(AllocationSnapshot.allocation_id == allocation.id)
         .order_by(AllocationSnapshot.as_of, AllocationSnapshot.id)
     ).all()
-    return {
+    view = {
         "id": allocation.id,
         "strategy_slug": strategy.slug,
         "strategy_name": strategy.name,
@@ -169,6 +175,11 @@ def allocation_view(db: Session, allocation: Allocation) -> dict:
         "curve": [[s.as_of.isoformat(), micros_to_float(s.equity_micros)] for s in snaps],
         "paper": allocation.mode == "paper",
     }
+    if is_asset_allocation(db, allocation):  # wave2: positions v2 and copy metrics
+        from alphamarket.paper import asset_view_extras
+
+        view.update(asset_view_extras(db, allocation, value))
+    return view
 
 
 def portfolio_summary(db: Session, user: User) -> dict:

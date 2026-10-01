@@ -538,6 +538,14 @@ class HyperliquidConnector(_Info, AssetVenueConnector):
             return str((details or {}).get("leader", "")).lower() == signer
         return False
 
+    def claim_text(self, code: str) -> str | None:
+        """Contract hook (wave2, OwnershipProof.SIGNED_MESSAGE)."""
+        return claim_message(self.address, code)
+
+    def claim_payload(self, code: str, signature: str) -> str:
+        """Contract hook (wave2): what verify_claim reads."""
+        return encode_claim_proof(code, signature)
+
     def verify_claim(self, code: str) -> bool | None:
         """`code` is encode_claim_proof(claim_code, signature). A bare code
         (no signature yet) is False; None only when the venue could not be

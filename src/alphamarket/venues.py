@@ -15,6 +15,7 @@ Secrets are accepted in the request body, used, encrypted, and never appear
 in any response, log line, or error detail.
 """
 
+import json
 import logging
 import re
 import secrets
@@ -149,6 +150,17 @@ def venue_closed_reason(venue: str) -> str | None:
     return None
 
 
+def oauth_expires_at(secret: str) -> datetime | None:
+    """wave2: an OAuth token record's absolute expiry (oauth.token_record), so
+    the refresh tick can find tokens due without decrypting every credential."""
+    try:
+        record = json.loads(secret)
+    except ValueError:
+        return None
+    raw = record.get("expires_at") if isinstance(record, dict) else None
+    return datetime.fromisoformat(raw) if raw else None
+
+
 def ensure_venue_open(venue: str) -> None:
     reason = venue_closed_reason(venue)
     if reason is not None:
@@ -248,6 +260,7 @@ def connect_account(
             secret,
             kind=profile.credential,
             account_ref=payload.account_ref,
+            expires_at=oauth_expires_at(secret) if oauth_grant else None,  # wave2
             actor_user_id=user.id,
         )
     audit.record(

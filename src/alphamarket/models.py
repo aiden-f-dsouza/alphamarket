@@ -11,13 +11,15 @@ Project invariants (see CLAUDE.md):
   returned by any API.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from enum import StrEnum
 
 from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -57,6 +59,9 @@ class VenueAccountStatus(StrEnum):
     ERROR = "error"  # last sync failed; retried on the next worker tick
     DISCONNECTED = "disconnected"  # user disconnected; encrypted key erased
     SUSPENDED = "suspended"  # p3-vault: key became writable on a re-check; key erased
+    # wave2: a connect started but not finished (SnapTrade portal round trip).
+    # Never synced; abandoned by housekeeping after pending_connect_ttl_hours.
+    PENDING = "pending"
 
 
 class VenueAccount(Base):
@@ -190,6 +195,13 @@ class EquitySnapshot(Base):
     tolerance_micros: Mapped[int] = mapped_column(BigInteger)
     reconciled: Mapped[bool] = mapped_column(Boolean)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # wave2: broker-reported total equity vs ledger equity at current marks
+    # (asset venues whose NormalizedBalances carries equity_usd_micros). NULL
+    # when not checked. A mismatch flags the stats; it never quarantines.
+    venue_equity_micros: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    computed_equity_micros: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    equity_tolerance_micros: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    equity_reconciled: Mapped[bool | None] = mapped_column(Boolean, default=None)
 
 
 class StrategyStats(Base):
@@ -257,22 +269,69 @@ class Signal(Base):
     """APPEND-ONLY. One row per post-anchor creator fill, in fill order: the
     event followers monitor and paper allocations mirror. `creator_equity_micros`
     is the creator's equity (cash + open cost) just before the fill, which is
-    the denominator of proportional sizing."""
+    the denominator of proportional sizing.
+
+    wave2 (signals v2): exactly one source per row (ck_signals_one_source).
+    - Binary rows: `fill_id` set; ticker/side/action/count/price/position_after
+      as in M6; every v2 column NULL.
+    - Asset rows: `asset_fill_id` set; `count_micros`, `price_micros` and
+      `position_after_micros` NULL; `ticker` = instrument symbol; `side` =
+      "long" | "short" by the sign of the creator's position after the fill
+      (before it, when the fill flattened it); quantities in atoms at
+      `qty_decimals`; `price` the venue's string; the quote Koine captured at
+      `observed_at` copied onto the row (paper_signals.py, methodology
+      "Signals v2 and copy lag")."""
 
     __tablename__ = "signals"
+    __table_args__ = (
+        CheckConstraint(
+            "(fill_id IS NULL) <> (asset_fill_id IS NULL)", name="ck_signals_one_source"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     strategy_id: Mapped[int] = mapped_column(ForeignKey("strategies.id"), index=True)
-    fill_id: Mapped[int] = mapped_column(ForeignKey("fills.id"), unique=True)
-    ticker: Mapped[str] = mapped_column(String(120), index=True)
+    fill_id: Mapped[int | None] = mapped_column(ForeignKey("fills.id"), unique=True, default=None)
+    ticker: Mapped[str] = mapped_column(String(160), index=True)
     side: Mapped[str] = mapped_column(String(10))
     action: Mapped[str] = mapped_column(String(10))
-    count_micros: Mapped[int] = mapped_column(BigInteger)
-    price_micros: Mapped[int] = mapped_column(BigInteger)
+    count_micros: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    price_micros: Mapped[int | None] = mapped_column(BigInteger, default=None)
     creator_equity_micros: Mapped[int] = mapped_column(BigInteger)
-    position_after_micros: Mapped[int] = mapped_column(BigInteger)  # creator's (ticker, side)
+    # creator's (ticker, side)
+    position_after_micros: Mapped[int | None] = mapped_column(BigInteger, default=None)
     filled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     emitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # ---- wave2: asset signals (NULL on binary rows) ----
+    asset_fill_id: Mapped[int | None] = mapped_column(
+        ForeignKey("asset_fills.id"), unique=True, default=None
+    )
+    instrument_id: Mapped[int | None] = mapped_column(
+        ForeignKey("instruments.id"), index=True, default=None
+    )
+    qty_atoms: Mapped[int | None] = mapped_column(BigInteger, default=None)  # unsigned
+    qty_decimals: Mapped[int | None] = mapped_column(Integer, default=None)
+    price: Mapped[str | None] = mapped_column(String(64), default=None)  # as reported
+    # qty x price in USD micros; NULL when the quote asset is not USD/stablecoin.
+    notional_micros: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    # Creator's signed position in the instrument (+ long, - short) around the
+    # fill, at qty_decimals.
+    position_before_atoms: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    position_after_atoms: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    # The UTC day whose closes valued creator_equity_micros (valuation.equity_before).
+    equity_basis_day: Mapped[date | None] = mapped_column(Date, default=None)
+    # When Koine first saw the fill (asset_fills.ingested_at). Copy lag is
+    # observed_at - filled_at.
+    observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    quote_bid: Mapped[str | None] = mapped_column(String(64), default=None)
+    quote_ask: Mapped[str | None] = mapped_column(String(64), default=None)
+    quote_last: Mapped[str | None] = mapped_column(String(64), default=None)
+    quote_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    quote_source: Mapped[str | None] = mapped_column(String(40), default=None)
+
+    @property
+    def is_asset(self) -> bool:
+        return self.asset_fill_id is not None
 
 
 class Follow(Base):
@@ -405,9 +464,7 @@ def _enforce_append_only(session: Session, flush_context, instances) -> None:
 # daily prices. Asset quantities are integer atoms at a per-row `decimals`
 # (<= 12), parsed from the venue's decimal string via money.to_atoms.
 
-from datetime import date  # noqa: E402
-
-from sqlalchemy import CheckConstraint, Date, Index  # noqa: E402
+from sqlalchemy import Index  # noqa: E402
 
 MAX_LEDGER_DECIMALS = 12  # money.MAX_DECIMALS; the CHECK constraints pin it in the schema
 
@@ -445,6 +502,10 @@ class Instrument(Base):
     multiplier: Mapped[int] = mapped_column(Integer, default=1)
     expiry: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # wave2: perp maintenance-margin tiers, [{"lower_bound": str, "max_leverage": int}]
+    # ascending (connectors.base.MarginTier), refreshed by the prices_daily job.
+    margin_tiers: Mapped[list | None] = mapped_column(JSON, default=None)
+    margin_tiers_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 
 class SymbolHistory(Base):
@@ -755,6 +816,8 @@ class AuditLog(Base):
     foreign key, so an audit row outlives the user it names."""
 
     __tablename__ = "audit_log"
+    # wave2: the security page lists a user's own keys' rows by target.
+    __table_args__ = (Index("ix_audit_log_target", "target_type", "target_id"),)
 
     id: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
@@ -799,14 +862,20 @@ class UserSession(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
+    )
     ip: Mapped[str | None] = mapped_column(String(64), default=None)
     user_agent: Mapped[str | None] = mapped_column(String(300), default=None)
     mfa_pending: Mapped[bool] = mapped_column(Boolean, default=False)
     # Last TOTP (or recovery code) check on this session: the step-up window.
     step_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, index=True
+    )
 
 
 class UserTotp(Base):
@@ -840,6 +909,7 @@ class RecoveryCode(Base):
 class AuthTokenKind(StrEnum):
     VERIFY_EMAIL = "verify_email"
     PASSWORD_RESET = "password_reset"
+    EMAIL_CHANGE = "email_change"  # wave2: sent to the NEW address; carries new_email
 
 
 class AuthToken(Base):
@@ -853,8 +923,10 @@ class AuthToken(Base):
     kind: Mapped[str] = mapped_column(String(20))
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # wave2: the address an EMAIL_CHANGE token switches the account to.
+    new_email: Mapped[str | None] = mapped_column(String(320), default=None)
 
 
 class RateLimitCounter(Base):
@@ -867,3 +939,235 @@ class RateLimitCounter(Base):
     window_start: Mapped[int] = mapped_column(BigInteger, primary_key=True)  # unix seconds
     count: Mapped[int] = mapped_column(Integer, default=0)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+# ---- wave2 scaffold -----------------------------------------------------------
+# Paper copy v2 (implementation_plan P6), asset market data, consent
+# (invariant 10) and venue activity flags. Migration 0013. Workstreams append
+# their own blocks below this one ("# ---- wave2:<label> ----").
+
+
+class MirrorAssetFill(Base):
+    """APPEND-ONLY. One paper trade in an allocation of an ASSET strategy: the
+    human-readable row (what was traded, at which price and why that price).
+    The cash and quantity truth is its group of mirror_ledger_entries
+    (paper_book.py). Binary allocations keep using mirror_fills."""
+
+    __tablename__ = "mirror_asset_fills"
+    __table_args__ = (
+        Index(
+            "uq_mirror_asset_fills_alloc_signal",
+            "allocation_id",
+            "signal_id",
+            unique=True,
+            postgresql_where=text("signal_id IS NOT NULL"),
+            sqlite_where=text("signal_id IS NOT NULL"),
+        ),
+        _decimals_check("qty_decimals", "mirror_asset_fills"),
+    )
+
+    id: Mapped[int] = mapped_column(_BigId, primary_key=True)
+    allocation_id: Mapped[int] = mapped_column(ForeignKey("allocations.id"), index=True)
+    signal_id: Mapped[int | None] = mapped_column(
+        ForeignKey("signals.id"), index=True, default=None
+    )
+    reason: Mapped[str] = mapped_column(String(20))  # "signal" | "liquidation"
+    mode: Mapped[str] = mapped_column(String(10))  # AllocationMode; always paper
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"))
+    action: Mapped[str] = mapped_column(String(10))  # buy | sell
+    qty_atoms: Mapped[int] = mapped_column(BigInteger)  # unsigned
+    qty_decimals: Mapped[int] = mapped_column(Integer)
+    price: Mapped[str] = mapped_column(String(64))  # decimal string, quote per unit
+    notional_micros: Mapped[int] = mapped_column(BigInteger)  # qty x price, USD micros
+    fee_micros: Mapped[int] = mapped_column(BigInteger, default=0)
+    # "ask" | "bid" | "creator_price_penalty" | "mark" (liquidation)
+    price_basis: Mapped[str] = mapped_column(String(30))
+    penalty_bps: Mapped[int | None] = mapped_column(Integer, default=None)
+    quote_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    venue_order_id: Mapped[str | None] = mapped_column(String(120), default=None)  # live only
+    filled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MirrorLedgerEntry(Base):
+    """APPEND-ONLY. One leg of a paper allocation's ledger, shaped like
+    ledger_entries but keyed by allocation, so valuation.py values creators
+    and followers with the same code. Starting cash is NOT a row: it is the
+    allocation's implicit anchor (USD, 6 dp = micros). Leg and ref
+    conventions: paper_book.py."""
+
+    __tablename__ = "mirror_ledger_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "allocation_id", "ref", "kind", "asset", name="uq_mirror_ledger_entries_identity"
+        ),
+        _decimals_check("decimals", "mirror_ledger_entries"),
+        Index("ix_mirror_ledger_entries_alloc_asset", "allocation_id", "asset"),
+    )
+
+    id: Mapped[int] = mapped_column(_BigId, primary_key=True)
+    allocation_id: Mapped[int] = mapped_column(ForeignKey("allocations.id"))
+    instrument_id: Mapped[int | None] = mapped_column(ForeignKey("instruments.id"), default=None)
+    asset: Mapped[str] = mapped_column(String(120))
+    delta_atoms: Mapped[int] = mapped_column(BigInteger)
+    decimals: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(20))  # connectors.base.LegKind
+    ref: Mapped[str] = mapped_column(String(255))  # idempotency: sig:<id>, fund:..., ca:<id>
+    group_ref: Mapped[str] = mapped_column(String(300))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MirrorSkip(Base):
+    """A signal an allocation considered and did not copy, and why
+    (below_minimum_size, insufficient_cash, stale_signal, ...). Display only;
+    not a ledger fact, so not append-only."""
+
+    __tablename__ = "mirror_skips"
+    __table_args__ = (
+        UniqueConstraint("allocation_id", "signal_id", name="uq_mirror_skips_alloc_signal"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    allocation_id: Mapped[int] = mapped_column(ForeignKey("allocations.id"), index=True)
+    signal_id: Mapped[int] = mapped_column(ForeignKey("signals.id"))
+    reason: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AssetQuote(Base):
+    """One observation of an instrument's public top of book (decimal strings,
+    quote asset per unit). Append-only by convention like market_prices, but
+    prunable: signals copy the quote they used, so no evidence lives only
+    here. The newest fresh row is the mark for follower valuation and
+    liquidation checks (prices.latest_mark)."""
+
+    __tablename__ = "asset_quotes"
+    __table_args__ = (Index("ix_asset_quotes_inst_as_of", "instrument_id", "as_of"),)
+
+    id: Mapped[int] = mapped_column(_BigId, primary_key=True)
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"))
+    bid: Mapped[str | None] = mapped_column(String(64), default=None)
+    ask: Mapped[str | None] = mapped_column(String(64), default=None)
+    last: Mapped[str | None] = mapped_column(String(64), default=None)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    source: Mapped[str] = mapped_column(String(40))  # venue or data source name
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class FundingRateRow(Base):
+    """One perp funding rate (public venue data); paper perps accrue it."""
+
+    __tablename__ = "funding_rates"
+    __table_args__ = (UniqueConstraint("instrument_id", "at", name="uq_funding_rates_inst_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"), index=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    rate: Mapped[str] = mapped_column(String(64))  # decimal string per interval
+    mark_price: Mapped[str | None] = mapped_column(String(64), default=None)
+    source: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CorporateActionRow(Base):
+    """A split, cash dividend or symbol change (public data). Keyed by symbol,
+    not instrument, because one equity is shared by Alpaca, IBKR and
+    SnapTrade accounts. Paper equity followers apply these
+    (paper_lifecycle.py); creators get theirs from their venue's legs."""
+
+    __tablename__ = "corporate_actions"
+    __table_args__ = (
+        UniqueConstraint(
+            "source", "symbol", "kind", "ex_date", name="uq_corporate_actions_identity"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(40))
+    symbol: Mapped[str] = mapped_column(String(40), index=True)
+    kind: Mapped[str] = mapped_column(String(20))  # connectors.base.CorporateActionKind
+    ex_date: Mapped[date] = mapped_column(Date, index=True)
+    pay_date: Mapped[date | None] = mapped_column(Date, default=None)
+    ratio_new: Mapped[int | None] = mapped_column(Integer, default=None)
+    ratio_old: Mapped[int | None] = mapped_column(Integer, default=None)
+    cash_per_share: Mapped[str | None] = mapped_column(String(64), default=None)
+    new_symbol: Mapped[str | None] = mapped_column(String(40), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class VenueActivityFlag(Base):
+    """APPEND-ONLY. Venue activity Koine skipped instead of guessing at (a
+    short sale, an option, a stock dividend): disclosed on the account and
+    its public page. A real balance effect is still caught by reconciliation."""
+
+    __tablename__ = "venue_activity_flags"
+    __table_args__ = (
+        UniqueConstraint(
+            "venue_account_id", "venue_ref", "kind", name="uq_venue_activity_flags_identity"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    venue_account_id: Mapped[int] = mapped_column(ForeignKey("venue_accounts.id"), index=True)
+    venue_ref: Mapped[str] = mapped_column(String(255))
+    kind: Mapped[str] = mapped_column(String(30))  # "unsupported_activity"
+    activity_type: Mapped[str] = mapped_column(String(60))
+    reason: Mapped[str] = mapped_column(String(40))
+    symbol: Mapped[str | None] = mapped_column(String(160), default=None)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    description: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ConsentText(Base):
+    """APPEND-ONLY. The exact consent text shown before a connect, stored once
+    per distinct body; venue_consents point at it by hash (invariant 10)."""
+
+    __tablename__ = "consent_texts"
+
+    sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    venue: Mapped[str] = mapped_column(String(40))
+    version: Mapped[str] = mapped_column(String(40))
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class VenueConsent(Base):
+    """APPEND-ONLY. One accepted consent screen: who, for which venue and
+    account, which exact text (by hash), from where, when."""
+
+    __tablename__ = "venue_consents"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    venue: Mapped[str] = mapped_column(String(40))
+    venue_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("venue_accounts.id"), index=True, default=None
+    )
+    text_sha256: Mapped[str] = mapped_column(ForeignKey("consent_texts.sha256"))
+    text_version: Mapped[str] = mapped_column(String(40))
+    ip: Mapped[str | None] = mapped_column(String(64), default=None)
+    user_agent: Mapped[str | None] = mapped_column(String(400), default=None)
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+APPEND_ONLY_MODELS_W2 = (
+    MirrorAssetFill,
+    MirrorLedgerEntry,
+    VenueActivityFlag,
+    ConsentText,
+    VenueConsent,
+)
+
+
+@event.listens_for(Session, "before_flush")
+def _enforce_append_only_w2(session: Session, flush_context, instances) -> None:
+    """Same guard as _enforce_append_only for the wave2 tables; Postgres
+    triggers (migration 0013) back it for raw SQL."""
+    for obj in session.dirty:
+        if isinstance(obj, APPEND_ONLY_MODELS_W2) and session.is_modified(obj):
+            raise AppendOnlyViolation(f"{type(obj).__name__} rows are append-only; cannot update")
+    for obj in session.deleted:
+        if isinstance(obj, APPEND_ONLY_MODELS_W2):
+            raise AppendOnlyViolation(f"{type(obj).__name__} rows are append-only; cannot delete")

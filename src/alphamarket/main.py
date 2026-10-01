@@ -8,12 +8,14 @@ from alphamarket import (
     account,
     audit,
     auth,
+    connect_pages,
     follows,
     mfa,
     oauth,
     pages,
     public,
     redaction,
+    rotate,
     security_pages,
     strategies,
     tails,
@@ -67,6 +69,8 @@ def create_app() -> FastAPI:
     app.include_router(public.router)
     app.include_router(follows.router)
     app.include_router(tails.router)
+    app.include_router(connect_pages.router)  # wave2
+    app.include_router(rotate.router)  # wave2
     app.include_router(pages.router)
 
     @app.get("/health")
