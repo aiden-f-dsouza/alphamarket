@@ -47,6 +47,9 @@ jobs:
 
   gitleaks:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -67,5 +70,5 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           python-version: "3.12"
-      - run: uv export --no-hashes --format requirements-txt -o requirements.txt
+      - run: uv export --no-hashes --no-emit-project --format requirements-txt -o requirements.txt
       - run: uvx pip-audit -r requirements.txt
