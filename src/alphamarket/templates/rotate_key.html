@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Replace key · Koine{% endblock %}
+{% block nav_active %}dashboard{% endblock %}
+{% block style %}
+  .rotate { display:grid; grid-template-columns:minmax(0, 560px) minmax(0, 1fr); gap:48px; }
+  @media (max-width:1000px) { .rotate { grid-template-columns:1fr; } }
+{% endblock %}
+{% block content %}
+<div class="rotate">
+  <div class="stack" style="gap:28px">
+    <div class="stack" style="gap:8px">
+      <span class="label">{{ profile.display_name }} · account #{{ account.id }}</span>
+      <h1 style="font-size:40px">Replace the key.</h1>
+      <p class="text2" style="font-size:16px">Paste a new read-only key for the same {{ profile.display_name }} account. We check its scope before we store it; the old key is erased the moment the new one is accepted. Your track record continues unchanged.</p>
+    </div>
+    {% if account.status == "suspended" %}
+    <div class="notice">This connection is paused because its key gained trading or withdrawal permission. Koine erased that key. Create a new read-only key to resume.</div>
+    {% elif account.last_sync_error %}
+    <div class="notice">{{ account.last_sync_error }}</div>
+    {% endif %}
+    {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+    {% if gate %}
+    <div class="notice stack" style="gap:12px">
+      {% if gate[0] == "step_up" %}
+      <span>Confirm a code from your authenticator app to continue. It stays confirmed for 10 minutes.</span>
+      <form method="post" action="/dashboard/security/step-up" style="display:flex;gap:10px;flex-wrap:wrap">
+        <input type="hidden" name="next" value="/dashboard/accounts/{{ account.id }}/rotate">
+        <input class="mono" name="code" required inputmode="numeric" autocomplete="one-time-code" placeholder="123456" style="max-width:180px" aria-label="Two-factor code">
+        <button class="btn sm" type="submit">Confirm code</button>
+      </form>
+      {% else %}
+      <span>{% if gate[0] == "totp" %}Turn on two-factor authentication before changing a venue key.{% else %}Confirm your email address before changing a venue key.{% endif %}</span>
+      <a class="btn secondary sm" href="/dashboard/security" style="align-self:flex-start">Security settings</a>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% if blocked %}
+    <div class="notice stack" style="gap:12px">
+      <span>{{ blocked }}</span>
+      <a class="btn secondary sm" href="/dashboard/connect?venue={{ profile.venue }}" style="align-self:flex-start">Connect page</a>
+    </div>
+    {% else %}
+    <form method="post" action="/dashboard/accounts/{{ account.id }}/rotate" class="card" autocomplete="off">
+      <div class="body" style="padding:28px;gap:22px">
+        <label class="field"><span class="label">{{ profile.key_label }}</span><input class="mono" name="key_id" required maxlength="120" autocomplete="off" placeholder="From {{ profile.display_name }} → API keys"></label>
+        <label class="field"><span class="label">{{ profile.secret_label }}</span><textarea class="mono" name="secret" required></textarea><span class="note">Encrypted before it touches the database. Never shown again.</span></label>
+        <div class="spread" style="align-items:center;padding-top:4px">
+          <span class="mono small muted" style="display:inline-flex;align-items:center;gap:8px">{{ m.icon("lock", 14, "var(--muted)") }}Environment: {{ "production" if account.venue_env == "prod" else account.venue_env }}</span>
+          <button class="btn" type="submit"{{ " disabled" if gate }}>Check scope and replace</button>
+        </div>
+      </div>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="stack" style="gap:0;padding-top:4px">
+    <span class="label" style="padding-bottom:8px;border-bottom:1px solid var(--line2)">What happens next</span>
+    <div class="hairline-list">
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Key scope is read-only</span><span class="small muted">A key with trading or withdrawal permission is refused and nothing changes.</span></div></div>
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>The old key is erased</span><span class="small muted">Only the new key's ciphertext is kept. You get an email confirming the change.</span></div></div>
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Sync and a balance check</span><span class="small muted">We sync right away and compare the balance with your ledger. A key for a different account does not match and the strategy is held for review.</span></div></div>
+    </div>
+  </div>
+</div>
+{% endblock %}

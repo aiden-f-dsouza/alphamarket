@@ -212,3 +212,50 @@ history) and sets `account_schedules.backfill_done_at` when it finishes.
 | `WORKER_SYNC_TICK_SECONDS` | 30 | how often due syncs are enqueued |
 | `RATE_LIMITER_BACKEND` | `postgres` | `postgres` or `memory` |
 | `INGEST_INTERVAL_SECONDS` | 300 | sync interval per account |
+
+<!-- wave2:account-security -->
+## OAuth refresh and nightly housekeeping (wave2)
+
+**`oauth_refresh` is live** (`oauth_jobs.py`).
+
+- `tick_oauth` runs every 15 minutes. It queues one `oauth_refresh` job
+  (priority 5, dedupe key `oauth_refresh:<account>`) for each **active**
+  OAuth account whose live credential has `venue_credentials.expires_at <=
+  now + 2 x REFRESH_MARGIN` (10 minutes). The expiry column is written at
+  connect and at every refresh, so the tick decrypts nothing. Tokens with no
+  expiry (Alpaca) are never queued.
+- The job re-reads the credential first. If a sync already refreshed it
+  (the expiry is past the horizon again), the job stops without a call, so
+  each due token is refreshed once. Otherwise it decrypts the credential
+  (audited), calls the token endpoint, stores the new record with its
+  `expires_at` (the old credential row is erased), and audits
+  `credential.refresh` with outcome `refreshed`.
+- **The venue refuses** (`invalid_grant`, `invalid_client`, or a refresh
+  that grants a write scope): the account goes to `error` with
+  "Reconnect <venue>: ...", the refusal is audited (outcome `refused`, the
+  error code only), and the owner gets one `oauth_reconnect` alert. The
+  alert is sent only on that transition. The job completes; the tick skips
+  `error` accounts.
+- **A 5xx, a 429 or a network error** is re-raised, so the job backs off and
+  retries like any other failure, and the account is unchanged.
+- **Lazy path.** `ingest.connector_for` calls `oauth_jobs.refresh_if_due`
+  before it builds an OAuth connector: the 5-minute margin plus jitter
+  (`oauth.ensure_fresh`). On a refresh it stores and commits the new record.
+  A refusal marks the account as above and raises `ReconnectRequired`, so the
+  sync fails with the reconnect message instead of a 401.
+
+**`housekeeping`** is queued nightly by `tick_nightly`, with dedupe key
+`housekeeping:<day>` and `once=True`. `housekeeping.run` deletes, committing
+each category on its own:
+
+| Category | Deleted when | Setting (default) |
+|---|---|---|
+| `rate_limit_counters` | the window has ended | none |
+| `sessions` | revoked, or expired (idle 24 h after last seen, 30 d after creation, 10 min for a password-only session), more than N days ago | `SESSION_RETENTION_DAYS` (30) |
+| `auth_tokens` | used, or expired, more than N days ago | `TOKEN_RETENTION_DAYS` (7) |
+| `asset_quotes` | `as_of` older than N days | `QUOTE_RETENTION_DAYS` (30) |
+| pending accounts | `pending.abandon_stale` (unfinished SnapTrade connects) | `PENDING_CONNECT_TTL_HOURS` (24) |
+| `jobs` | done more than 7 d ago, dead more than 30 d ago (`jobs.prune_finished`, which moved here from `tick_nightly`) | none |
+
+It returns the count per category, which is logged. It never touches an
+append-only table.

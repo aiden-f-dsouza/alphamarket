@@ -291,3 +291,67 @@ sent this request: there the permission list Alpaca returns with the grant
 is the proof, and a grant that comes back without one is marked unverified
 rather than read-only. A grant refused at any step is revoked where the
 venue allows it.
+
+<!-- wave2:account-security -->
+## Replacing a key
+
+You can replace the read-only key on a connection without losing its
+history. Use **Replace key** on the dashboard (or `POST
+/venues/{id}/rotate`). This works for a working connection, one in error,
+and one we **suspended** because its key gained trading permission.
+
+- It needs the same checks as connecting a key: a confirmed email,
+  two-factor, a code confirmed in the last 10 minutes, and the same rate
+  limit (10 per hour, shared with connect and claim).
+- The new key is tested exactly like a new connection's. Koine authenticates
+  with it, then proves it is read-only. A key that can trade or withdraw is
+  refused: the refusal is recorded in the audit log and **nothing changes**.
+  A suspended connection stays suspended.
+- When the new key is accepted, the old key is erased at once. Only the new
+  key's ciphertext is kept. The connection becomes active, a sync starts
+  immediately, and the change is recorded in the audit log (the read-only
+  check, then the replacement). You get an email.
+- Your track record continues from the **same starting balance**: replacing
+  a key never resets it. A one-off balance check runs right after the sync.
+  If the new key belongs to a different account, the balances will not
+  match, and the strategy is held for review instead of quietly starting a
+  new record.
+- Connections that have no pasted key work differently. OAuth (Alpaca),
+  aggregators (SnapTrade) and public addresses are reconnected from the
+  connect page instead.
+
+## Changing your email address
+
+Change it from the security page (or `POST /account/email`). You need your
+current password and a code confirmed in the last 10 minutes.
+
+- We email a confirmation link to the **new** address. It works once and
+  lasts 1 hour, and we store only its hash. The address changes only when
+  the link is opened.
+- Your **current** address is told about the request straight away, with
+  the new address partly masked. If it was not you, change your password
+  and sign out everywhere.
+- The answer is the same whether or not the new address already has a Koine
+  account, so the form cannot be used to find out who has one. An address
+  that is taken gets a short notice instead of a link. When the link is
+  opened, we check again that no one else has taken the address.
+- When the change completes, the new address counts as confirmed, every
+  other session is signed out, and every outstanding link is cancelled
+  (including password resets sent to the old address). The change is
+  recorded in the audit log, and the old address gets one last email saying
+  the change happened.
+- Requests are limited to 5 per hour per account. Mail to any one address
+  is limited to 3 per hour.
+
+## Your activity
+
+The security page lists your last 50 security events, newest first:
+
+- what you did: signing in, two-factor changes, password and email changes,
+  connecting, replacing or disconnecting keys;
+- everything done to your connections, including **every time Koine
+  decrypted one of your keys and why** (sync, reconcile, the nightly
+  read-only re-check, token refresh). Background jobs show as "Koine worker".
+
+Each row shows only the event, its purpose, the venue, the time and the IP
+address. You never see another user's events, and no row shows a secret.

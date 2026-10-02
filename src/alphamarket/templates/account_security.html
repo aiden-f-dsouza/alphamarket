@@ -28,6 +28,13 @@
       <form method="post" action="/dashboard/security/verify-email/resend"><button class="btn secondary sm" type="submit">Send a new link</button></form>
     </div>
     {% endif %}
+    <form method="post" action="/dashboard/security/email" class="body" style="gap:16px" autocomplete="off">
+      <span class="small text2">Change it: we send a link to the new address, and it changes only when you open it. Your current address is told either way.{% if not totp_on %} Needs two-factor authentication.{% endif %}</span>
+      <label class="field"><span class="label">New email</span><input name="new_email" type="email" required maxlength="254" autocomplete="email"></label>
+      <label class="field"><span class="label">Current password</span><input name="current_password" type="password" required autocomplete="current-password"></label>
+      {% if totp_on and not stepped_up %}<label class="field"><span class="label">Two-factor code</span><input class="mono" name="code" required minlength="6" maxlength="40" autocomplete="one-time-code" placeholder="123456"></label>{% endif %}
+      <div><button class="btn secondary" type="submit"{{ " disabled" if not totp_on }}>Send confirmation link</button></div>
+    </form>
   </div>
 
   <div class="card">
@@ -93,6 +100,30 @@
       <label class="field"><span class="label">New password (10+ characters)</span><input name="new_password" type="password" required minlength="10" maxlength="128" autocomplete="new-password"></label>
       <div><button class="btn secondary" type="submit">Change password</button></div>
     </form>
+  </div>
+
+  <div class="card">
+    <div class="row"><div class="stack" style="gap:6px"><h3>Activity</h3><span class="small text2">Your last {{ audit_rows|length }} security events, including every time Koine used one of your venue keys and why.</span></div></div>
+    <div class="table-wrap">
+      {% if audit_rows %}
+      <table>
+        <thead><tr><th>What</th><th>Why</th><th>Venue</th><th>When (UTC)</th><th>From</th></tr></thead>
+        <tbody>
+        {% for r in audit_rows %}
+          <tr data-action="{{ r.action }}">
+            <td>{{ r.label }}</td>
+            <td>{{ r.purpose or "—" }}</td>
+            <td>{{ r.venue or "—" }}</td>
+            <td>{{ r.at.strftime("%Y-%m-%d %H:%M") }}</td>
+            <td>{{ r.ip }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <span class="small muted">Nothing yet.</span>
+      {% endif %}
+    </div>
   </div>
 </div>
 {% endblock %}
