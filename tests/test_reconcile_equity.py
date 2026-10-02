@@ -250,3 +250,36 @@ def test_a_vector_divergence_still_quarantines(db, account, venue):
     reasons = [q.ref for q in db.scalars(select(LedgerQuarantine))]
     assert reasons == ["reconcile:BTC"]  # the equity mismatch adds no quarantine
     assert db.scalars(select(EquitySnapshot)).one().id == snap.id
+
+
+def test_with_the_worker_limiter_live_marks_value_the_holdings(db, account, venue, monkeypatch):
+    # wave2 integration: BTC trades at 55,000 now (bid 54,990 / ask 55,010).
+    # Broker equity 10,500. With the worker's limiter, reconcile captures a
+    # quote first: computed = 5,000 + 0.1 x mid 55,000 = 10,500 -> ok. Without
+    # it, yesterday's 50,000 close gives 10,000 and a 500 divergence -> flagged.
+    from alphamarket.models import AssetQuote
+
+    calls = []
+
+    def fake_capture(db_, venue_name, venue_env, instrument, limiter):
+        calls.append((venue_name, instrument.symbol, limiter))
+        quote = AssetQuote(
+            instrument_id=instrument.id,
+            bid="54990",
+            ask="55010",
+            as_of=datetime.now(UTC),
+            source=venue_name,
+        )
+        db_.add(quote)
+        db_.flush()
+        return quote
+
+    venue.equity = 10_500 * M
+    stale = reconcile.reconcile_account(db, account)
+    assert (stale.computed_equity_micros, stale.equity_reconciled) == (10_000 * M, False)
+
+    monkeypatch.setattr(prices, "capture_quote", fake_capture)
+    limiter = object()
+    snap = reconcile.reconcile_account(db, account, limiter=limiter)
+    assert calls == [(VENUE, "BTCUSD", limiter)]
+    assert (snap.computed_equity_micros, snap.equity_reconciled) == (10_500 * M, True)

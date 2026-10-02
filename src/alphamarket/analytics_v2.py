@@ -190,6 +190,25 @@ def _mark_prices(
     return out
 
 
+def capture_marks(db: Session, account: VenueAccount, limiter) -> int:
+    """Capture one quote now for every non-cash asset the account holds
+    (prices.capture_quote, throttled by `limiter`), so marked_valuation finds
+    fresh marks. Returns quotes stored; a missing quote just leaves that asset
+    at its last close."""
+    inputs = valuation_db.account_inputs(db, account)
+    if inputs is None:
+        return 0
+    assets = _price_assets(inputs.assets | {f.asset for f in inputs.perp_fills})
+    stored = 0
+    for _, inst_id in sorted(_pricing_instruments(db, account, assets).items()):
+        instrument = db.get(Instrument, inst_id)
+        if instrument is None:
+            continue
+        quote = prices_mod.capture_quote(db, account.venue, account.venue_env, instrument, limiter)
+        stored += quote is not None
+    return stored
+
+
 def marked_valuation(db: Session, account: VenueAccount, now: datetime) -> DayValuation | None:
     """The account's holdings at `now` (anchor + every leg and perp fill at or
     before it), valued at the freshest mark per asset (prices.latest_mark),

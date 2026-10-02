@@ -129,11 +129,13 @@ def reconcilable(account: VenueAccount) -> bool:
     return get_profile(account.venue).balance_observable
 
 
-def reconcile_account(db: Session, account: VenueAccount) -> EquitySnapshot:
+def reconcile_account(db: Session, account: VenueAccount, limiter=None) -> EquitySnapshot:
+    """`limiter` (the worker's) lets the asset path capture fresh quotes for
+    the broker equity check; without it, holdings are valued at closes."""
     if not reconcilable(account):
         raise BalanceUnavailable(f"{account.venue} exposes no balance to reconcile against")
     if is_asset_venue(account.venue):
-        return reconcile_asset_account(db, account)
+        return reconcile_asset_account(db, account, limiter=limiter)
     if account.anchor_balance_micros is None or account.anchor_at is None:
         raise ValueError(f"venue account {account.id} has no reconciliation anchor")
     strategy = db.scalar(select(Strategy).where(Strategy.venue_account_id == account.id))
@@ -270,7 +272,7 @@ def _micros_toward_zero(atoms: int, decimals: int) -> int:
     return q if atoms >= 0 else -q
 
 
-def reconcile_asset_account(db: Session, account: VenueAccount) -> EquitySnapshot:
+def reconcile_asset_account(db: Session, account: VenueAccount, limiter=None) -> EquitySnapshot:
     """Reconcile v2. Writes one AssetReconciliation row per asset and a
     summary EquitySnapshot (the cash asset's numbers, overall verdict), so the
     worker, the API and the public pages read it like any other run. The
@@ -320,7 +322,7 @@ def reconcile_asset_account(db: Session, account: VenueAccount) -> EquitySnapsho
         tolerance_micros=_micros_toward_zero(cash.tolerance_atoms, cash.decimals) if cash else 0,
         reconciled=reconciled,
     )
-    _check_broker_equity(db, account, venue, now, snapshot)
+    _check_broker_equity(db, account, venue, now, snapshot, limiter=limiter)
     db.add(snapshot)
     if not reconciled:
         for c in checks:
@@ -344,6 +346,7 @@ def _check_broker_equity(
     venue: NormalizedBalances,
     now: datetime,
     snapshot: EquitySnapshot,
+    limiter=None,
 ) -> None:
     """wave2 (D16): when the venue reports total account equity, compare it
     with the ledger's equity at now (holdings valued at the latest marks,
@@ -358,9 +361,13 @@ def _check_broker_equity(
     no equity (or a valuation that cannot be built) leave the columns NULL."""
     if venue.equity_usd_micros is None:
         return
-    from alphamarket.analytics_v2 import equity_tolerance_micros, marked_valuation
+    from alphamarket.analytics_v2 import capture_marks, equity_tolerance_micros, marked_valuation
 
     try:
+        if limiter is not None:
+            # Fresh quotes for what the creator holds, so live broker equity is
+            # compared with live marks, not yesterday's close (wave2 integration).
+            capture_marks(db, account, limiter)
         marked = marked_valuation(db, account, now)
     except Exception:  # never let the advisory check break the vector reconciliation
         logger.exception("broker equity check failed for venue account %s", account.id)

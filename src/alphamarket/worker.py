@@ -155,7 +155,7 @@ def handle_reconcile(ctx: JobContext) -> None:
     assert account is not None
     if not reconcilable(account):
         return  # fills-only tier: nothing to compare against
-    snap = reconcile_account(ctx.db, account)
+    snap = reconcile_account(ctx.db, account, limiter=ctx.limiter)
     logger.info(
         "reconciled account %s: divergence %d micros (tolerance %d) -> %s",
         account.id,
