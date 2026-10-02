@@ -113,6 +113,7 @@ from alphamarket.connectors.base import (
     RateLimited,
     ReadOnlyEvidence,
     ReadOnlyProof,
+    Throttle,
 )
 from alphamarket.connectors.base import InstrumentType as InstType
 from alphamarket.money import to_atoms
@@ -155,6 +156,11 @@ EVENT_TYPES = (
 
 class SnapTradeUserExists(Exception):
     """registerUser called for a userId that already exists at SnapTrade."""
+
+
+class SnapTradeUserNotFound(Exception):
+    """deleteUser for a userId SnapTrade does not know: never registered, or
+    already deleted. A retry that gets this answer is done (idempotent)."""
 
 
 def _dec(value: Any) -> Decimal:
@@ -681,12 +687,24 @@ def _retry_after(resp: httpx.Response) -> float:
 # ---- registration / deletion (outside VenueConnector: account lifecycle) --
 
 
+def _check_response(resp: httpx.Response, endpoint: str, throttle: Throttle | None) -> None:
+    """The module-level calls' version of the connector's `_request` handling:
+    429/418 become RateLimited (so the caller can back off and the limiter can
+    penalise the bucket), anything else non-2xx raises HTTPStatusError."""
+    if resp.status_code in (429, 418):
+        if throttle is not None:
+            throttle.after(endpoint)
+        raise RateLimited(_retry_after(resp), endpoint)
+    resp.raise_for_status()
+
+
 def register_user(
     client_id: str,
     consumer_key: str,
     user_id: str,
     base_url: str = BASE_URL,
     client: httpx.Client | None = None,
+    throttle: Throttle | None = None,
 ) -> tuple[str, str]:
     """POST /snapTrade/registerUser -> (userId, userSecret). Called once when
     a trader chooses SnapTrade; the userSecret is stored in the vault and
@@ -696,6 +714,8 @@ def register_user(
     params = {"clientId": client_id, "timestamp": str(int(time.time()))}
     raw_query = urlencode(sorted(params.items()))
     signature = sign(consumer_key, "/api/v1/snapTrade/registerUser", raw_query, body)
+    if throttle is not None:
+        throttle.before("RegisterUser")
     resp = http.post(
         f"{base_url}/snapTrade/registerUser?{raw_query}",
         json=body,
@@ -703,7 +723,7 @@ def register_user(
     )
     if resp.status_code == 409:
         raise SnapTradeUserExists(user_id)
-    resp.raise_for_status()
+    _check_response(resp, "RegisterUser", throttle)
     data = resp.json()
     return data["userId"], data["userSecret"]
 
@@ -718,6 +738,7 @@ def generate_connection_portal_url(
     broker: str | None = None,
     base_url: str = BASE_URL,
     client: httpx.Client | None = None,
+    throttle: Throttle | None = None,
 ) -> str:
     """POST /snapTrade/login with connectionType="read" -- the Connection
     Portal link the user opens to link a brokerage. Read-only is requested
@@ -737,12 +758,14 @@ def generate_connection_portal_url(
     }
     raw_query = urlencode(sorted(params.items()))
     signature = sign(consumer_key, "/api/v1/snapTrade/login", raw_query, body)
+    if throttle is not None:
+        throttle.before("Login")
     resp = http.post(
         f"{base_url}/snapTrade/login?{raw_query}",
         json=body,
         headers={"Signature": signature, "Content-Type": "application/json"},
     )
-    resp.raise_for_status()
+    _check_response(resp, "Login", throttle)
     return resp.json()["redirectURI"]
 
 
@@ -752,20 +775,37 @@ def delete_user(
     user_id: str,
     base_url: str = BASE_URL,
     client: httpx.Client | None = None,
+    throttle: Throttle | None = None,
 ) -> dict[str, Any]:
     """DELETE /snapTrade/deleteUser. Each registered user costs Koine
     $1-2/month (docs/venues/snaptrade.md); call this on disconnect so we stop
     being billed for accounts nobody is tracking any more. Deletion is
-    asynchronous (SnapTrade queues it and sends a USER_DELETED webhook)."""
+    asynchronous (SnapTrade queues it and sends a USER_DELETED webhook).
+
+    Answers, for a caller that retries (aggregator_jobs.py):
+      2xx           deleted (or queued for deletion): done.
+      404 / 410     SnapTrade has no such user (never registered, or an earlier
+                    attempt already deleted it): raises SnapTradeUserNotFound,
+                    which a retry treats as done. [VERIFY] the exact status and
+                    body against a live account; the reference lists 404.
+      429 / 418     RateLimited (transient, honours Retry-After).
+      5xx, timeouts HTTPStatusError / httpx errors (transient: retry).
+      other 4xx     HTTPStatusError (400/401/403: a Koine-side fault such as a
+                    wrong consumer key; retrying will not help until it is
+                    fixed, so the job runs out its attempts and dead-letters)."""
     http = client or httpx.Client(timeout=20.0)
     params = {"clientId": client_id, "timestamp": str(int(time.time())), "userId": user_id}
     raw_query = urlencode(sorted(params.items()))
     signature = sign(consumer_key, "/api/v1/snapTrade/deleteUser", raw_query, None)
+    if throttle is not None:
+        throttle.before("DeleteUser")
     resp = http.delete(
         f"{base_url}/snapTrade/deleteUser?{raw_query}",
         headers={"Signature": signature, "Content-Type": "application/json"},
     )
-    resp.raise_for_status()
+    if resp.status_code in (404, 410):
+        raise SnapTradeUserNotFound(user_id)
+    _check_response(resp, "DeleteUser", throttle)
     return resp.json()
 
 

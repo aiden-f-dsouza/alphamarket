@@ -22,6 +22,7 @@ from alphamarket import audit, vault
 from alphamarket.audit import AuditAction
 from alphamarket.connectors.registry import get_profile
 from alphamarket.models import VenueAccount, VenueAccountStatus, VenueCredential, utcnow
+from alphamarket.venue_limits import VenueLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -192,37 +193,46 @@ def disconnect(
     *,
     actor_user_id: int | None,
     reason: str = "user_disconnect",
+    limiter: VenueLimiter | None = None,
 ) -> None:
     """User disconnect: erase the key, keep the ledger (append-only). An OAuth
     grant is revoked at the venue first, so it does not outlive the account;
-    an aggregator user (SnapTrade, wave2) is deleted at the aggregator.
-    `reason` is "pending_abandoned" when housekeeping drops an unfinished
-    connect (pending.abandon_stale)."""
+    an aggregator user (SnapTrade, wave2) is deleted at the aggregator, with a
+    retry job if that fails. `reason` is "pending_abandoned" when housekeeping
+    drops an unfinished connect (pending.abandon_stale). `limiter` is the
+    outbound limiter the aggregator call spends (web requests pass the app's,
+    the worker its own; None = unthrottled, for tests and scripts)."""
     _revoke_oauth_grant(db, account)
-    delete_aggregator_user(account)
+    delete_aggregator_user(db, account, limiter=limiter, cause=reason)
     revoke(db, account, actor_user_id=actor_user_id, reason=reason)
     account.status = VenueAccountStatus.DISCONNECTED
     db.commit()
 
 
-def delete_aggregator_user(account: VenueAccount) -> None:
+def delete_aggregator_user(
+    db: Session,
+    account: VenueAccount,
+    *,
+    limiter: VenueLimiter | None = None,
+    cause: str = "user_disconnect",
+) -> str | None:
     """wave2 (D20): one aggregator user per connection, so disconnecting
     deletes it (the aggregator drops the brokerage link and stops billing).
-    Needs only the user id (key_id), never the secret. Best effort: the
-    local credential is erased whether or not the aggregator answered."""
+    Needs only the user id (key_id), never the secret. One attempt now; if it
+    fails (or the limiter says the aggregator is busy) an
+    AGGREGATOR_DELETE_USER job is queued in `db`'s transaction and retried
+    until it succeeds or dead-letters (aggregator_jobs.py), so the credential
+    is erased locally whether or not the aggregator answered and the delete is
+    not forgotten. Returns the outcome ("deleted", "already_gone",
+    "retry_queued"), None when there is nothing to delete. Not committed."""
+    from alphamarket import aggregator_jobs
     from alphamarket.connectors.base import CredentialKind
-    from alphamarket.connectors.registry import aggregator_delete_user
 
     if get_profile(account.venue).credential is not CredentialKind.AGGREGATOR:
-        return
+        return None
     if account.status == VenueAccountStatus.DISCONNECTED:
-        return  # already released
-    try:
-        aggregator_delete_user(account.venue, account.key_id)
-    except Exception as exc:  # noqa: BLE001 - erasing the credential must still happen
-        logger.warning(
-            "aggregator user delete failed for account %s: %s", account.id, type(exc).__name__
-        )
+        return None  # already released
+    return aggregator_jobs.release_user(db, account, limiter=limiter, cause=cause)
 
 
 def _revoke_oauth_grant(db: Session, account: VenueAccount) -> None:

@@ -72,6 +72,7 @@ from alphamarket.reconcile import (
     take_anchor,
 )
 from alphamarket.scopecheck import apply_evidence, evidence_json, prove
+from alphamarket.venue_limits import VenueBusy, call_venue, get_web_limiter
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/venues", tags=["venues"])
@@ -441,6 +442,11 @@ def connect_account(
     }
 
 
+def venue_busy_message(display_name: str) -> str:
+    """What a page says when venue_limits.VenueBusy stopped a web call."""
+    return f"{display_name} is busy, try again in a minute."
+
+
 def begin_aggregator_connect(
     db: Session,
     user: User,
@@ -462,8 +468,23 @@ def begin_aggregator_connect(
             status_code=422, detail=f"{profile.display_name} does not connect through a portal."
         )
     screen = consent.require_consent(db, user, venue, consent_sha256, request)
+    limiter = get_web_limiter(request.app) if request is not None else None
     try:
-        user_id, user_secret = aggregator_register_user(venue)
+        # Through the outbound limiter like the worker's calls, but never waiting
+        # for it: a refused or rate-limited call is a 503 "busy", not a stall.
+        user_id, user_secret = call_venue(
+            limiter,
+            venue,
+            None,
+            lambda throttle: aggregator_register_user(venue, throttle=throttle),
+        )
+    except VenueBusy as exc:
+        logger.warning("%s user registration refused: %s", venue, exc.reason)
+        raise HTTPException(
+            status_code=503,
+            detail=venue_busy_message(profile.display_name),
+            headers={"Retry-After": str(max(1, round(exc.retry_after_seconds)))},
+        ) from None
     except Exception:
         logger.warning("%s user registration failed", venue)
         raise HTTPException(
@@ -653,12 +674,17 @@ def manual_reconcile(
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(require_step_up)],  # p3-auth
 )
-def disconnect(account_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
+def disconnect(
+    account_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
     """Disconnect erases the encrypted key immediately (invariant #4). The
     already-ingested ledger stays: it is append-only history the track record
     was built on, and the methodology page says exactly that."""
     account = _owned_account(db, account_id, user)
-    credentials.disconnect(db, account, actor_user_id=user.id)
+    credentials.disconnect(db, account, actor_user_id=user.id, limiter=get_web_limiter(request.app))
 
 
 def import_now(db: Session, account: VenueAccount) -> SyncResult:

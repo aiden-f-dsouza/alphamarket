@@ -78,6 +78,10 @@ class JobKind(StrEnum):
     SCOPE_RECHECK = "scope_recheck"  # re-prove a credential is read-only (P3)
     PRICES_DAILY = "prices_daily"  # wave2: daily closes, margin tiers, corp actions per venue
     HOUSEKEEPING = "housekeeping"  # wave2: prune counters, sessions, tokens, quotes
+    # wave2: delete an aggregator user (SnapTrade) after a disconnect, suspension or
+    # abandoned connect whose first delete failed (aggregator_jobs.py). 22 chars;
+    # jobs.kind is String(40).
+    AGGREGATOR_DELETE_USER = "aggregator_delete_user"
 
 
 # Lower runs first. Copy lag matters for creators with followers, so their
@@ -92,6 +96,17 @@ INACTIVE_ACCOUNT_STATUSES = (
     VenueAccountStatus.PENDING,
 )
 
+# Kinds that DO run for an account in INACTIVE_ACCOUNT_STATUSES, because the
+# account is inactive precisely since the work exists: an aggregator user is
+# deleted after its account was disconnected or suspended. The job keeps its
+# venue_account_id (so the runner still applies that venue's circuit breaker and
+# 429 backoff, serialises per account, and the job row traces to the account),
+# and run_job's inactive skip would otherwise complete it unrun: Koine would keep
+# paying for (and SnapTrade keep the brokerage link of) a user nobody can reach.
+# These handlers must check the account's status themselves and never act on a
+# live account.
+RUNS_ON_INACTIVE_ACCOUNT = frozenset({JobKind.AGGREGATOR_DELETE_USER})
+
 PRIORITY_URGENT = 5
 PRIORITY_SYNC_FOLLOWED = 10
 PRIORITY_SYNC = 20
@@ -100,6 +115,9 @@ PRIORITY_BACKFILL = 40
 
 DEFAULT_PRIORITY: dict[str, int] = {
     JobKind.OAUTH_REFRESH: PRIORITY_URGENT,
+    # One request, and until it succeeds a brokerage link (a trade-capable one
+    # after a scope suspension) stays live at the aggregator.
+    JobKind.AGGREGATOR_DELETE_USER: PRIORITY_URGENT,
     JobKind.SIGNALS: PRIORITY_SYNC_FOLLOWED,
     JobKind.MIRROR: PRIORITY_SYNC_FOLLOWED,
     JobKind.SYNC: PRIORITY_SYNC,
@@ -120,6 +138,7 @@ KIND_LABELS: dict[str, str] = {
     JobKind.OAUTH_REFRESH: "Refreshing your venue connection",
     JobKind.SCOPE_RECHECK: "Re-checking that your key is read-only",
     JobKind.KEY_ROTATE: "Rotating your stored key's encryption",
+    JobKind.AGGREGATOR_DELETE_USER: "Removing your brokerage link at the aggregator",
 }
 
 MAX_ERROR_CHARS = 1000
@@ -229,6 +248,17 @@ PageRunner = Callable[
     [Session, VenueAccount, VenueConnector, str | None], tuple[str | None, str | None]
 ]
 PAGE_RUNNERS: dict[str, PageRunner] = {}
+
+# fn(db, job, attempts, last_error), called by fail() when a job of that kind is
+# dead-lettered, in the same transaction as the status change (fail() commits
+# it). For kinds whose dead letter matters beyond the account's own `error`
+# state, which an inactive account never gets (aggregator_jobs.py audits it).
+DeadLetterHook = Callable[[Session, Job, int, str], None]
+DEAD_LETTER_HOOKS: dict[str, DeadLetterHook] = {}
+
+
+def register_dead_letter_hook(kind: str, hook: DeadLetterHook) -> None:
+    DEAD_LETTER_HOOKS[str(kind)] = hook
 
 
 def register_page_runner(stream: str, runner: PageRunner) -> None:
@@ -570,6 +600,12 @@ def fail(
             # Same as ingest.sync_account today: a failed sync shows on the account.
             account.status = VenueAccountStatus.ERROR
             account.last_sync_error = msg
+    hook = DEAD_LETTER_HOOKS.get(job.kind) if values["status"] == JobStatus.DEAD else None
+    if hook is not None:
+        try:
+            hook(db, job, attempts, msg)
+        except Exception:  # a hook must never keep the dead letter from being recorded
+            logger.exception("dead-letter hook for job %s (%s) failed", job_id, job.kind)
     db.commit()
     return values["status"]
 
@@ -826,7 +862,11 @@ class JobRunner:
                 db, job_id, self.worker_id, self.settings.worker_lease_seconds, now=self.clock()
             ):
                 return "lost"
-            if account is not None and account.status in INACTIVE_ACCOUNT_STATUSES:
+            if (
+                account is not None
+                and account.status in INACTIVE_ACCOUNT_STATUSES
+                and job.kind not in RUNS_ON_INACTIVE_ACCOUNT
+            ):
                 complete(db, job_id, self.worker_id, now=self.clock())
                 return "done"
             if venue and self.limiter is not None:

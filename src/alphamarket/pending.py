@@ -4,8 +4,10 @@ finished (SnapTrade portal round trip).
 Contract: abandon_stale(db, now) -> int
     Accounts PENDING for longer than settings.pending_connect_ttl_hours:
     erase the credential (credentials.disconnect), delete the SnapTrade user
-    (registry wrapper, via credentials.disconnect), set DISCONNECTED. Returns
-    accounts abandoned. Called by housekeeping (integration wires it).
+    (registry wrapper, via credentials.disconnect; a failed delete is retried
+    by an AGGREGATOR_DELETE_USER job, aggregator_jobs.py), set DISCONNECTED.
+    Returns accounts abandoned. Called by housekeeping, which passes the
+    worker's outbound limiter.
 
 A PENDING account has no strategy, no anchor and no ledger rows, and the
 worker never touches it (jobs.INACTIVE_ACCOUNT_STATUSES); the only thing it
@@ -22,6 +24,7 @@ from sqlalchemy.orm import Session
 from alphamarket import credentials
 from alphamarket.config import get_settings
 from alphamarket.models import VenueAccount, VenueAccountStatus
+from alphamarket.venue_limits import VenueLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +33,7 @@ def stale_cutoff(now: datetime) -> datetime:
     return now - timedelta(hours=get_settings().pending_connect_ttl_hours)
 
 
-def abandon_stale(db: Session, now: datetime) -> int:
+def abandon_stale(db: Session, now: datetime, limiter: VenueLimiter | None = None) -> int:
     cutoff = stale_cutoff(now)
     accounts = db.scalars(
         select(VenueAccount)
@@ -49,7 +52,9 @@ def abandon_stale(db: Session, now: datetime) -> int:
             db.commit()  # release the lock; it is not ours to abandon any more
             continue
         try:
-            credentials.disconnect(db, account, actor_user_id=None, reason="pending_abandoned")
+            credentials.disconnect(
+                db, account, actor_user_id=None, reason="pending_abandoned", limiter=limiter
+            )
         except Exception:  # one bad row must not stop the sweep
             db.rollback()
             logger.exception("could not abandon pending account %s", account.id)

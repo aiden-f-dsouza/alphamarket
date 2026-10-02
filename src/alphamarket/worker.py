@@ -29,6 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from alphamarket import (
+    aggregator_jobs,
     credentials,
     email,
     housekeeping,
@@ -299,7 +300,7 @@ def handle_scope_recheck(ctx: JobContext) -> None:
     """Nightly (P3): prove every active key is still read-only; a writable one
     is erased and its account suspended (scopecheck.py). Queued ahead of the
     reconciles so a suspended key is never used for them."""
-    logger.info("scope re-check: %s", scopecheck.recheck_all(ctx.db))
+    logger.info("scope re-check: %s", scopecheck.recheck_all(ctx.db, ctx.limiter))
 
 
 @register_handler(JobKind.KEY_ROTATE)
@@ -327,6 +328,14 @@ def handle_housekeeping(ctx: JobContext) -> None:
 def handle_oauth_refresh(ctx: JobContext) -> None:
     """Refresh one account's OAuth access token before it expires (wave2)."""
     oauth_jobs.run(ctx)
+
+
+@register_handler(JobKind.AGGREGATOR_DELETE_USER)
+def handle_aggregator_delete_user(ctx: JobContext) -> None:
+    """Retry a failed deleteUser at the aggregator (SnapTrade) for an account
+    that is already disconnected or suspended, until it succeeds ("user not
+    found" counts) or dead-letters (aggregator_jobs.run)."""
+    aggregator_jobs.run(ctx)
 
 
 def pricing_venues_in_use(db: Session) -> list[str]:

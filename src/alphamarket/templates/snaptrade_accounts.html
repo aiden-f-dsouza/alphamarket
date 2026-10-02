@@ -59,7 +59,7 @@
     {% endif %}
     {% if portal_url %}
     <a class="btn{{ ' secondary' if accounts }}" href="{{ portal_url }}" rel="noopener noreferrer" style="align-self:flex-start">{% if accounts %}Link another broker on {{ profile.display_name }}{% else %}Open {{ profile.display_name }}{% endif %}</a>
-    {% elif not accounts and not closed_reason and not load_error %}
+    {% elif not accounts and not closed_reason and not load_error and not hold %}
     <a class="btn secondary" href="{{ picker_url }}" style="align-self:flex-start">Try again</a>
     {% endif %}
     <a class="small muted" href="/dashboard">Back to the dashboard (finish within a day, or start again)</a>

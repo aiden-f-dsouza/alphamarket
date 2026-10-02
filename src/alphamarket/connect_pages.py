@@ -16,7 +16,13 @@ Routes (HTML, session cookie; CSRF Origin check applies to every POST):
       venue_credentials, then on to the picker, which links to the portal.
   GET  /dashboard/connect/snaptrade/{account_id}
       The return page and account picker: portal link (connectionType=read)
-      while nothing is linked, then the linked brokerage accounts.
+      while nothing is linked, then the linked brokerage accounts. Each load
+      calls SnapTrade twice, so it has its own inbound limit
+      (ratelimit "snaptrade_picker_user", 429 rendered as this page) and its
+      calls spend the outbound buckets like the worker's, failing fast: when
+      the limiter would make the request wait more than a couple of seconds,
+      the circuit is open or SnapTrade answers 429, the page says it is busy
+      (503, Retry-After) and nothing more is sent.
   POST /dashboard/connect/snaptrade/{account_id}
       Finish: venues.connect_account(pending=account) with the chosen
       account_ref and a strategy name; the account becomes ACTIVE.
@@ -51,12 +57,14 @@ from alphamarket.connectors.registry import (
 from alphamarket.db import get_db
 from alphamarket.models import User, VenueAccount, VenueAccountStatus
 from alphamarket.pages import _connect_ctx, _render, _user
+from alphamarket.venue_limits import VenueBusy, call_venue, credential_ref, get_web_limiter
 from alphamarket.venues import (
     ConnectIn,
     _owned_account,
     begin_aggregator_connect,
     claim_account,
     connect_account,
+    venue_busy_message,
     venue_closed_reason,
 )
 
@@ -127,10 +135,16 @@ def _picker_url(account: VenueAccount) -> str:
     return f"/dashboard/connect/snaptrade/{account.id}"
 
 
-def _picker_ctx(request: Request, db: Session, user: User, account: VenueAccount) -> dict:
+def _picker_ctx(
+    request: Request, db: Session, user: User, account: VenueAccount, *, fetch: bool = True
+) -> dict:
     """Linked accounts and a fresh portal link (SnapTrade links last 5
     minutes, so one is made per page view). Opening the user secret is an
-    audited decrypt like any other."""
+    audited decrypt like any other. Both SnapTrade calls go through the
+    outbound limiter and fail fast (`busy` is set and nothing more is sent
+    when it says wait). `fetch=False` renders the page without touching
+    SnapTrade or the vault (the inbound 429 page): `hold` hides the retry
+    link."""
     profile = get_profile(account.venue)
     ctx: dict = {
         "account": account,
@@ -140,26 +154,60 @@ def _picker_ctx(request: Request, db: Session, user: User, account: VenueAccount
         "accounts": [],
         "portal_url": None,
         "load_error": None,
+        "busy": False,
+        "hold": not fetch,
         "picker_url": _picker_url(account),
     }
+    if not fetch:
+        return ctx
     try:
         opened = credentials.open_credential(db, account, purpose="aggregator_accounts")
     except credentials.CredentialUnavailable:
         ctx["load_error"] = "This connection expired. Start again from the connect page."
         return ctx
+    limiter = get_web_limiter(request.app)
+    cred_id = credential_ref(account.venue, account.key_id)
     try:
-        ctx["accounts"] = aggregator_list_accounts(account.venue, account.key_id, opened.secret)
+        ctx["accounts"] = call_venue(
+            limiter,
+            account.venue,
+            cred_id,
+            lambda throttle: aggregator_list_accounts(
+                account.venue, account.key_id, opened.secret, throttle=throttle
+            ),
+        )
+    except VenueBusy as exc:
+        return _picker_busy(ctx, profile.display_name, exc)
     except Exception as exc:  # noqa: BLE001 - shown as a retry message, never echoed
         logger.warning("%s account list failed: %s", account.venue, type(exc).__name__)
         ctx["load_error"] = f"Could not read your {profile.display_name} accounts; try again."
     if ctx["closed_reason"] is None:
         redirect = get_settings().public_base_url.rstrip("/") + _picker_url(account)
         try:
-            ctx["portal_url"] = aggregator_portal_url(
-                account.venue, account.key_id, opened.secret, redirect=redirect
+            ctx["portal_url"] = call_venue(
+                limiter,
+                account.venue,
+                cred_id,
+                lambda throttle: aggregator_portal_url(
+                    account.venue,
+                    account.key_id,
+                    opened.secret,
+                    redirect=redirect,
+                    throttle=throttle,
+                ),
             )
+        except VenueBusy as exc:
+            return _picker_busy(ctx, profile.display_name, exc)
         except Exception as exc:  # noqa: BLE001
             logger.warning("%s portal link failed: %s", account.venue, type(exc).__name__)
+    return ctx
+
+
+def _picker_busy(ctx: dict, display_name: str, exc: VenueBusy) -> dict:
+    logger.warning("%s picker call refused: %s", exc.venue, exc.reason)
+    ctx["busy"] = True
+    ctx["retry_after"] = max(1, round(exc.retry_after_seconds))
+    ctx["load_error"] = venue_busy_message(display_name)
     return ctx
 
 
@@ -170,9 +218,14 @@ def _picker_page(
     account: VenueAccount,
     error: str | None,
     status: int = 200,
+    *,
+    fetch: bool = True,
 ) -> HTMLResponse:
-    ctx = _picker_ctx(request, db, user, account)
+    ctx = _picker_ctx(request, db, user, account, fetch=fetch)
     resp = _render(request, "snaptrade_accounts.html", user=user, error=error, **ctx)
+    if ctx["busy"]:  # SnapTrade's side: 503 unless a form error already set a status
+        resp.headers["Retry-After"] = str(ctx["retry_after"])
+        status = 503 if status == 200 else status
     resp.status_code = status
     return resp
 
@@ -210,6 +263,8 @@ def aggregator_start(
             raise
         resp = _render(request, "connect.html", user=user, error=exc.detail, gate=None, **ctx)
         resp.status_code = exc.status_code
+        if exc.status_code == 503 and exc.headers:  # "busy": say when to come back
+            resp.headers["Retry-After"] = exc.headers.get("Retry-After", "60")
         return resp
     return RedirectResponse(_picker_url(account), status_code=303)
 
@@ -222,6 +277,24 @@ def aggregator_accounts(request: Request, account_id: int, db: Session = Depends
     account = _pending_or_none(db, account_id, user)
     if account is None:  # finished (or abandoned): nothing left to pick
         return RedirectResponse("/dashboard", status_code=303)
+    try:
+        ratelimit.check(request, "snaptrade_picker_user", user.id)
+    except HTTPException as exc:
+        if exc.status_code != 429:
+            raise
+        # A page you navigate to, so the 429 is this page with an error, not
+        # JSON; neither SnapTrade nor the vault is touched.
+        resp = _picker_page(
+            request,
+            db,
+            user,
+            account,
+            "You have reloaded this page too many times. Wait a few minutes and try again.",
+            status=429,
+            fetch=False,
+        )
+        resp.headers["Retry-After"] = (exc.headers or {}).get("Retry-After", "60")
+        return resp
     return _picker_page(request, db, user, account, None)
 
 

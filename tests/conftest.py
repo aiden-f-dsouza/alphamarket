@@ -37,6 +37,9 @@ def test_settings():
         "email_backend": "console",
         "hibp_enabled": False,
         "rate_limiter": "memory",
+        # The web process's outbound limiter (venue_limits.get_web_limiter) must
+        # never reach for the developer's Postgres from a unit test.
+        "rate_limiter_backend": "memory",
         "trust_proxy_headers": False,
         "key_wrapper": "local",
         "enable_unapproved_venues": True,  # the gate itself is tested explicitly

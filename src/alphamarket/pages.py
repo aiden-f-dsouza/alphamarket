@@ -60,6 +60,7 @@ from alphamarket.public import (
 from alphamarket.reconcile import reconcilable, reconcile_account
 from alphamarket.stats import drawdown_series
 from alphamarket.strategies import ListingIn, update_listing
+from alphamarket.venue_limits import get_web_limiter
 from alphamarket.venues import (
     ConnectIn,
     _owned_account,
@@ -452,7 +453,9 @@ def account_action_form(
             claim_account(db, user, account.id)
         elif action == "disconnect":
             mfa.ensure_step_up(request, db, user)
-            credentials.disconnect(db, account, actor_user_id=user.id)
+            credentials.disconnect(
+                db, account, actor_user_id=user.id, limiter=get_web_limiter(request.app)
+            )
         else:
             raise HTTPException(status_code=404)
     except HTTPException as exc:
