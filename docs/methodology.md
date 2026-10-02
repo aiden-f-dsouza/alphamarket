@@ -898,3 +898,106 @@ cost of copying late. A signal whose lag already exceeds the venue's limit
 not copied (it is still shown). If no quote can be had (the data budget is
 spent or the source is down), the signal is stored without one and paper
 followers use the creator's price with a stated penalty instead.
+
+<!-- wave2:p6-engine -->
+## Paper copying v2: sizing, fill price, fees
+
+Paper allocations of crypto and equity strategies (Kraken, Hyperliquid,
+Coinbase, Binance.US, Alpaca, IBKR, SnapTrade) follow the creator's verified
+fills with virtual capital. Nothing is placed anywhere, and a live mode does
+not exist: asking for one is refused in code. Prediction markets keep the
+rules in "Paper tailing" above. Every number below is reproduced by a
+hand-computed test (`tests/test_paper_engine.py`).
+
+**Which signals are copied.** A follower copies only signals filled after the
+allocation started. A signal Koine observed more than 6 hours after the fill
+(3 days on venues that only publish daily reports: IBKR, SnapTrade) is
+skipped as stale, because a follower could not have traded near that price.
+Instruments not quoted in USD or a stablecoin (USDC, USDT) are skipped. Every
+skip is recorded with its reason and counted on the follower's portfolio.
+
+**Fill price.** A paper fill happens when Koine observed the creator's fill,
+at the venue's public quote captured at that moment: buys at the ask, sells
+at the bid. When no quote was available, the creator's own price is moved
+against the follower by 0.5% (50 basis points):
+
+```
+buy:   price = creator_price x 1.005
+sell:  price = creator_price x 0.995
+```
+
+The fill records which rule priced it ("ask", "bid" or
+"creator_price_penalty") and the quote's timestamp.
+
+**Sizing.** F is the follower's equity (cash plus holdings at the freshest
+mark, below) and C the creator's equity just before the fill.
+
+```
+spot / equity buy:   q = creator_qty x F / C
+perp open or add:    q = creator_qty x creator_price x F / C / fill_price
+                     (the notional scales, so the follower's leverage
+                      equals the creator's)
+reduce (any kind):   q = follower_position x closed_qty / creator_position_before
+                     (the same fraction; all of it when the creator went
+                      flat or flipped)
+perp flip:           close the follower's whole position, then open the
+                     remainder sized as an open; one fill of the sum
+```
+
+Quantities are floored to the instrument's step. An opening order below the
+venue's minimum quantity or minimum order value is skipped, and so is a
+partial reduction below them; a full exit never is. A spot or equity buy is
+capped at the largest stepped quantity whose cost plus fee fits in the
+follower's cash. Spot and shares are never sold short on paper. If the
+follower's position has drifted from the creator's (a closing fill was
+skipped as stale, say), any part of an order that runs against the
+follower's own perp position closes it and realizes its profit or loss.
+
+**Rounding.** Always against the follower: a buy's cost rounds up to the
+micro-dollar, a sale's proceeds round down, realized perp profit rounds down
+and a realized perp loss rounds up.
+
+**Fees.** By the venue's fee model:
+
+```
+crypto (bps of notional):  fee = qty x price x taker_rate, rounded half up
+                           to the venue's fee precision
+                           (Kraken 0.80% to $0.0001; Hyperliquid 0.05% to $0.000001)
+US equities:               buys: $0 (commission-free)
+                           sells: SEC fee  = notional x SEC rate per $1M, up to the cent
+                                + FINRA TAF = min(shares x TAF rate, TAF cap), up to the cent
+```
+
+The SEC and FINRA rates are listed with the date they were checked; they
+change by regulatory order.
+
+**Worked example (Kraken, 0.80% taker).** A $10,000 creator buys 0.1 BTC; the
+quote has an ask of 60,030. A $1,000 follower buys 0.1 x 1,000 / 10,000 = 0.01
+BTC: cost 600.30, fee 4.8024, cash left 394.8976. The creator then sells 0.04
+of its 0.1 (40%) with the bid at 60,990.5: the follower sells 40% of 0.01 =
+0.004 BTC for 243.962, fee 1.9517, cash 636.9079, 0.006 BTC left. A $100
+follower of a $1,000,000 creator buying 0.1 BTC would buy 0.00001 BTC, under
+Kraken's 0.0001 BTC minimum, so that signal is skipped.
+
+**Worked example (Hyperliquid perp, 0.05%).** A $10,000 creator buys 1 BTC
+(60,000 notional, 6x). A $1,000 follower mirrors 6,000 of notional at the ask
+60,010: 0.09998 BTC (5 decimals), fee 2.9999, cash 997.0001 (perp margin stays
+in cash). The creator then sells 3 at 61,000 (long 1 to short 2) with the bid
+at 60,990: the follower closes its 0.09998 (realized 0.09998 x 980 = 97.9804)
+and opens 2 x 61,000 x 997.0001 / 10,000 / 60,990 = 0.19943 short, one sale of
+0.29941 (notional 18,261.0159, fee 9.130508), cash 1,085.849992, short 0.19943
+at an entry of 60,990.
+
+**Worked example (US equity sell).** Selling 20 shares at $80 (notional
+$1,600) with the SEC rate at $0.00 per million and FINRA TAF at $0.000166 per
+share: SEC fee $0.00, TAF 20 x 0.000166 = $0.00332, rounded up to $0.01.
+
+**Valuing the follower.** Each holding is valued at the freshest mark: the
+mid (or, without both sides, the last trade) of a public quote no
+older than 15 minutes, else the last daily close,
+else (never priced yet) its cost, so an unpriced holding never shows as a
+loss. A perp position is worth quantity x (mark - entry), with the entry
+averaged over the follower's own fills; while unpriced it adds nothing. The
+drawdown stop reads this equity exactly as for prediction markets. The
+portfolio shows the median copy lag (observed time minus fill time) of the
+signals the follower copied, and how many were skipped and why.
