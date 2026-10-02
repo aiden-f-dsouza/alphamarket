@@ -1175,3 +1175,34 @@ def _enforce_append_only_w2(session: Session, flush_context, instances) -> None:
     for obj in session.deleted:
         if isinstance(obj, APPEND_ONLY_MODELS_W2):
             raise AppendOnlyViolation(f"{type(obj).__name__} rows are append-only; cannot delete")
+
+
+# ---- wave2:market-data ----
+# Migration 0014.
+
+
+class MarketDataCoverage(Base):
+    """What the prices_daily job has already asked a data source for, so a
+    rerun makes no request. Not a fact about prices (those are prices_daily /
+    corporate_actions rows): deleting a row only costs one repeat request.
+
+    kind "closes": source = the instrument's venue, scope = its symbol,
+    covered_from..covered_through = the day range already fetched.
+    kind "corporate_actions": scope = the equity symbol, fetched_on = the last
+    UTC day it was fetched.
+    kind "unpriced": scope = an asset no source prices, fetched_on = the last
+    UTC day that was checked."""
+
+    __tablename__ = "market_data_coverage"
+    __table_args__ = (
+        UniqueConstraint("source", "kind", "scope", name="uq_market_data_coverage_identity"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(40))
+    kind: Mapped[str] = mapped_column(String(30))
+    scope: Mapped[str] = mapped_column(String(160))
+    covered_from: Mapped[date | None] = mapped_column(Date, default=None)
+    covered_through: Mapped[date | None] = mapped_column(Date, default=None)
+    fetched_on: Mapped[date] = mapped_column(Date)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
