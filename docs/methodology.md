@@ -697,10 +697,12 @@ digit, which is what lets very small prices be valued exactly elsewhere.
 **Which days are fetched.** For each priced instrument, only the days that are
 missing: from the day before the earliest account anchor or paper allocation
 start that holds the asset (the creator's equity at a fill uses the previous
-complete close, so a fill on the anchor day needs it) up to yesterday UTC. Days
-the source never publishes (weekends and holidays for stocks) are asked for once
-and remembered, so the same range is never requested twice. A close that is
-already stored is never rewritten.
+complete close, so a fill on the anchor day needs it) up to yesterday UTC. A
+day of the last four that the source has not published yet is asked for again
+by the next night's request, so a close published late is still stored; an
+older day without a close (weekends and holidays for stocks) is taken as one
+the source never publishes and is not asked for again. A close that is already
+stored is never rewritten.
 
 **Perpetual contract margin tiers.** For Hyperliquid perpetuals Koine stores
 the contract's maintenance-margin tiers, refreshed once per UTC day: a list of

@@ -206,3 +206,17 @@ def test_curated_ids_are_unique_and_stablecoin_free():
     assert len(set(COINGECKO_COIN_IDS.values())) == len(COINGECKO_COIN_IDS)
     assert not {"USD", "USDC", "USDT"} & set(COINGECKO_COIN_IDS)
     assert json.dumps(sorted(COINGECKO_COIN_IDS))  # codes are plain strings
+
+
+@respx.mock
+def test_history_older_than_the_plan_allows_is_not_requested():
+    route = respx.get(f"{BASE}/coins/bitcoin/market_chart/range").mock(
+        return_value=httpx.Response(200, text=_body("market_chart_range_bitcoin_hourly.json"))
+    )
+    # Wholly before the window (NOW 2026-09-24 - 363 days = 2025-09-26): no request.
+    assert _source().fetch_daily_closes("bitcoin", date(2024, 1, 1), date(2025, 9, 25)) == []
+    assert route.call_count == 0
+    # Straddling it: the request starts at the first day inside the window.
+    _source().fetch_daily_closes("bitcoin", date(2024, 1, 1), date(2026, 9, 22))
+    sent = route.calls[0].request.url.params
+    assert int(sent["from"]) == _ts("2025-09-27T00:00:00+00:00") - 2 * 3600

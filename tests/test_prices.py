@@ -28,6 +28,7 @@ from alphamarket.jobs import Defer
 from alphamarket.models import (
     Allocation,
     AnchorBalance,
+    AssetFill,
     AssetQuote,
     CorporateActionRow,
     FundingRateRow,
@@ -1078,3 +1079,98 @@ def test_run_daily_on_postgres_matches_the_migrated_schema(pg_url):
                 outer.rollback()
     finally:
         engine.dispose()
+
+
+# ---- review fixes: perps opened after the anchor, late closes, one source per pass ----------
+
+
+@respx.mock
+def test_perp_opened_after_the_anchor_is_priced(session_factory):
+    """A perp position opened after the anchor is not a ledger leg (it lives in
+    perp_fills), yet its "BTC-PERP" closes are what values it."""
+    mock_hyperliquid()
+    with session_factory() as db:
+        account = make_account(db, "hyperliquid", {"USDC": (1_000_000_000, 8)})
+        perp = make_instrument(db, "hyperliquid", "BTC", "BTC-PERP", InstrumentType.PERP, "USDC")
+        db.add(
+            AssetFill(
+                venue_account_id=account.id,
+                instrument_id=perp.id,
+                venue_fill_id="f1",
+                action="buy",
+                qty_atoms=1_000,
+                qty_decimals=5,
+                price="60500",
+                filled_at=ANCHOR + timedelta(hours=1),
+            )
+        )
+        db.commit()
+        prices.run_daily(ctx(db, "hyperliquid"))
+        assert closes_of(db, "hyperliquid", "BTC") == {
+            D20: ("60000", 60_000_000_000),
+            D21: ("61000", 61_000_000_000),
+        }
+
+
+@respx.mock
+def test_a_recent_close_the_source_has_not_published_is_asked_for_the_next_night(
+    session_factory, alpaca_keys
+):
+    bars = mock_alpaca()  # 09-21 and 09-22 only: 09-23's bar is late
+    with session_factory() as db:
+        make_account(db, "ibkr", {"USD": (5_000_000_000, 6), "AAPL": (10_000_000_000, 9)})
+        db.commit()
+        prices.run_daily(ctx(db, "alpaca"))
+        row = db.scalar(select(MarketDataCoverage).where(MarketDataCoverage.kind == "closes"))
+        assert (row.covered_from, row.covered_through) == (D20, D22)  # 09-23 still missing
+
+        prices.run_daily(ctx(db, "alpaca"))  # same day: nothing asked again
+        assert bars.call_count == 1
+
+        bars.mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "bars": {"AAPL": [alpaca_bar(D23, 181), alpaca_bar(date(2026, 9, 24), 182)]},
+                    "next_page_token": None,
+                },
+            )
+        )
+        prices.run_daily(ctx(db, "alpaca", now=NOW + timedelta(days=1)))
+        assert bars.call_count == 2  # one request covers the late day and the new one
+        assert bars.calls.last.request.url.params["start"] == "2026-09-23"
+        aapl = closes_of(db, "alpaca", "AAPL")
+        assert aapl[D23] == ("181", 181_000_000)
+        assert aapl[date(2026, 9, 24)] == ("182", 182_000_000)
+
+
+def test_fetch_window_skips_a_tail_already_asked_today():
+    y = D23
+    assert prices._fetch_window(None, D20, y) == (D20, y)
+    assert prices._fetch_window((D20, D21), D20, y) == (D22, y)
+    assert prices._fetch_window((D20, D21), D20, y, fetched_today=True) is None
+    # A new, older first day is still fetched the same day (the head only).
+    assert prices._fetch_window((D21, D21), D20, y, fetched_today=True) == (D20, D20)
+    assert prices._fetch_window((D20, y), D20, y) is None
+    assert prices._fetch_window(None, NOW.date(), y) is None  # first day after yesterday
+
+
+@respx.mock
+def test_refresh_asset_marks_builds_one_source_per_venue(session_factory):
+    def ticker(request: httpx.Request) -> httpx.Response:
+        pair = request.url.params["pair"]
+        book = {"a": ["11", "1", "1"], "b": ["10", "1", "1"], "c": ["10.5", "1"]}
+        return httpx.Response(200, json={"error": [], "result": {pair: book}})
+
+    respx.get(f"{KRAKEN}/Ticker").mock(side_effect=ticker)
+    limiter = StubLimiter()
+    with session_factory() as db:
+        kr_account = make_account(db, "kraken", {"USD": (10**9, 6)})
+        started = datetime(2026, 9, 24, tzinfo=UTC)
+        for symbol, base in (("XETHZUSD", "ETH"), ("XXBTZUSD", "BTC")):
+            inst = make_instrument(db, "kraken", symbol, base)
+            allocation = make_allocation(db, kr_account, started, {base: 10_000})
+            add_fill(db, allocation, inst, started)
+        db.commit()
+        assert prices.refresh_asset_marks(db, limiter) == 2
+        assert limiter.throttled == ["kraken"]  # one throttled source for both instruments

@@ -56,8 +56,10 @@ Every item marked [VERIFY] must be checked first. Connector:
   fallback close can differ from the venue the trader used. Every such row is
   stored with `source = coingecko`, and `valuation_db.price_inputs` always
   prefers the pricing venue's own close when both exist.
-- The demo plan's history is limited (about one year) [VERIFY]; an account
-  anchored longer ago has no fallback closes before that.
+- The demo plan's history is limited (about one year) [VERIFY]; the connector
+  never asks for days older than `HISTORY_DAYS` (365, with a two-day margin),
+  so an account anchored longer ago has no fallback closes before that instead
+  of a request that fails every night.
 - Unknown assets are never guessed: an asset not in the curated map stays
   unpriced and is displayed without a value.
 - Coin ids can change when a coin migrates. Re-check the map against `/coins/list`

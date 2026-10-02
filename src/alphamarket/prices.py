@@ -104,6 +104,11 @@ CORPORATE_ACTION_REFETCH_DAYS = 14
 CORPORATE_ACTION_WINDOW_DAYS = 90
 CORPORATE_ACTION_SYMBOLS_PER_CALL = 50
 MIN_DEFER_SECONDS = 5.0
+# A day this recent that the source has not returned yet stays "missing" and is
+# asked for again by the next night's tail request (the same one request that
+# fetches the new day, so it costs nothing extra). Older gaps are taken as days
+# the source never publishes (weekends, holidays, before listing).
+LATE_CLOSE_GRACE_DAYS = 4
 FUNDING_LOOKBACK = timedelta(days=1)  # first funding fetch when no fill is known
 
 
@@ -271,7 +276,9 @@ def _demand(db: Session, venue: str) -> _Demand:
         if inputs is None:
             continue
         first = aware(inputs.anchor_at).astimezone(UTC).date() - timedelta(days=1)
-        for asset in inputs.assets:
+        # A perp opened after the anchor is in perp_fills only (its position is
+        # not a ledger leg), and its "X-PERP" closes value it all the same.
+        for asset in inputs.assets | {fill.asset for fill in inputs.perp_fills}:
             demand.want(asset, first)
 
     rows = db.execute(
@@ -334,6 +341,13 @@ def _closes_coverage(db: Session, inst: Instrument) -> tuple[date, date] | None:
     if not spans:
         return None
     return min(s[0] for s in spans), max(s[1] for s in spans)
+
+
+def _closes_fetched_on(db: Session, inst: Instrument, today: date) -> bool:
+    """True when the closes of `inst` were already asked for today (a rerun
+    then does not re-ask the recent days the source has not published)."""
+    row = _coverage_row(db, inst.venue, KIND_CLOSES, inst.symbol)
+    return row is not None and row.fetched_on >= today
 
 
 def _record_closes_coverage(
@@ -454,18 +468,22 @@ def _unpriced(db: Session, venue: str, asset: str, today: date, now: datetime) -
 
 
 def _fetch_window(
-    coverage: tuple[date, date] | None, first_day: date, yesterday: date
+    coverage: tuple[date, date] | None,
+    first_day: date,
+    yesterday: date,
+    fetched_today: bool = False,
 ) -> tuple[date, date] | None:
     """The one day range to ask for: what is missing before the covered range
-    (an older first_day) and after it (days up to yesterday). Both missing, or
-    nothing covered yet: the whole span. None when nothing is missing."""
+    (an older first_day) and after it (days up to yesterday; not again on a
+    day the tail was already asked for). Both missing, or nothing covered yet:
+    the whole span. None when nothing is missing."""
     if first_day > yesterday:
         return None
     if coverage is None:
         return first_day, yesterday
     cov_from, cov_through = coverage
     head = first_day < cov_from
-    tail = cov_through < yesterday
+    tail = cov_through < yesterday and not fetched_today
     if head and tail:
         return first_day, yesterday
     if head:
@@ -485,7 +503,9 @@ def _fill_closes(
 ) -> int:
     """Insert the closes of `inst` that are missing. Returns rows added."""
     yesterday = today - timedelta(days=1)
-    window = _fetch_window(_closes_coverage(db, inst), first_day, yesterday)
+    window = _fetch_window(
+        _closes_coverage(db, inst), first_day, yesterday, _closes_fetched_on(db, inst, today)
+    )
     if window is None:
         return 0
     low, high = window
@@ -499,8 +519,12 @@ def _fill_closes(
         )
     )
     added = 0
+    returned: list[date] = []
     for close in sorted(closes, key=lambda c: c.day):
-        if not low <= close.day <= high or close.day in have:
+        if not low <= close.day <= high:
+            continue
+        returned.append(close.day)
+        if close.day in have:
             continue
         try:
             usd = usd_micros_per_unit(close.close, inst.quote_asset)
@@ -522,7 +546,12 @@ def _fill_closes(
         )
         have.add(close.day)
         added += 1
-    _record_closes_coverage(db, inst, low, high, today, now)
+    # Covered through the newest day returned, or through the grace horizon:
+    # a recent day the source has not published yet is asked for again by the
+    # next night's request instead of being skipped for good.
+    settled = yesterday - timedelta(days=LATE_CLOSE_GRACE_DAYS)
+    through = high if high <= settled else max([low - timedelta(days=1), settled, *returned])
+    _record_closes_coverage(db, inst, low, through, today, now)
     return added
 
 
@@ -733,15 +762,22 @@ def _capture(db: Session, source_venue: str, source, symbol: str, instrument: In
     return row
 
 
-def _quote_source(venue: str, instrument: Instrument, venue_env: str, limiter):
+def _quote_source(
+    venue: str, instrument: Instrument, venue_env: str, limiter, cache: dict | None = None
+):
     """(source venue, source, symbol) that quotes `instrument` held on `venue`:
-    the profile's pricing_venue when it has one (IBKR/SnapTrade -> alpaca)."""
+    the profile's pricing_venue when it has one (IBKR/SnapTrade -> alpaca).
+    `cache` reuses one source (and its HTTP client) per (venue, env) in a pass."""
     profile = get_profile(venue)
     source_venue = profile.pricing_venue or venue
     env = venue_env if source_venue == venue else _market_env(source_venue)
-    source = build_market_data(source_venue, env)
-    if limiter is not None:
-        source.set_throttle(limiter.throttle(source_venue, None))
+    source = cache.get((source_venue, env)) if cache is not None else None
+    if source is None:
+        source = build_market_data(source_venue, env)
+        if limiter is not None:
+            source.set_throttle(limiter.throttle(source_venue, None))
+        if cache is not None:
+            cache[(source_venue, env)] = source
     symbol = instrument.symbol if source_venue == instrument.venue else instrument.base_asset
     return source_venue, source, symbol
 
@@ -892,10 +928,11 @@ def refresh_asset_marks(db: Session, limiter) -> int:
     now = utcnow()
     written = 0
     blocked: set[str] = set()
+    cache: dict = {}
     for inst in open_instruments:
         try:
             source_venue, source, symbol = _quote_source(
-                inst.venue, inst, _market_env(inst.venue), limiter
+                inst.venue, inst, _market_env(inst.venue), limiter, cache
             )
         except ValueError:
             logger.warning("asset marks: venue %r of %s is not registered", inst.venue, inst.symbol)

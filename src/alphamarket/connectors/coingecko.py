@@ -58,6 +58,11 @@ QTY_DECIMALS = 8  # synthetic instruments are never traded; a valid placeholder
 ENDPOINT_RANGE = "MarketChartRange"
 MIDNIGHT_TOLERANCE = timedelta(minutes=30)
 DEFAULT_RETRY_AFTER = 60.0
+# The demo plan serves about the past 365 days of history and answers an
+# older range with an error [VERIFY the exact limit and error]. Closes are
+# requested only inside it, so an old anchor costs its oldest days (they stay
+# unpriced) rather than failing the whole request every night.
+HISTORY_DAYS = 365
 # Query this far either side of the wanted midnights so the nearest sample
 # is inside the response whichever granularity CoinGecko picks.
 _PAD = timedelta(hours=2)
@@ -156,10 +161,14 @@ class CoinGeckoMarketData(AssetMarketData):
     def fetch_daily_closes(self, symbol: str, start: date, end: date) -> list[DailyClose]:
         """UTC daily closes for [start, end] of coin id `symbol`, oldest first.
         The close of day d is the price at 00:00 UTC of d+1; a close whose
-        midnight is still in the future is not a close and is dropped."""
+        midnight is still in the future is not a close and is dropped. Days
+        older than HISTORY_DAYS are not requested (no closes for them)."""
+        now = self.clock()
+        # One day of margin inside the limit: the request starts 2 h before
+        # the first wanted midnight.
+        start = max(start, now.astimezone(UTC).date() - timedelta(days=HISTORY_DAYS - 2))
         if end < start:
             return []
-        now = self.clock()
         first = _midnight(start + timedelta(days=1))
         last = _midnight(end + timedelta(days=1))
         body = self._get(

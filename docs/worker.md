@@ -232,8 +232,10 @@ counting an attempt and the rerun asks only for what is still missing. Rerun
 cost is zero when nothing is missing: what has been asked of a source is kept
 in `market_data_coverage` (closes by instrument, corporate actions by symbol
 and day, assets no source prices), so a second run the same day makes no HTTP
-request, and weekends are not asked for again. An asset no source prices is
-re-checked once per UTC day.
+request. The last `LATE_CLOSE_GRACE_DAYS` (4) days without a close are re-asked
+by the next night's tail request (the same single request, so a late bar is not
+lost); older gaps such as weekends are not asked for again. An asset no source
+prices is re-checked once per UTC day.
 
 **Other failures.** An asset whose source call fails (not a budget stop) is
 logged and skipped so the others still get their prices; after everything else
