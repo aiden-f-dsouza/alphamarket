@@ -354,7 +354,10 @@ def size_asset_order(
     floored to instrument.qty_step_atoms, skipped below min_qty_atoms or
     min_notional, and (spot/equity buys) capped by cash including the fee.
     A partial close below the minimums is skipped too; a full close never is.
-    Spot is never sold short: a spot sell only closes."""
+    Spot is never sold short: a spot sell only closes. close_atoms is the
+    part of the order that runs against the follower's OWN position (which
+    can differ from the creator's after a skip), so realized P&L is booked
+    whenever a follower position shrinks."""
     perp = instrument.type == InstrumentType.PERP
     dec, step = instrument.qty_decimals, instrument.qty_step_atoms or 1
     action = Action(signal.action)
@@ -413,6 +416,12 @@ def size_asset_order(
     total = close + opening
     if total <= 0:
         return Sized(0, 0, reasons[0] if reasons else NO_POSITION)
+    order_sign = 1 if action is Action.BUY else -1
+    if position_atoms != 0 and _sign(position_atoms) != order_sign:
+        # The follower's book can differ from the creator's (a stale close
+        # was skipped, a liquidation): whatever part of this order runs
+        # against the follower's own position closes it and realizes P&L.
+        close = min(total, abs(position_atoms))
     return Sized(total, close, "ok")
 
 

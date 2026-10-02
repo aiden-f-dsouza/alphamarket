@@ -692,7 +692,10 @@ Quantities are floored to the instrument's step. An opening order below the
 venue's minimum quantity or minimum order value is skipped, and so is a
 partial reduction below them; a full exit never is. A spot or equity buy is
 capped at the largest stepped quantity whose cost plus fee fits in the
-follower's cash. Spot and shares are never sold short on paper.
+follower's cash. Spot and shares are never sold short on paper. If the
+follower's position has drifted from the creator's (a closing fill was
+skipped as stale, say), any part of an order that runs against the
+follower's own perp position closes it and realizes its profit or loss.
 
 **Rounding.** Always against the follower: a buy's cost rounds up to the
 micro-dollar, a sale's proceeds round down, realized perp profit rounds down

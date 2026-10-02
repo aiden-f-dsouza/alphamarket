@@ -498,6 +498,94 @@ def test_perp_partial_reduce_realizes_a_loss_rounded_against_the_follower(db, hy
     assert b.perps["BTC-PERP"].qty.atoms == 4_999 and b.perps["BTC-PERP"].entry == 60_010
 
 
+def test_perp_order_against_a_diverged_follower_position_realizes_pnl(db, hyperliquid):
+    # The follower opened long 0.09998 @ 60,010 (cash 997.0001); the creator's
+    # close was observed too late and skipped, so the follower is still long
+    # while the creator is flat. The creator then opens SHORT 0.5 at 61,000
+    # (before 0), bid 60,990. F = 997.0001 (the perp is unpriced):
+    #   q = 0.5 x 61,000 x 997.0001 / 10,000 / 60,990 = 0.0498581... -> 0.04985
+    # That sell runs against the follower's long, so it CLOSES 0.04985:
+    #   realized = 0.04985 x (60,990 - 60,010) = 48.853
+    #   fee = 0.04985 x 60,990 x 5 bps = 1.52017575 -> 1.520176
+    #   cash = 997.0001 + 48.853 - 1.520176 = 1,044.332924; long 0.05013 left
+    alloc = hyperliquid.allocation("1000")
+    hyperliquid.signal(hyperliquid.perp, "buy", "1", "60000", before="0", after="1", ask="60010")
+    stale = hyperliquid.signal(
+        hyperliquid.perp, "sell", "1", "61000", before="1", after="0", bid="60990",
+        filled_at=T0 + timedelta(hours=1), lag=timedelta(hours=6, seconds=1),
+    )  # fmt: skip
+    s3 = hyperliquid.signal(
+        hyperliquid.perp, "sell", "0.5", "61000", before="0", after="-0.5", bid="60990",
+        filled_at=T0 + timedelta(hours=2),
+    )  # fmt: skip
+    assert process_allocation(db, alloc) == (2, 0)
+    assert skips_of(db, alloc) == {stale.id: "stale_signal"}
+    assert legs_of(db, alloc, f"sig:{s3.id}") == {
+        "fill_base:BTC-PERP": -4_985,
+        "realized_pnl:USD": 48_853_000,
+        "fee:USD": -1_520_176,
+    }
+    b = book(db, alloc)
+    assert b.cash_micros == to_micros("1044.332924")
+    assert b.perps["BTC-PERP"].qty.atoms == 5_013 and b.perps["BTC-PERP"].entry == 60_010
+
+
+def test_spot_partial_sell_below_minimum_is_skipped_but_a_full_exit_is_not(db, kraken):
+    # $15 follower of a $10,000 creator buying 0.1 BTC at the ask 60,030:
+    #   q = 0.1 x 15 / 10,000 = 0.00015 BTC (15,000 atoms >= ordermin 10,000)
+    #   cost 9.0045; fee 0.8% = 0.072036 -> 0.0720; cash 15 - 9.0765 = 5.9235
+    alloc = kraken.allocation("15")
+    kraken.signal(kraken.btc, "buy", "0.1", "60000", before="0", after="0.1", ask="60030")
+    # Creator sells 40%: the follower would sell 6,000 atoms < 10,000 -> skipped.
+    partial = kraken.signal(
+        kraken.btc, "sell", "0.04", "61000", before="0.1", after="0.06", bid="60990.5",
+        filled_at=T0 + timedelta(hours=1),
+    )  # fmt: skip
+    # Creator sells the rest (flat): the follower exits all 0.00015 at 60,990.5:
+    #   proceeds 9.148575; fee 0.8% = 0.0731886 -> 0.0732
+    #   cash = 5.9235 + 9.148575 - 0.0732 = 14.998875
+    full = kraken.signal(
+        kraken.btc, "sell", "0.06", "61000", before="0.06", after="0", bid="60990.5",
+        filled_at=T0 + timedelta(hours=2),
+    )  # fmt: skip
+    assert process_allocation(db, alloc) == (2, 0)
+    assert skips_of(db, alloc) == {partial.id: "below_minimum_size"}
+    sell = fills_of(db, alloc)[1]
+    assert (sell.signal_id, sell.qty_atoms, sell.notional_micros, sell.fee_micros) == (
+        full.id,
+        15_000,
+        9_148_575,
+        73_200,
+    )
+    b = book(db, alloc)
+    assert b.cash_micros == to_micros("14.998875")
+    assert "BTC" not in b.holdings
+
+
+def test_perp_skip_reasons(db, hyperliquid):
+    alloc = hyperliquid.allocation("1000")
+    # A perp signal without the creator's position: open vs close is unknown.
+    unknown = hyperliquid.signal(
+        hyperliquid.perp, "buy", "1", "60000", before=None, after="1", ask="60010"
+    )
+    # A creator reducing a position the follower never had.
+    reduce = hyperliquid.signal(
+        hyperliquid.perp, "sell", "0.5", "60000", before="1", after="0.5", bid="59990"
+    )
+    # A $1,000,000 creator opening 0.001 BTC: 0.001 x 60,000 x 1,000 / 1,000,000
+    # = $0.06 of notional -> 0 atoms at 5 dp, under the $10 minimum.
+    tiny = hyperliquid.signal(
+        hyperliquid.perp, "buy", "0.001", "60000", before="1", after="1.001",
+        equity="1000000", ask="60010",
+    )  # fmt: skip
+    assert process_allocation(db, alloc) == (0, 0)
+    assert skips_of(db, alloc) == {
+        unknown.id: "creator_position_unknown",
+        reduce.id: "no_position",
+        tiny.id: "below_minimum_size",
+    }
+
+
 # ---- exit tests: stale signals, live executor, drawdown on a pure buy ----------------------------
 
 
