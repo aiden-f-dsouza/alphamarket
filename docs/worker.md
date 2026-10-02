@@ -44,6 +44,7 @@ Postgres is the only queue (decision E3: no Redis). Enqueueing is idempotent
 | `oauth_refresh` | account | Refresh an OAuth access token (`oauth_jobs.run`) | worker.py (wave 2) |
 | `key_rotate` | global | Re-encrypt credentials under a new data key | P3 |
 | `scope_recheck` | account | Re-prove a credential is read-only | P3 |
+| `aggregator_delete_user` | account (released) | Retry a failed SnapTrade `deleteUser` for an account that is already disconnected or suspended (below) | worker.py (wave 2) |
 
 Another module adds a handler with
 `jobs.register_handler(JobKind.X, fn)` (or as a decorator). `fn(ctx)` gets a
@@ -58,7 +59,7 @@ Lower runs first; within a priority, the older `run_after` first.
 
 | Priority | Jobs |
 |---|---|
-| 5 | `oauth_refresh` (an expired token would fail every sync of that account) |
+| 5 | `oauth_refresh` (an expired token would fail every sync of that account); `aggregator_delete_user` (one request, and until it lands a brokerage link, a trade-capable one after a scope suspension, stays live at SnapTrade) |
 | 10 | `sync` for creators with followers or active paper allocations; `signals`, `mirror` (copy lag) |
 | 20 | every other `sync` |
 | 30 | `reconcile`, `stats`, `prices`, `prices_daily`, `housekeeping`, `scope_recheck`, `key_rotate` |
@@ -102,7 +103,9 @@ the same second. `next_sync_at` lives in `account_schedules`.
   reaped by the next claim round as one failed attempt. Every state change is
   conditional on the worker still holding the lease, so a slow worker that
   lost its job cannot overwrite the new owner's progress.
-- A job for a disconnected account is completed without running.
+- A job for a disconnected, suspended or pending account is completed without
+  running, except the kinds in `jobs.RUNS_ON_INACTIVE_ACCOUNT`
+  (`aggregator_delete_user`: the account is inactive because the work exists).
 
 **Deferrals are not failures.** `BudgetExhausted`, `RateLimited` (and an
 httpx 429/418 from connectors written before contract v2), an open circuit,
@@ -158,6 +161,16 @@ deferred to the reopen time (spread by a few seconds per job) instead of
 running or failing, so a venue outage never dead-letters every account. After
 2 minutes the next job tries (half-open): one more failure reopens it, one
 success closes it and resets the count.
+
+**Web requests spend the same buckets, but never wait for them.** The SnapTrade
+connect pages (account picker, portal link, `registerUser` on start) and the
+`deleteUser` of a disconnect call `venue_limits.call_venue`: the same buckets
+(`EGRESS_IP`, shared with the workers through Postgres), the same 429
+penalty and the same circuit breaker. A bucket that needs at most 2 s to
+refill (`WEB_MAX_WAIT_SECONDS`) is slept on; a longer wait, an open circuit or
+a 429 raises `VenueBusy` and nothing is sent. Pages answer 503 with
+`Retry-After` and "SnapTrade is busy, try again in a minute"; a disconnect
+does not fail but hands its `deleteUser` to the job below.
 
 Backends: `PostgresBuckets` (default; `rate_buckets` and `venue_circuits`
 tables, refill+take in one `UPDATE ... RETURNING`, shared by all processes)
@@ -304,6 +317,37 @@ pruned by housekeeping.
   sync fails with the reconnect message instead of a 401. A transient error
   while the current token has not yet expired is logged and the sync goes
   ahead with that token.
+
+**`aggregator_delete_user`** (wave 2, D20). Every SnapTrade connection is its
+own SnapTrade user; disconnecting (user, `scopecheck.suspend` for a link that
+turned writable, `pending.abandon_stale`) deletes it, or Koine keeps paying
+for it and SnapTrade keeps the brokerage link. `credentials.delete_aggregator_user`
+makes one attempt through the outbound limiter; any failure, including "busy",
+queues this job in the same transaction as the disconnect, so the retry cannot
+be lost.
+
+- **Dedupe key** `aggregator_delete_user:<account id>`: one active job per
+  account however many paths ask. **Payload** `{"cause": ...}` only: the
+  handler needs just the SnapTrade user id, which is `venue_accounts.key_id`
+  (an identifier Koine chose, not a secret). The user secret is never in a
+  payload, an error or an audit row.
+- The job keeps the account's id, so the runner still applies SnapTrade's
+  circuit breaker and 429 backoff and serialises it per account;
+  `RUNS_ON_INACTIVE_ACCOUNT` stops the runner completing it unrun for the
+  inactive account. The handler refuses to act on an account that is not
+  `disconnected` or `suspended`.
+- **Done** when SnapTrade accepts the delete, or answers 404/410 for the user
+  (already deleted: idempotent; `[VERIFY]` the exact status against a live
+  account). **Transient** (429, 5xx, timeouts): backs off, an outage opens the
+  circuit and defers without spending attempts. **Permanent** (other 4xx, e.g.
+  a wrong consumer key): retries and dead-letters with the rest.
+- `max_attempts` is 12 (`aggregator_jobs.DELETE_MAX_ATTEMPTS`), about five hours
+  of backoff, because the failure costs money every month. On the dead letter
+  `aggregator_jobs` logs at error and audits `aggregator.user_delete` with
+  outcome `gave_up`; delete the user by hand in SnapTrade's dashboard.
+- Audit: `aggregator.user_delete` on the account, outcome `deleted`,
+  `already_gone`, `retry_queued` or `gave_up` (shown as "Brokerage link
+  removed" on the user's security page).
 
 **`housekeeping`** is queued nightly by `tick_nightly`, with dedupe key
 `housekeeping:<day>` and `once=True`. `housekeeping.run` deletes, committing

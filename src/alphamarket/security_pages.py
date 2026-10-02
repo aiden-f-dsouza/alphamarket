@@ -110,6 +110,7 @@ AUDIT_LABELS = {
     "credential.refresh": "Access token refreshed",
     "scope.check": "Read-only check",
     "account.suspend": "Connection suspended",
+    "aggregator.user_delete": "Brokerage link removed",
     "venue.consent": "Venue terms accepted",
     "account.email_change_request": "Email change requested",
     "account.email_change": "Email changed",

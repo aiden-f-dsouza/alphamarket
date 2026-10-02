@@ -782,6 +782,8 @@ _MARKET_DATA_BUILDERS["coingecko"] = _build_coingecko
 
 from dataclasses import dataclass  # noqa: E402 (shared file: wave2 end block)
 
+from alphamarket.connectors.base import Throttle  # noqa: E402 (shared file: wave2 end block)
+
 
 @dataclass(frozen=True)
 class AggregatorAccount:
@@ -807,7 +809,13 @@ def _require_aggregator(venue: str) -> None:
         raise ValueError(f"{venue} is not an aggregator venue")
 
 
-def aggregator_register_user(venue: str) -> tuple[str, str]:
+# Every wrapper below takes an optional `throttle` (connectors.base.Throttle):
+# the outbound limiter's charge for the call. The worker's connectors get theirs
+# from JobContext; web requests pass one from venue_limits.call_venue, which
+# fails fast instead of waiting (SnapTrade is shared by every connected user).
+
+
+def aggregator_register_user(venue: str, *, throttle: Throttle | None = None) -> tuple[str, str]:
     """Register a fresh aggregator user for one connection: (user_id, user_secret).
     The id is random (no email or Koine user id leaks to the aggregator)."""
     import secrets as _secrets
@@ -819,14 +827,19 @@ def aggregator_register_user(venue: str) -> tuple[str, str]:
     for _ in range(3):
         user_id = f"koine-{_secrets.token_hex(16)}"
         try:
-            return snaptrade.register_user(client_id, consumer_key, user_id)
+            return snaptrade.register_user(client_id, consumer_key, user_id, throttle=throttle)
         except snaptrade.SnapTradeUserExists:
             continue  # astronomically unlikely; draw another id
     raise RuntimeError("could not register an aggregator user")
 
 
 def aggregator_portal_url(
-    venue: str, user_id: str, user_secret: str, *, redirect: str | None = None
+    venue: str,
+    user_id: str,
+    user_secret: str,
+    *,
+    redirect: str | None = None,
+    throttle: Throttle | None = None,
 ) -> str:
     """The aggregator's Connection Portal link, read-only connection type."""
     from alphamarket.connectors import snaptrade
@@ -834,14 +847,17 @@ def aggregator_portal_url(
     _require_aggregator(venue)
     client_id, consumer_key = _snaptrade_keys()
     return snaptrade.generate_connection_portal_url(
-        client_id, consumer_key, user_id, user_secret, custom_redirect=redirect
+        client_id, consumer_key, user_id, user_secret, custom_redirect=redirect, throttle=throttle
     )
 
 
-def aggregator_list_accounts(venue: str, user_id: str, user_secret: str) -> list[AggregatorAccount]:
+def aggregator_list_accounts(
+    venue: str, user_id: str, user_secret: str, *, throttle: Throttle | None = None
+) -> list[AggregatorAccount]:
     """Every brokerage account the aggregator user has linked."""
     _require_aggregator(venue)
     connector = build_connector(venue, get_settings().venue_env(venue), user_id, user_secret)
+    connector.set_throttle(throttle)
     rows = connector.list_accounts()  # type: ignore[attr-defined]
     out = []
     for r in rows:
@@ -858,11 +874,18 @@ def aggregator_list_accounts(venue: str, user_id: str, user_secret: str) -> list
     return out
 
 
-def aggregator_delete_user(venue: str, user_id: str) -> None:
+def aggregator_delete_user(venue: str, user_id: str, *, throttle: Throttle | None = None) -> bool:
     """Delete the aggregator user (stops billing; the aggregator drops its
-    brokerage connections). Raises on failure; callers decide to tolerate."""
+    brokerage connections). True when it was deleted now, False when the
+    aggregator no longer knows it (already deleted: the same end state, so a
+    retry counts it as done). Raises on any other failure; the caller hands
+    that to the retry job (aggregator_jobs.py)."""
     from alphamarket.connectors import snaptrade
 
     _require_aggregator(venue)
     client_id, consumer_key = _snaptrade_keys()
-    snaptrade.delete_user(client_id, consumer_key, user_id)
+    try:
+        snaptrade.delete_user(client_id, consumer_key, user_id, throttle=throttle)
+    except snaptrade.SnapTradeUserNotFound:
+        return False
+    return True

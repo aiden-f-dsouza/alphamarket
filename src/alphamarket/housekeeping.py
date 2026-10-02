@@ -84,7 +84,7 @@ def run(ctx) -> dict[str, int]:
     counts["sessions"] = prune_sessions(db, now, timedelta(days=settings.session_retention_days))
     counts["auth_tokens"] = prune_tokens(db, now, timedelta(days=settings.token_retention_days))
     counts["asset_quotes"] = prune_quotes(db, now, timedelta(days=settings.quote_retention_days))
-    counts["pending_accounts"] = pending.abandon_stale(db, now)
+    counts["pending_accounts"] = pending.abandon_stale(db, now, getattr(ctx, "limiter", None))
     db.commit()
     counts["jobs"] = prune_finished(db, now=now)
     return counts
