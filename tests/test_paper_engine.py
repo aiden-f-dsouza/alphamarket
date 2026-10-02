@@ -619,12 +619,18 @@ def test_live_asset_executor_is_refused():
 
 def test_live_allocation_mirrors_nothing(db, kraken):
     alloc = kraken.allocation("1000")
-    kraken.signal(kraken.btc, "buy", "0.1", "60000", before="0", after="0.1", ask="60030")
+    # A stale signal would otherwise be skipped (a row) before any executor is asked for.
+    kraken.signal(
+        kraken.btc, "buy", "0.1", "60000", before="0", after="0.1", ask="60030",
+        lag=timedelta(days=1),
+    )  # fmt: skip
+    kraken.signal(kraken.btc, "buy", "0.1", "60000", before="0.1", after="0.2", ask="60030")
     alloc.mode = "live"  # cannot be created through the API; refused here anyway
     db.commit()
     with pytest.raises(LiveMirroringUnavailable):
         process_allocation(db, alloc)
-    assert fills_of(db, alloc) == []
+    assert fills_of(db, alloc) == [] and skips_of(db, alloc) == {}
+    assert alloc.last_signal_id == 0
 
 
 def test_snapshot_after_a_pure_buy_does_not_trip_the_drawdown_stop(db, kraken):

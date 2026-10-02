@@ -628,6 +628,9 @@ def mirror_asset_pending(db: Session, allocation: Allocation, now: datetime | No
     ).all()
     if not signals:
         return 0
+    from alphamarket.execution import get_asset_executor
+
+    get_asset_executor(allocation.mode)  # a live allocation raises before writing anything
     profile = _profile_of(db, allocation)
     started = aware(allocation.started_at)
     mirrored = 0
