@@ -7,6 +7,7 @@ activity appears.
 """
 
 from datetime import datetime
+from fractions import Fraction
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -15,10 +16,13 @@ from sqlalchemy.orm import Session
 
 from alphamarket.auth import current_user
 from alphamarket.db import get_db
+from alphamarket.jobs import aware
 from alphamarket.models import Allocation, Follow, Settlement, Signal, Strategy, User
+from alphamarket.money import format_atoms
 from alphamarket.public import is_visible, visible_strategy_or_404
 from alphamarket.ratelimit import rate_limit
 from alphamarket.stats import micros_to_float
+from alphamarket.valuation import parse_price
 
 router = APIRouter(tags=["follows"])
 
@@ -85,7 +89,41 @@ def list_follows(db: Session = Depends(get_db), user: User = Depends(current_use
 # ---- feed ----------------------------------------------------------------------
 
 
+def asset_signal_item(strategy: Strategy, s: Signal) -> dict:
+    """An asset signal (signals v2) in the feed's shape. `count` and `price`
+    are display floats of the exact strings also returned (`qty`,
+    `price_str`); `stake_fraction` = notional / creator equity, None when the
+    notional is not in USD or the creator's equity is unknown."""
+    equity = s.creator_equity_micros
+    notional = s.notional_micros
+    qty = Fraction(s.qty_atoms or 0, 10 ** (s.qty_decimals or 0))
+    lag = (
+        int((aware(s.observed_at) - aware(s.filled_at)).total_seconds())
+        if s.observed_at is not None
+        else None
+    )
+    return {
+        "kind": "fill",
+        "asset": True,
+        "at": aware(s.filled_at).isoformat(),
+        "strategy_slug": strategy.slug,
+        "strategy_name": strategy.name,
+        "ticker": s.ticker,
+        "side": s.side,
+        "action": s.action,
+        "count": float(qty),
+        "qty": format_atoms(s.qty_atoms or 0, s.qty_decimals or 0),
+        "price": float(parse_price(s.price)) if s.price else None,
+        "price_str": s.price,
+        "notional": micros_to_float(notional) if notional is not None else None,
+        "stake_fraction": notional / equity if notional is not None and equity > 0 else None,
+        "copy_lag_seconds": lag,
+    }
+
+
 def signal_item(strategy: Strategy, s: Signal) -> dict:
+    if s.is_asset:
+        return asset_signal_item(strategy, s)
     return {
         "kind": "fill",
         "at": s.filled_at.isoformat(),

@@ -642,3 +642,69 @@ reported account equity.
 **Prices.** Daily closes are Alpaca's unadjusted daily bars (share counts
 are adjusted by the split entries themselves, so prices must not be
 adjusted twice). A bar belongs to its New York trading date.
+
+<!-- wave2:p6-signals -->
+## Signals v2 and copy lag
+
+**What a signal is.** For stocks, coins and perpetual futures, every fill the
+creator made after connecting (strictly after the anchor) becomes one
+signal, in fill order. A fill at or before the anchor never does, and
+deposits, withdrawals, transfers, staking, dividends and funding are never
+signals. A signal is a fact about a trade that already happened, never a
+recommendation, and it is never edited afterwards.
+
+**What it records.**
+
+```
+qty, price          exactly as the venue reported the fill
+notional            qty x price in USD, rounded down to $0.000001;
+                    only when the pair is quoted in USD, USDC or USDT,
+                    otherwise left empty (a BTC-quoted pair has no USD notional)
+position before     the creator's signed holding of the asset just before the fill
+position after      before + qty for a buy, before - qty for a sell
+side                long or short by the sign of the position after the fill
+                    (before it, when the fill closed the position)
+creator equity      cash + holdings x last complete daily close + perp
+                    unrealized P&L, just before the fill (below)
+```
+
+Spot coins and shares take the position from the ledger (every entry before
+the fill); perps take it from the perp position built from the creator's
+perp fills. When one order fills several times at the same instant, the
+fills chain: the second fill's "before" is the first fill's "after", and all
+of them share one equity figure (none of them is "before" the others in
+time). A holding recorded more precisely than the venue reports fill sizes
+is cut to the fill's precision (dust below it is dropped).
+
+**Creator equity at the fill.** The denominator followers are sized
+against:
+
+```
+E(t-) = cash + sum(qty x close of day D-1) + sum(perp qty x (close of D-1 - entry))
+```
+
+where D is the fill's UTC day, holdings include everything strictly before
+the fill, and the closes are those of the last complete UTC day (carried
+back further if a day is missing), so no intraday price is assumed. The day
+whose closes were used is stored with the signal. Assets with no close at
+all are left out, exactly as in the daily equity series. When the result is
+not positive the equity is stored as unknown and followers do not copy the
+signal.
+
+Worked example: anchored with $5,000 and 1 ETH, ETH closed at 3,000 on D-1,
+and the creator buys 0.5 ETH at 3,100 on D. Equity before the fill is
+5,000 + 1 x 3,000 = $8,000 (D's own close is not used); the position goes
+1 -> 1.5 ETH; the notional is 0.5 x 3,100 = $1,550, which is 19.375% of
+equity. Two sells of 0.2 and 0.3 ETH at the same later instant both use
+equity 3,450 + 1.5 x 3,000 = $7,950, and the position goes 1.5 -> 1.3 -> 1.0.
+
+**Copy lag.** Each signal stores when the fill happened and when Koine
+first saw it (`observed_at`, the moment the fill was imported). The copy
+lag is the difference. At that moment Koine takes one public quote per
+instrument (bid, ask, last and its time and source) and stores it on the
+signal: paper followers buy at that ask and sell at that bid, which is the
+cost of copying late. A signal whose lag already exceeds the venue's limit
+(6 hours; 3 days for venues that report once a day) gets no quote and is
+not copied (it is still shown). If no quote can be had (the data budget is
+spent or the source is down), the signal is stored without one and paper
+followers use the creator's price with a stated penalty instead.
