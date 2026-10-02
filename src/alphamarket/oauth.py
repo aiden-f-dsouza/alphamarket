@@ -2,9 +2,10 @@
 (Alpaca first; Webull Connect and Schwab later).
 
 Flow:
-  GET /oauth/{venue}/start     (logged in) makes a random `state` and a PKCE
-      verifier, keeps both in a short-lived itsdangerous-signed cookie bound
-      to the user, and redirects to the venue's authorize URL with the state,
+  GET /oauth/{venue}/start     (logged in) checks the consent hash (wave2,
+      consent.require_consent), makes a random `state` and a PKCE verifier,
+      keeps both and the consent hash in a short-lived itsdangerous-signed
+      cookie bound to the user, and redirects to the venue's authorize URL with the state,
       the S256 code_challenge and the provider's scopes (Alpaca: none).
   GET /oauth/{venue}/callback  checks the state against the cookie, exchanges
       the code (backend call, client secret never leaves the server), refuses
@@ -311,13 +312,20 @@ def _provider_or_404(venue: str) -> OAuthProvider:
 )
 def start(
     venue: str,
+    request: Request,
     strategy_name: str = Query(min_length=2, max_length=120),
+    consent_sha256: str | None = Query(default=None, max_length=64),
+    db: Session = Depends(get_db),
     user: User = Depends(require_connect_ready),
 ) -> RedirectResponse:
+    from alphamarket.consent import require_consent
     from alphamarket.venues import ensure_venue_open  # venues imports this module's users
 
     ensure_venue_open(venue)
     provider = _provider_or_404(venue)
+    # wave2 (D18): the consent screen comes before the venue's page. The hash
+    # rides in the signed state and is re-checked and recorded at callback.
+    screen = require_consent(db, user, venue, consent_sha256, request)
     state = secrets.token_urlsafe(32)
     verifier = new_code_verifier()
     resp = RedirectResponse(
@@ -325,7 +333,9 @@ def start(
     )
     resp.set_cookie(
         cookie_name(venue),
-        dump_state({"s": state, "v": verifier, "u": user.id, "n": strategy_name}),
+        dump_state(
+            {"s": state, "v": verifier, "u": user.id, "n": strategy_name, "c": screen.sha256}
+        ),
         max_age=STATE_MAX_AGE_SECONDS,
         path=f"/oauth/{venue}",
         httponly=True,
@@ -388,8 +398,15 @@ def callback(
         connect_account(
             db,
             user,
-            ConnectIn(venue=venue, key_id=account_id, secret=secret, strategy_name=saved["n"]),
+            ConnectIn(
+                venue=venue,
+                key_id=account_id,
+                secret=secret,
+                strategy_name=saved["n"],
+                consent_sha256=saved.get("c"),
+            ),
             oauth_grant=True,
+            request=request,
         )
     except HTTPException:
         # Refused (e.g. the probe showed write access): nothing was stored,

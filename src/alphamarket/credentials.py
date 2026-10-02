@@ -186,13 +186,43 @@ def revoke(
     return len(creds)
 
 
-def disconnect(db: Session, account: VenueAccount, *, actor_user_id: int | None) -> None:
+def disconnect(
+    db: Session,
+    account: VenueAccount,
+    *,
+    actor_user_id: int | None,
+    reason: str = "user_disconnect",
+) -> None:
     """User disconnect: erase the key, keep the ledger (append-only). An OAuth
-    grant is revoked at the venue first, so it does not outlive the account."""
+    grant is revoked at the venue first, so it does not outlive the account;
+    an aggregator user (SnapTrade, wave2) is deleted at the aggregator.
+    `reason` is "pending_abandoned" when housekeeping drops an unfinished
+    connect (pending.abandon_stale)."""
     _revoke_oauth_grant(db, account)
-    revoke(db, account, actor_user_id=actor_user_id, reason="user_disconnect")
+    _delete_aggregator_user(account)
+    revoke(db, account, actor_user_id=actor_user_id, reason=reason)
     account.status = VenueAccountStatus.DISCONNECTED
     db.commit()
+
+
+def _delete_aggregator_user(account: VenueAccount) -> None:
+    """wave2 (D20): one aggregator user per connection, so disconnecting
+    deletes it (the aggregator drops the brokerage link and stops billing).
+    Needs only the user id (key_id), never the secret. Best effort: the
+    local credential is erased whether or not the aggregator answered."""
+    from alphamarket.connectors.base import CredentialKind
+    from alphamarket.connectors.registry import aggregator_delete_user
+
+    if get_profile(account.venue).credential is not CredentialKind.AGGREGATOR:
+        return
+    if account.status == VenueAccountStatus.DISCONNECTED:
+        return  # already released
+    try:
+        aggregator_delete_user(account.venue, account.key_id)
+    except Exception as exc:  # noqa: BLE001 - erasing the credential must still happen
+        logger.warning(
+            "aggregator user delete failed for account %s: %s", account.id, type(exc).__name__
+        )
 
 
 def _revoke_oauth_grant(db: Session, account: VenueAccount) -> None:

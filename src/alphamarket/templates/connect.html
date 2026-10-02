@@ -1,5 +1,11 @@
 {% extends "base.html" %}
 {% import "_macros.html" as m %}
+{# One branch per CredentialKind (wave2, w2-p8-connect): rsa_pem, key_secret,
+   key_secret_passphrase, report_token (pasted forms posting to
+   /dashboard/connect), oauth2 (GET /oauth/<venue>/start), aggregator (POST
+   /dashboard/connect/<venue>/start, then the account picker) and address
+   (profile-code bio claim or signed-message claim afterwards). Every form
+   carries the consent partial. #}
 {% block title %}Connect {{ profile.display_name }} · Koine{% endblock %}
 {% block nav_active %}dashboard{% endblock %}
 {% block style %}
@@ -11,41 +17,77 @@
   .venues { display:flex; gap:8px; flex-wrap:wrap; }
   .venues a { padding:6px 12px; border:1px solid var(--line2); border-radius:999px; font-size:13px; color:var(--text2); }
   .venues a.on { background:var(--text); border-color:var(--text); color:var(--surface); }
+  .consent { display:flex; flex-direction:column; gap:10px; }
+  .consent-text { max-height:260px; overflow-y:auto; padding:14px 16px; border:1px solid var(--line2); border-radius:6px; background:var(--surface); font-size:13px; line-height:1.55; color:var(--text2); }
+  .consent-text p { margin:0 0 10px; }
+  .consent-text p:last-child { margin-bottom:0; }
+  .consent-text .consent-head { font-weight:600; color:var(--text); }
+  .consent-ack { display:flex; gap:10px; align-items:flex-start; font-size:13px; line-height:1.45; }
+  .consent-ack input { margin-top:2px; }
   @media (max-width:1000px) { .connect { grid-template-columns:1fr; } }
 {% endblock %}
 {% block content %}
+{% set kind = profile.credential|string %}
+{% set pasted = kind in ("rsa_pem", "key_secret", "key_secret_passphrase", "report_token") %}
+{% set signed = (profile.ownership|string) == "signed_message" %}
 <div class="connect">
   <div class="stack" style="gap:20px">
     <span class="label">Connect a venue</span>
     <div class="venues">{% for p in profiles %}<a href="/dashboard/connect?venue={{ p.venue }}" class="{{ 'on' if p.venue == profile.venue else '' }}">{{ p.display_name }}</a>{% endfor %}</div>
     <div class="stack" style="gap:0">
-      {% if profile.needs_secret %}
+      {% if kind == "oauth2" %}
+      <div class="step on"><i>1</i>Read and accept the terms</div>
+      <div class="step on"><i>2</i>Approve read-only access on {{ profile.display_name }}</div>
+      <div class="step off"><i>3</i>Scope check</div>
+      <div class="step off"><i>4</i>Import and verify</div>
+      {% elif kind == "aggregator" %}
+      <div class="step on"><i>1</i>Read and accept the terms</div>
+      <div class="step off"><i>2</i>Link your broker on {{ profile.display_name }} (read-only)</div>
+      <div class="step off"><i>3</i>Pick the account to verify</div>
+      <div class="step off"><i>4</i>Import and verify</div>
+      {% elif kind == "address" %}
+      <div class="step on"><i>1</i>Paste your {{ profile.key_label|lower }}</div>
+      <div class="step off"><i>2</i>Import your public history</div>
+      {% if signed %}
+      <div class="step off"><i>3</i>Sign a Koine message with your wallet</div>
+      <div class="step off"><i>4</i>Your page can go public</div>
+      {% else %}
+      <div class="step off"><i>3</i>Put the Koine code in your {{ profile.display_name }} bio</div>
+      <div class="step off"><i>4</i>Claim from the dashboard</div>
+      {% endif %}
+      {% elif kind == "report_token" %}
+      <div class="step on"><i>1</i>Create a report token at {{ profile.display_name }}</div>
+      <div class="step on"><i>2</i>Paste it here</div>
+      <div class="step off"><i>3</i>Access check</div>
+      <div class="step off"><i>4</i>Import and verify</div>
+      {% else %}
       <div class="step on"><i>1</i>Create a read-only key at {{ profile.display_name }}</div>
       <div class="step on"><i>2</i>Paste it here</div>
       <div class="step off"><i>3</i>Scope check</div>
       <div class="step off"><i>4</i>Import and verify</div>
-      {% else %}
-      <div class="step on"><i>1</i>Paste your {{ profile.key_label|lower }}</div>
-      <div class="step off"><i>2</i>Import your public history</div>
-      <div class="step off"><i>3</i>Put the Koine code in your {{ profile.display_name }} bio</div>
-      <div class="step off"><i>4</i>Claim from the dashboard</div>
       {% endif %}
     </div>
     <p class="small muted" style="line-height:1.55">{{ profile.key_help }}</p>
   </div>
 
   <div class="stack" style="gap:28px">
-    {% if profile.credential == "oauth2" %}
+    {% if kind == "oauth2" %}
     <div class="stack"><h1 style="font-size:40px">Approve read-only access.</h1>
       <p class="text2" style="font-size:16px">You sign in on {{ profile.display_name }} and approve access there. Koine requests no trading permission; a grant that could place orders is refused.</p></div>
-    {% elif profile.needs_secret %}
+    {% elif kind == "aggregator" %}
+    <div class="stack"><h1 style="font-size:40px">Link your broker, read-only.</h1>
+      <p class="text2" style="font-size:16px">You pick your broker and sign in on {{ profile.display_name }}'s own page. Koine never sees your brokerage password, and the connection is requested read-only: it cannot place trades or move money.</p></div>
+    {% elif kind == "report_token" %}
+    <div class="stack"><h1 style="font-size:40px">Paste a report token.</h1>
+      <p class="text2" style="font-size:16px">A report token can only fetch the statement you configured for it. It cannot place an order or move money. We check it works before we store it.</p></div>
+    {% elif pasted %}
     <div class="stack"><h1 style="font-size:40px">Paste a read-only key.</h1>
       <p class="text2" style="font-size:16px">We check the scope before we store it. A key that can place orders is refused, and you'll be asked to make a read-only one instead.</p></div>
     {% else %}
     <div class="stack"><h1 style="font-size:40px">Paste your wallet address.</h1>
-      <p class="text2" style="font-size:16px">{{ profile.display_name }} history is public, so no key is needed. Because anyone could paste any address, your page stays hidden until you prove the account is yours with a code in your profile bio.</p></div>
+      <p class="text2" style="font-size:16px">{{ profile.display_name }} history is public, so no key is needed. Because anyone could paste any address, your page stays hidden until you prove the account is yours{% if signed %} by signing a Koine message with your wallet{% else %} with a code in your profile bio{% endif %}.</p></div>
     {% endif %}
-    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
     {% if closed_reason %}<div class="notice">{{ closed_reason }}</div>{% endif %}
     {% if gate %}{# p3-auth: TOTP, a verified email and a fresh step-up come before any key #}
     <div class="notice stack" style="gap:12px">
@@ -62,14 +104,27 @@
       {% endif %}
     </div>
     {% endif %}
-    {% if profile.credential == "oauth2" %}
+
+    {% if kind == "oauth2" %}
     <form method="get" action="/oauth/{{ profile.venue }}/start" class="card" autocomplete="off">
       <div class="body" style="padding:28px;gap:22px">
         <label class="field"><span class="label">Strategy name</span><input name="strategy_name" required minlength="2" maxlength="120" placeholder="Shown on your public page"></label>
+        {% include "_consent.html" %}
         <div class="spread" style="align-items:center;padding-top:4px">
           <span class="mono small muted" style="display:inline-flex;align-items:center;gap:8px">{{ m.icon("lock", 14, "var(--muted)") }}Environment: {{ venue_env }}</span>
           <button class="btn" type="submit"{{ " disabled" if gate or closed_reason }}>Continue to {{ profile.display_name }}</button>
         </div>
+      </div>
+    </form>
+    {% elif kind == "aggregator" %}
+    <form method="post" action="/dashboard/connect/{{ profile.venue }}/start" class="card" autocomplete="off">
+      <div class="body" style="padding:28px;gap:22px">
+        {% include "_consent.html" %}
+        <div class="spread" style="align-items:center;padding-top:4px">
+          <span class="mono small muted" style="display:inline-flex;align-items:center;gap:8px">{{ m.icon("lock", 14, "var(--muted)") }}Read-only connection</span>
+          <button class="btn" type="submit"{{ " disabled" if gate or closed_reason }}>Continue to {{ profile.display_name }}</button>
+        </div>
+        <span class="note small muted">Next you open {{ profile.display_name }}'s page, link your broker, and come back here to pick the account and name the strategy. An unfinished connection is dropped after a day.</span>
       </div>
     </form>
     {% else %}
@@ -77,13 +132,26 @@
       <input type="hidden" name="venue" value="{{ profile.venue }}">
       <div class="body" style="padding:28px;gap:22px">
         <label class="field"><span class="label">Strategy name</span><input name="strategy_name" required minlength="2" maxlength="120" placeholder="Shown on your public page"></label>
-        <label class="field"><span class="label">{{ profile.key_label }}</span><input class="mono" name="key_id" required autocomplete="off" placeholder="{{ '0x…' if not profile.needs_secret else 'From ' + profile.display_name + ' → API keys' }}"></label>
-        {% if profile.needs_secret %}
-        <label class="field"><span class="label">{{ profile.secret_label }}</span><textarea class="mono" name="secret" required placeholder="Paste the contents of the .pem file"></textarea><span class="note">Encrypted before it touches the database. Erased when you disconnect.</span></label>
+        {% if kind == "address" %}
+        <label class="field"><span class="label">{{ profile.key_label }}</span><input class="mono" name="key_id" required autocomplete="off" spellcheck="false" placeholder="0x…"></label>
+        {% else %}
+        <label class="field"><span class="label">{{ profile.key_label }}</span><input class="mono" name="key_id" required autocomplete="off" spellcheck="false" placeholder="From {{ profile.display_name }}"></label>
         {% endif %}
+        {% if kind == "rsa_pem" %}
+        <label class="field"><span class="label">{{ profile.secret_label }}</span><textarea class="mono" name="secret" required spellcheck="false" placeholder="Paste the contents of the .pem file"></textarea><span class="note">Encrypted before it touches the database. Erased when you disconnect.</span></label>
+        {% elif kind == "key_secret" %}
+        <label class="field"><span class="label">{{ profile.secret_label }}</span><textarea class="mono" name="secret" required spellcheck="false" rows="3" placeholder="Paste the secret exactly as {{ profile.display_name }} showed it"></textarea><span class="note">Encrypted before it touches the database. Erased when you disconnect.</span></label>
+        {% elif kind == "key_secret_passphrase" %}
+        <label class="field"><span class="label">{{ profile.secret_label }}</span><textarea class="mono" name="secret" required spellcheck="false" rows="3" placeholder="Paste the secret exactly as {{ profile.display_name }} showed it"></textarea></label>
+        <label class="field"><span class="label">Passphrase</span><input class="mono" type="password" name="passphrase" required autocomplete="off" placeholder="The passphrase you set when creating the key"><span class="note">The secret and passphrase are encrypted together. Erased when you disconnect.</span></label>
+        {% elif kind == "report_token" %}
+        <label class="field"><span class="label">{{ profile.secret_label }}</span><input class="mono" type="password" name="secret" required autocomplete="off" placeholder="From {{ profile.display_name }} reporting settings"><span class="note">Encrypted before it touches the database. Erased when you disconnect.</span></label>
+        <label class="field"><span class="label">Account id (optional)</span><input class="mono" name="account_ref" maxlength="120" autocomplete="off" placeholder="Only when the report covers several accounts"></label>
+        {% endif %}
+        {% include "_consent.html" %}
         <div class="spread" style="align-items:center;padding-top:4px">
           <span class="mono small muted" style="display:inline-flex;align-items:center;gap:8px">{{ m.icon("lock", 14, "var(--muted)") }}Environment: {{ "production" if venue_env == "prod" else venue_env }}</span>
-          <button class="btn" type="submit"{{ " disabled" if gate or closed_reason }}>{{ "Check scope and import" if profile.needs_secret else "Import public history" }}</button>
+          <button class="btn" type="submit"{{ " disabled" if gate or closed_reason }}>{{ "Check scope and import" if pasted else "Import public history" }}</button>
         </div>
       </div>
     </form>
@@ -93,14 +161,21 @@
   <div class="stack" style="gap:0;padding-top:4px">
     <span class="label" style="padding-bottom:8px;border-bottom:1px solid var(--line2)">What happens next</span>
     <div class="hairline-list">
-      {% if profile.needs_secret %}
-      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Key scope is read-only</span><span class="small muted">A key with trading permission is rejected before anything is stored.</span></div></div>
-      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Key is encrypted with a server-side vault key</span><span class="small muted">Stored ciphertext only. Never logged, never returned by any page or API.</span></div></div>
-      {% else %}
+      {% if kind == "address" %}
       <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Nothing secret is stored</span><span class="small muted">The address is public on-chain data. Koine holds no key of any kind for this venue.</span></div></div>
+      {% if signed %}
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Ownership claim by signature</span><span class="small muted">You sign a short Koine message with your wallet. Signing is not a transaction and costs nothing. Until the signature checks out, your page is hidden.</span></div></div>
+      {% else %}
       <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Ownership claim</span><span class="small muted">You get a code to paste into your {{ profile.display_name }} bio. Until we see it there, your page is hidden.</span></div></div>
       {% endif %}
-      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>First import from {{ profile.display_name }}</span><span class="small muted">Fills and settlements are pulled as far back as the venue returns them. Your verified window starts now, not earlier.</span></div></div>
+      {% elif kind == "oauth2" or kind == "aggregator" %}
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Access is read-only</span><span class="small muted">A connection that could place orders is refused before anything is stored, and re-checked every night.</span></div></div>
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>No password ever reaches Koine</span><span class="small muted">You sign in on {{ profile.display_name }}'s own page. Koine stores only the encrypted access it grants.</span></div></div>
+      {% else %}
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>{{ "Token access is read-only" if kind == "report_token" else "Key scope is read-only" }}</span><span class="small muted">A credential with trading permission is rejected before anything is stored.</span></div></div>
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Encrypted with a server-side vault key</span><span class="small muted">Stored ciphertext only. Never logged, never returned by any page or API.</span></div></div>
+      {% endif %}
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>First import from {{ profile.display_name }}</span><span class="small muted">History is pulled as far back as the venue returns it. Your verified window starts now, not earlier.</span></div></div>
       {% if profile.balance_observable %}
       <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>First balance reconciliation tonight</span><span class="small muted">The page goes public once the ledger matches your venue balance.</span></div></div>
       {% else %}

@@ -55,3 +55,12 @@ def secure_account(client, email: str) -> str:
     verify_email(client, email)
     secret, _ = enrol_totp(client)
     return secret
+
+
+def consent(venue: str) -> str:
+    """wave2 (invariant 10): the sha256 of the venue's current consent text,
+    which every connect (form, JSON POST /venues, OAuth start, SnapTrade
+    start) must send as `consent_sha256`."""
+    from alphamarket.consent import consent_text
+
+    return consent_text(venue).sha256

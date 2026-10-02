@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{# Ownership claim for address-keyed accounts (wave2, w2-p8-connect).
+   SIGNED_MESSAGE: the exact text from connector.claim_text(stored code);
+   /static/claim.js (data-* hooks, no inline script) asks an injected wallet
+   to personal_sign it and fills the signature field; pasting a signature
+   works without JS. PROFILE_CODE: the bio code and a Claim button. #}
+{% block title %}Claim {{ profile.display_name }} · Koine{% endblock %}
+{% block nav_active %}dashboard{% endblock %}
+{% block style %}
+  .claim { display:grid; grid-template-columns:minmax(0, 620px) minmax(0, 1fr); gap:48px; }
+  .claim-message { white-space:pre-wrap; word-break:break-word; margin:0; padding:14px 16px; border:1px solid var(--line2); border-radius:6px; background:var(--surface); font:13px/1.55 var(--mono); }
+  .claim-code { font-size:18px; padding:8px 14px; border:1px solid var(--line2); border-radius:6px; }
+  @media (max-width:1000px) { .claim { grid-template-columns:1fr; } }
+{% endblock %}
+{% block content %}
+<div class="claim">
+  <div class="stack" style="gap:24px">
+    <span class="label">{{ profile.display_name }} · <span class="mono">{{ account.key_id }}</span></span>
+    <div class="stack"><h1 style="font-size:40px">Prove this address is yours.</h1>
+      {% if claim_message %}
+      <p class="text2" style="font-size:16px">Anyone can paste a public address, so your page stays hidden until you sign this Koine message with the wallet that controls the address (for a vault or sub-account, the leader or master wallet). Signing is not a transaction: it cannot trade, move funds or approve anything, and it costs nothing.</p>
+      {% else %}
+      <p class="text2" style="font-size:16px">Anyone can paste a public address, so your page stays hidden until we see this code in your {{ profile.display_name }} profile bio. Add it, save the bio on {{ profile.display_name }}, then press Claim. You can remove it afterwards.</p>
+      {% endif %}
+    </div>
+    {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+
+    {% if claim_message %}
+    <form method="post" action="/dashboard/connect/claim/{{ account.id }}" class="card" autocomplete="off" data-claim-form data-claim-address="{{ account.key_id }}">
+      <div class="body" style="padding:28px;gap:20px">
+        <div class="stack" style="gap:8px">
+          <span class="label">Message to sign</span>
+          <pre class="claim-message" data-claim-message="{{ claim_message }}">{{ claim_message }}</pre>
+        </div>
+        <div class="stack" style="gap:8px">
+          <button class="btn" type="button" data-claim-sign hidden>Sign with my wallet</button>
+          <span class="small muted" data-claim-status aria-live="polite"></span>
+        </div>
+        <label class="field"><span class="label">Signature</span><textarea class="mono" name="signature" rows="3" spellcheck="false" placeholder="0x… (filled in when you sign with a browser wallet)" data-claim-signature></textarea>
+          <span class="note">No browser wallet? Sign the exact message above with your wallet's "sign message" tool (personal_sign / EIP-191) and paste the 0x signature here.</span></label>
+        <div class="spread" style="align-items:center">
+          <span class="mono small muted">Code {{ account.claim_code }}</span>
+          <button class="btn" type="submit">Check signature and claim</button>
+        </div>
+      </div>
+    </form>
+    <script src="/static/claim.js" defer></script>
+    {% else %}
+    <div class="card"><div class="body" style="padding:28px;gap:18px">
+      <span class="label">Your code</span>
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <code class="mono claim-code">{{ account.claim_code }}</code>
+        <form class="inline" method="post" action="/dashboard/connect/claim/{{ account.id }}"><button class="btn" type="submit">Claim</button></form>
+      </div>
+    </div></div>
+    {% endif %}
+    <a class="small muted" href="/dashboard">Back to the dashboard (you can claim later)</a>
+  </div>
+
+  <div class="stack" style="gap:0;padding-top:4px">
+    <span class="label" style="padding-bottom:8px;border-bottom:1px solid var(--line2)">How the check works</span>
+    <div class="hairline-list">
+      {% if claim_message %}
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>The code is single-use</span><span class="small muted">It was issued for this account only. A signature over any other code is refused, so an old signature cannot be replayed.</span></div></div>
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Nothing is stored but the result</span><span class="small muted">Koine recovers the signing address from the signature and compares it with this address (or its vault leader or sub-account master).</span></div></div>
+      {% else %}
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Koine reads your public profile</span><span class="small muted">The check looks for the code in the bio; nothing else about the profile is stored.</span></div></div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

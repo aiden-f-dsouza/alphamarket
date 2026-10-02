@@ -18,6 +18,7 @@ import markdown
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -26,6 +27,8 @@ from alphamarket.analytics import latest_stats
 from alphamarket.charts import drawdown_window, polyline, ticks
 from alphamarket.config import get_settings
 from alphamarket.connectors.registry import PROFILES, get_profile
+from alphamarket.consent import STALE_DETAIL as STALE_CONSENT
+from alphamarket.consent import consent_text
 from alphamarket.db import get_db
 from alphamarket.marks import sigil, tag_color
 from alphamarket.models import (
@@ -285,6 +288,8 @@ def _connect_ctx(venue: str) -> dict:
         "profiles": list(PROFILES.values()),
         "venue_env": get_settings().venue_env(venue),
         "closed_reason": venue_closed_reason(venue),
+        # wave2 (D18): the exact text, and the hash the form posts back.
+        "consent": consent_text(venue),
     }
 
 
@@ -307,9 +312,12 @@ def connect_page(request: Request, venue: str = "kalshi", db: Session = Depends(
 def connect_form(
     request: Request,
     venue: str = Form("kalshi"),
-    key_id: str = Form(),
+    key_id: str = Form(""),
     secret: str | None = Form(None),
-    strategy_name: str = Form(),
+    passphrase: str | None = Form(None),
+    account_ref: str | None = Form(None),
+    strategy_name: str = Form(""),
+    consent_sha256: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
     user = _user(request, db)
@@ -323,13 +331,31 @@ def connect_form(
         return resp
     try:
         ratelimit.check(request, "venues_user", user.id)
-        connect_account(
-            db,
-            user,
-            ConnectIn(venue=venue, key_id=key_id, secret=secret, strategy_name=strategy_name),
+        payload = ConnectIn(
+            venue=venue,
+            key_id=key_id.strip(),
+            secret=secret or None,
+            passphrase=passphrase or None,
+            account_ref=(account_ref or "").strip() or None,
+            strategy_name=strategy_name.strip(),
+            consent_sha256=consent_sha256,
         )
+        result = connect_account(db, user, payload, request=request)
+    except ValidationError as exc:
+        # Field names only: a pydantic error must never echo a pasted secret.
+        fields = sorted({str(e["loc"][-1]) for e in exc.errors() if e.get("loc")})
+        error = "Check these fields: " + ", ".join(fields).replace("_", " ") + "."
+        resp = _render(request, "connect.html", user=user, error=error, gate=None, **ctx)
+        resp.status_code = 422
+        return resp
     except HTTPException as exc:
-        return _render(request, "connect.html", user=user, error=exc.detail, gate=None, **ctx)
+        resp = _render(request, "connect.html", user=user, error=exc.detail, gate=None, **ctx)
+        if exc.status_code == 422 and exc.detail == STALE_CONSENT:
+            resp.status_code = 422  # the re-rendered page carries the current text
+        return resp
+    if not result.get("claimed", True):
+        # Address-keyed venues: straight on to proving the address is theirs.
+        return RedirectResponse(f"/dashboard/connect/claim/{result['id']}", status_code=303)
     return RedirectResponse("/dashboard", status_code=303)
 
 
@@ -369,6 +395,9 @@ def account_action_form(
             import_now(db, account)
         elif action == "reconcile":
             reconcile_account(db, account)
+        elif action == "claim" and get_profile(account.venue).ownership == "signed_message":
+            # wave2 (D21): a signed claim needs the message page, not a bare POST.
+            return RedirectResponse(f"/dashboard/connect/claim/{account.id}", status_code=303)
         elif action == "claim":
             ratelimit.check(request, "venues_user", user.id)
             claim_account(db, user, account.id)

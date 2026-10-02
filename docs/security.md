@@ -291,3 +291,45 @@ sent this request: there the permission list Alpaca returns with the grant
 is the proof, and a grant that comes back without one is marked unverified
 rather than read-only. A grant refused at any step is revoked where the
 venue allows it.
+
+<!-- wave2:p8-connect -->
+
+## Consent before every connection
+
+Before any venue is connected, Koine shows a consent screen: what Koine will
+read, that the access is read-only, what can become public on your strategy
+page, and how to revoke. The text is built from the venue's terms position
+(`docs/venues/<venue>.md`) and its profile, and every version is kept.
+
+Accepting it is recorded, not assumed. The connect form sends the SHA-256 of
+the exact text you were shown; the server recomputes the current text and
+refuses the connection (nothing is stored, the venue is never contacted) if
+the hash is missing or does not match, for example because the text changed
+after the page loaded. The same rule applies to the JSON API, to OAuth
+(the hash travels in the signed state and is checked again on return) and to
+SnapTrade (recorded before you are sent to SnapTrade's page). Each acceptance
+is an append-only row naming you, the venue, the account, the text's hash and
+version, the time, your IP address and browser, and it is written in the same
+transaction that creates the account. The texts themselves are stored once
+each, append-only, so any recorded consent can be matched to the words shown.
+
+## Proving a wallet address is yours
+
+Address-based venues need no key, so anyone could type any address. Until
+ownership is proven the strategy page stays hidden. For Hyperliquid you sign
+a short Koine message with the wallet (EIP-191 `personal_sign`): the page can
+ask a browser wallet to sign it, or you can sign it anywhere and paste the
+signature. The message includes a one-time code issued for that account
+only, and the server always rebuilds the message from the code it stored, so
+a signature made for a different code or account is refused. Signing is not a
+transaction and Koine never asks for a seed phrase or private key.
+
+## SnapTrade connections
+
+For brokers reached through SnapTrade, Koine registers a separate SnapTrade
+user for each connection and keeps its user secret encrypted in the same
+vault as every other credential. You link your broker on SnapTrade's own page
+with a read-only connection; Koine never sees your brokerage password. The
+connection is not active until you come back and pick the account; an
+unfinished one is dropped after a day, and disconnecting (or abandoning) it
+erases the secret and deletes the SnapTrade user.
