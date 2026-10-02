@@ -370,6 +370,13 @@ def callback(
     if error or not code:
         # The user declined on the venue (error=access_denied) or it failed.
         raise HTTPException(status_code=400, detail="Authorization was not granted.")
+    # wave2 (D18): re-check the accepted consent before the code exchange, so
+    # a text that changed while the user was on the venue's page never leads
+    # to a venue call (connect_account checks and records it again).
+    from alphamarket.consent import STALE_DETAIL, consent_text
+
+    if saved.get("c") != consent_text(venue).sha256:
+        raise HTTPException(status_code=422, detail=STALE_DETAIL)
 
     try:
         record = exchange_code(provider, code, redirect_uri_for(venue), str(saved["v"]))

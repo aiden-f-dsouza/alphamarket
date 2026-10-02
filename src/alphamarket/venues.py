@@ -267,6 +267,15 @@ def connect_account(
                 status_code=422,
                 detail=f"Connect {profile.display_name} with its Connect button (OAuth).",
             )
+        if profile.credential is CredentialKind.AGGREGATOR:
+            # Aggregator users are registered by Koine (begin_aggregator_connect)
+            # and finished through the picker; a pasted user id/secret is never
+            # accepted, so every aggregator account has its consent and its
+            # one-user-per-connection lifecycle (D20).
+            raise HTTPException(
+                status_code=422,
+                detail=f"Connect {profile.display_name} with its Continue button.",
+            )
         secret = assemble_secret(profile, payload)
         key_id = payload.key_id
         # Before any venue call: a connect without the current consent never
@@ -320,6 +329,14 @@ def connect_account(
 
     key_proves_ownership = profile.ownership is OwnershipProof.KEY
     if pending is not None:
+        # Re-read the row under a lock (Postgres FOR UPDATE, held until the
+        # commit below): a double submit of the finish form, or abandon_stale
+        # racing it, must not activate the account twice (a second Strategy
+        # would break the one-account-one-strategy unique key: a 500).
+        db.refresh(pending, with_for_update=True)
+        if pending.status != VenueAccountStatus.PENDING:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="This connection is not pending.")
         account = pending
         account.status = VenueAccountStatus.ACTIVE
         account.anchor_balance_micros = anchor.balance_micros

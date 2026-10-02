@@ -261,5 +261,7 @@ def aggregator_finish(
         if exc.status_code == 429:
             raise
         db.rollback()
+        if account.status != VenueAccountStatus.PENDING:  # finished by a concurrent submit
+            return RedirectResponse("/dashboard", status_code=303)
         return _picker_page(request, db, user, account, str(exc.detail), status=exc.status_code)
     return RedirectResponse("/dashboard", status_code=303)

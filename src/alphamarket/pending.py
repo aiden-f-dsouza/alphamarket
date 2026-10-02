@@ -42,6 +42,12 @@ def abandon_stale(db: Session, now: datetime) -> int:
     ).all()
     abandoned = 0
     for account in accounts:
+        # Lock and re-check: the owner may have finished the connect since the
+        # select (venues.connect_account locks the same row before activating).
+        db.refresh(account, with_for_update=True)
+        if account.status != VenueAccountStatus.PENDING:
+            db.commit()  # release the lock; it is not ours to abandon any more
+            continue
         try:
             credentials.disconnect(db, account, actor_user_id=None, reason="pending_abandoned")
         except Exception:  # one bad row must not stop the sweep

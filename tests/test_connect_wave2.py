@@ -681,9 +681,17 @@ def test_partner_gate_still_refuses_every_new_path(closed, session_factory, snap
         assert db.scalars(select(VenueAccount)).all() == []
 
 
-def test_oauth_start_requires_consent_and_carries_it_in_state(client, user):
-    get_settings().alpaca_client_id = get_settings().alpaca_client_id or "cid"
-    get_settings().alpaca_client_secret = get_settings().alpaca_client_secret or "csecret"
+@pytest.fixture()
+def alpaca_keys(monkeypatch):
+    # monkeypatch restores the shared settings object (no leak into later tests).
+    settings = get_settings()
+    monkeypatch.setattr(settings, "alpaca_client_id", "koine-client")
+    monkeypatch.setattr(settings, "alpaca_client_secret", "koine-client-secret")
+    monkeypatch.setattr(settings, "alpaca_env", "paper")
+    monkeypatch.setattr(settings, "public_base_url", "http://testserver")
+
+
+def test_oauth_start_requires_consent_and_carries_it_in_state(client, user, alpaca_keys):
     resp = client.get("/oauth/alpaca/start?strategy_name=Growth", follow_redirects=False)
     assert resp.status_code == 422
     resp = client.get(
@@ -698,3 +706,129 @@ def test_oauth_start_requires_consent_and_carries_it_in_state(client, user):
         oauth.cookie_name("alpaca")
     )
     assert oauth.load_state(raw)["c"] == consent("alpaca")
+
+
+@respx.mock
+def test_oauth_callback_with_a_changed_consent_text_never_calls_the_venue(
+    client, user, alpaca_keys, session_factory, monkeypatch
+):
+    from test_oauth import _mock_alpaca, _start
+
+    token_route, _ = _mock_alpaca()
+    state = _start(client)
+    # The text changed while the user was on Alpaca's page.
+    real = consent_mod.consent_text
+    monkeypatch.setattr(
+        consent_mod,
+        "consent_text",
+        lambda venue: dataclasses.replace(real(venue), sha256="e" * 64),
+    )
+    resp = client.get(f"/oauth/alpaca/callback?code=c0de&state={state}", follow_redirects=False)
+    assert resp.status_code == 422
+    assert not token_route.called  # no code exchange without the current consent
+    with session_factory() as db:
+        assert db.scalars(select(VenueAccount)).all() == []
+
+
+@respx.mock
+def test_json_connect_refuses_a_pasted_aggregator_user(client, user, snaptrade_keys):
+    routes = _mock_snaptrade()
+    resp = client.post(
+        "/venues",
+        json={
+            "venue": "snaptrade",
+            "key_id": "koine-someone",
+            "secret": "a-user-secret",
+            "strategy_name": "Pasted",
+            "consent_sha256": consent("snaptrade"),
+        },
+    )
+    assert resp.status_code == 422 and "Continue" in resp.json()["detail"]
+    assert not any(r.called for r in routes.values())
+
+
+@respx.mock
+def test_signature_for_one_account_is_refused_on_another(client, user, session_factory):
+    """Replay across accounts: the same address connected twice (e.g. after a
+    disconnect, or by someone else) gets a new code, so a signature that
+    claimed the first account cannot claim the second."""
+    first_id, first_code = _seed_hyperliquid(session_factory, user["id"], WALLET.address)
+    # A signature over another message recovers to some other address, which
+    # the connector then asks Hyperliquid about (not a leader or master).
+    respx.post(INFO_URL).mock(return_value=httpx.Response(200, json={"role": "user"}))
+    good = _sign(WALLET, claim_message(WALLET.address, first_code))
+    assert client.post(f"/venues/{first_id}/claim", json={"signature": good}).status_code == 200
+    with session_factory() as db:
+        second = VenueAccount(
+            user_id=user["id"],
+            venue="hyperliquid",
+            venue_env="prod",
+            key_id=WALLET.address.lower(),
+            status=VenueAccountStatus.ACTIVE,
+            claim_code="koine-9f8e7d6c",
+        )
+        db.add(second)
+        db.commit()
+        second_id = second.id
+    resp = client.post(f"/venues/{second_id}/claim", json={"signature": good})
+    assert resp.status_code == 422
+    with session_factory() as db:
+        assert db.get(VenueAccount, second_id).claimed_at is None
+
+
+@respx.mock
+def test_finish_rechecks_the_connect_gate(
+    client, user, session_factory, snaptrade_keys, monkeypatch
+):
+    from alphamarket import connect_pages
+
+    routes = _mock_snaptrade()
+    account_id = _start_snaptrade(client)
+    # The step-up expired while the user was on SnapTrade's page.
+    monkeypatch.setattr(
+        connect_pages.mfa, "connect_block", lambda request, db, u: ("step_up", "Confirm a code.")
+    )
+    resp = client.post(
+        f"/dashboard/connect/snaptrade/{account_id}",
+        data={"account_ref": SNAP_ACCOUNT_REF, "strategy_name": "Too late"},
+    )
+    assert resp.status_code == 403 and "Confirm a code" in resp.text
+    assert not routes["auth"].called
+    with session_factory() as db:
+        assert db.get(VenueAccount, account_id).status == VenueAccountStatus.PENDING
+        assert db.scalars(select(Strategy)).all() == []
+
+
+@respx.mock
+def test_a_second_finish_is_409_and_keeps_one_strategy(
+    client, user, session_factory, snaptrade_keys
+):
+    """Double submit of the finish form: the second request read the account
+    while it was still PENDING; connect_account re-reads it under a lock
+    before activating, so it refuses instead of adding a second strategy."""
+    from alphamarket import venues
+
+    _mock_snaptrade()
+    account_id = _start_snaptrade(client)
+    with session_factory() as db:
+        stale = db.get(VenueAccount, account_id)  # PENDING in this session's view
+        owner = db.get(User, user["id"])
+        assert stale.status == VenueAccountStatus.PENDING
+        resp = client.post(
+            f"/dashboard/connect/snaptrade/{account_id}",
+            data={"account_ref": SNAP_ACCOUNT_REF, "strategy_name": "First"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        payload = ConnectIn(
+            venue="snaptrade",
+            key_id=stale.key_id,
+            strategy_name="Second",
+            account_ref=SNAP_ACCOUNT_REF,
+        )
+        with pytest.raises(HTTPException) as exc:
+            venues.connect_account(db, owner, payload, pending=stale)
+        assert exc.value.status_code == 409
+    with session_factory() as db:
+        assert [s.name for s in db.scalars(select(Strategy)).all()] == ["First"]
+        assert db.get(VenueAccount, account_id).status == VenueAccountStatus.ACTIVE
