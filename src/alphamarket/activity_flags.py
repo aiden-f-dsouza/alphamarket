@@ -60,3 +60,39 @@ def flags_for(db: Session, account_id: int) -> list[VenueActivityFlag]:
             .order_by(VenueActivityFlag.occurred_at, VenueActivityFlag.id)
         ).all()
     )
+
+
+# ---- wave2:p8-pages: read helpers for the dashboard and the public page ----------------
+
+REASON_LABELS: dict[str, str] = {
+    "short_sale": "short sale",
+    "option": "option trade",
+    "crypto": "crypto activity",
+    "stock_dividend": "stock dividend",
+    "canceled": "canceled activity",
+    "unsupported_type": "unsupported activity type",
+}
+
+
+def reason_label(reason: str) -> str:
+    return REASON_LABELS.get(reason, reason.replace("_", " "))
+
+
+def summarize(flags: Sequence[VenueActivityFlag]) -> dict:
+    """{"count", "by_reason": [(label, n)] most common first, "latest": iso | None}.
+    Reasons and counts only: what a flag is about is disclosed, the account's
+    activity detail (symbols, descriptions) is not put on a public page."""
+    counts: dict[str, int] = {}
+    for flag in flags:
+        counts[flag.reason] = counts.get(flag.reason, 0) + 1
+    ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    latest = max((aware(f.occurred_at) for f in flags), default=None)
+    return {
+        "count": len(flags),
+        "by_reason": [(reason_label(reason), n) for reason, n in ordered],
+        "latest": latest.isoformat() if latest else None,
+    }
+
+
+def summary_for(db: Session, account_id: int) -> dict:
+    return summarize(flags_for(db, account_id))
