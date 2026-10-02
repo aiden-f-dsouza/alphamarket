@@ -62,7 +62,7 @@
     <span class="label" style="padding-bottom:8px;border-bottom:1px solid var(--line2)">How the check works</span>
     <div class="hairline-list">
       {% if claim_message %}
-      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>The code is single-use</span><span class="small muted">It was issued for this account only. A signature over any other code is refused, so an old signature cannot be replayed.</span></div></div>
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>The code belongs to this account</span><span class="small muted">It was issued for this account only. A signature over any other code is refused, so an old signature cannot be replayed.</span></div></div>
       <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Nothing is stored but the result</span><span class="small muted">Koine recovers the signing address from the signature and compares it with this address (or its vault leader or sub-account master).</span></div></div>
       {% else %}
       <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Koine reads your public profile</span><span class="small muted">The check looks for the code in the bio; nothing else about the profile is stored.</span></div></div>
