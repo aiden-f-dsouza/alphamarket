@@ -654,14 +654,18 @@ the money in the account, not the return, so it must not bend the picture.
 
 ```
 index(d)     = growth of 1.0 with external flows removed (time-weighted)
-growth(d)    = equity(first day) x index(d)          the chart, in dollars
+growth(d)    = equity(f) / index(f) x index(d)       the chart, in dollars; f is the
+               first day with positive equity (index(f) = 1.0 for an
+               account that opened funded or was funded on day f)
 drawdown(d)  = (max over s <= d of index(s) - index(d)) / max over s <= d of index(s)
 month return = index(month end) / index(prior month end) - 1
                (the first month is measured from the first day's index)
 ```
 
-Worked example: equity 10,000, 10,500, 13,605 (a 3,000 deposit at the start
-of day 3), 12,244.5. The index is 1.0, 1.05, 1.0605, 0.95445, so the return
+Worked example: equity 10,000, 10,500, 13,605 (a 3,000 deposit on day 3,
+counted at the end of the day as above), 12,244.5. Day returns are
+10,500 / 10,000 - 1 = +5%, (13,605 - 3,000) / 10,500 - 1 = +1% and
+12,244.5 / 13,605 - 1 = -10%. The index is 1.0, 1.05, 1.0605, 0.95445, so the return
 is -4.555% and the worst drawdown 10% (peak 1.0605 on day 3). The raw
 equity would say +22.4%, which is the deposit counted as profit. The chart
 plots 10,000, 10,500, 10,605, 9,544.5. The page still lists the actual equity
@@ -672,7 +676,7 @@ complete UTC close, largest first, each at the day's close and valued as
 described under "Asset valuation". Cash is not exposure.
 
 ```
-share of a holding = value / sum of all position values      (cash, spot, equity)
+share of a holding = value / sum of the cash, spot and equity values (perps excluded)
 gross exposure     = sum over spot, equity and perp of |notional|
 largest exposure   = the underlying with the largest share of gross (BTC spot and
                      BTC-PERP count together)

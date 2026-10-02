@@ -79,10 +79,12 @@ def _strategy(db, venue, slug, name=None, claimed=True, user=None, status="live"
 
 
 def v2_extras(**overrides) -> dict:
-    """Plan numbers: equity 10,000 -> 10,500 -> 13,605 (a 3,000 deposit at the
-    start of day 3) -> 12,244.5. Day returns +5%, (13,605 - 3,000)/10,500 =
-    +1%, -10%: index 1.0, 1.05, 1.0605, 0.95445, so TWR = -4.555% and the
-    worst drawdown 10% from 1.0605. Raw equity says +22.4%."""
+    """Plan numbers: equity 10,000 -> 10,500 -> 13,605 (a 3,000 deposit on
+    day 3, counted at the end of the day: r_d = (E_d - F_d) / E_(d-1) - 1)
+    -> 12,244.5. Day returns +5%, (13,605 - 3,000)/10,500 - 1 = +1%,
+    12,244.5/13,605 - 1 = -10%: index 1.0, 1.05, 1.0605, 0.95445, so
+    TWR = -4.555% and the worst drawdown 1 - 0.95445/1.0605 = 10%. Raw
+    equity says 12,244.5/10,000 - 1 = +22.445%."""
     extras = {
         "valuation": "v2",
         "daily_equity": [
@@ -96,7 +98,8 @@ def v2_extras(**overrides) -> dict:
         "twr": -0.04555,
         # Last-close book: $5,000 cash + 1.5 ETH x 3,000 (4,500) + a 0.05 BTC
         # perp, entry 60,000, mark 62,000 (unrealized 100, notional 3,100).
-        # Value sum = 9,600; ETH share 4,500 / 9,600 = 46.875%.
+        # Equity 9,600. Share is over the non-perp values: 5,000 + 4,500 =
+        # 9,500, so ETH 4,500 / 9,500 = 47.37% and USD 52.63%.
         "holdings": [
             {
                 "asset": "USD",
@@ -206,7 +209,7 @@ def test_v2_page_shows_holdings_exposure_and_twr_not_settled_trades(client, db):
     assert "Holdings and exposure" in html
     assert "BTC-PERP" in html and "entry 60000" in html
     assert "$100.00" in html and "unrealized" in html  # perp: unrealized P&L, not a holding
-    assert "$4,500.00" in html and "47%" in html  # ETH value and 46.875% share
+    assert "$4,500.00" in html and "47%" in html  # ETH value and 47.37% share
     assert "$7,600.00" in html and "59%" in html and "0.32×" in html  # exposure panel
     assert "Return, time-weighted" in html
     # binary-only copy is gone
@@ -243,11 +246,35 @@ def test_v2_drawdown_and_months_come_from_the_twr_index_not_raw_equity(client, d
     assert [h["asset"] for h in st["holdings"]] == ["USD", "ETH", "BTC-PERP"]  # largest first
 
 
+def test_v2_growth_curve_starts_at_the_first_funded_day():
+    # Opened empty, funded with 2,000 on day 2 (a flow, not a return), +10% on
+    # day 3: the index stays 1.0 until day 3 (no return off zero equity), so
+    # the chart is growth of 2,000: 2,000, 2,000, 2,200 (never growth of $0).
+    extras = v2_extras(
+        daily_equity=[[DAYS[0], 0], [DAYS[1], 2_000 * M], [DAYS[2], 2_200 * M]],
+        daily_flows=[[DAYS[1], 2_000 * M]],
+        twr_index=[[DAYS[0], 1.0], [DAYS[1], 1.0], [DAYS[2], 1.1]],
+    )
+    assert [round(v, 2) for _, v in public.growth_curve(extras)] == [2_000.0, 2_000.0, 2_200.0]
+
+
+def test_v2_page_without_an_index_renders_without_a_chart(client, db):
+    # A v2 row whose index is still empty (no defined daily return yet) must
+    # not fall back to charting raw equity, and must not 500.
+    s = _strategy(db, "kraken", "no-index", "No Index")
+    _stats(db, s, v2_extras(twr_index=[]))
+    db.commit()
+    resp = client.get("/s/no-index")
+    assert resp.status_code == 200
+    assert "Holdings and exposure" in resp.text and "data-series" not in resp.text
+
+
 def test_v2_holdings_view_orders_by_notional_and_weights_non_perps():
     rows = public.holdings_view(v2_extras())
     assert [r["asset"] for r in rows] == ["USD", "ETH", "BTC-PERP"]  # 5,000 > 4,500 > 3,100
     by = {r["asset"]: r for r in rows}
-    assert by["ETH"]["weight"] == pytest.approx(4_500 / 9_600)
+    assert by["ETH"]["weight"] == pytest.approx(4_500 / 9_500)
+    assert by["USD"]["weight"] + by["ETH"]["weight"] == pytest.approx(1.0)
     assert by["BTC-PERP"]["weight"] is None
     assert by["BTC-PERP"]["value_label"] == "$100.00"
     assert by["BTC-PERP"]["notional_label"] == "$3,100.00"
@@ -522,7 +549,7 @@ PERP_VIEW = {
             "side": "long",
             "qty": "0.01",
             "cost": 0.0,
-            "mark": "62500.5",
+            "mark": "62550",
             "mark_source": "quote",
             "mark_as_of": "2026-09-05T11:59:00+00:00",
             "value": 25.5,
@@ -550,7 +577,8 @@ def test_portfolio_for_a_logged_in_user_shows_a_perp_with_unrealized_value(
     html = resp.text
     assert "Sample data" not in html
     assert "Perp Pro" in html and "BTC-PERP" in html
-    assert "Entry" in html and "60000" in html and "62500.5" in html
+    # 0.01 x (62,550 - 60,000) = 25.50 unrealized
+    assert "Entry" in html and "60000" in html and "62550" in html
     assert "$25.50" in html and "unrealized" in html
     assert "copy lag 42 s" in html
     assert "2 below minimum size" in html and "1 stale signal" in html
@@ -690,6 +718,20 @@ def test_portfolio_view_combines_curves_and_ages():
         "10 min",
         "2.0 h",
         "2.3 d",
+    ]
+
+
+def test_combined_curve_buckets_snapshots_by_utc_day():
+    # 23:30 at -05:00 is 04:30 UTC the next day: it belongs to 09-02, where it
+    # replaces the earlier 09-02 snapshot (last snapshot of the UTC day wins).
+    curve = [
+        ["2026-09-01T12:00:00+00:00", 1_000.0],
+        ["2026-09-02T01:00:00+00:00", 1_050.0],
+        ["2026-09-01T23:30:00-05:00", 990.0],
+    ]
+    assert pages._combined_curve([{"curve": curve}]) == [
+        ("2026-09-01", 1_000.0),
+        ("2026-09-02", 990.0),
     ]
 
 

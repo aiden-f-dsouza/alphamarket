@@ -195,13 +195,22 @@ def is_v2(stats) -> bool:
 
 def holdings_view(extras: dict) -> list[dict]:
     """Rows for the holdings panel, largest first. Perp rows show notional and
-    the entry price (their `value` is unrealized P&L, not a holding's worth)."""
-    total = sum(int(h.get("value_micros", 0)) for h in extras.get("holdings", []))
+    the entry price (their `value` is unrealized P&L, not a holding's worth),
+    and get no share. Share = value / sum of the cash, spot and equity values
+    (methodology "Reading an asset strategy's page"), so the shares add up to
+    100% and a losing perp cannot push them past it."""
+    total = sum(
+        int(h.get("value_micros", 0))
+        for h in extras.get("holdings", [])
+        if h.get("kind", "spot") != "perp"
+    )
     out = []
     for h in extras.get("holdings", []):
         kind = h.get("kind", "spot")
         value = int(h.get("value_micros", 0))
         close = h.get("close_micros")
+        notional = h.get("notional_micros")
+        notional = abs(int(notional)) if notional is not None else abs(value)
         out.append(
             {
                 "asset": h.get("asset"),
@@ -211,10 +220,10 @@ def holdings_view(extras: dict) -> list[dict]:
                 "price_day": h.get("price_day"),
                 "value": micros_to_float(value),
                 "value_label": _usd_label(value),
-                "notional_label": _usd_label(abs(int(h.get("notional_micros", 0)))),
+                "notional_label": _usd_label(notional),
                 "entry": h.get("entry"),
                 "weight": value / total if kind != "perp" and total > 0 else None,
-                "_order": abs(int(h.get("notional_micros", value))),
+                "_order": notional,
             }
         )
     out.sort(key=lambda r: (-r["_order"], r["asset"] or ""))
@@ -243,14 +252,21 @@ def exposure_view(extras: dict) -> dict | None:
 
 
 def growth_curve(extras: dict) -> list[tuple[date, float]]:
-    """Growth of the first day's equity with external flows removed:
-    equity_0 x twr_index(d), dollars. The chart plots this, never raw equity,
-    so a deposit cannot look like a return."""
+    """Growth of the first funded day's equity with external flows removed:
+    E_f / index(f) x index(d), dollars, where f is the first day of the index
+    with positive equity (index(f) is 1.0 unless the account was emptied and
+    refunded). The chart plots this, never raw equity, so a deposit cannot
+    look like a return; an account that opens empty and is funded on day 2
+    is not drawn as growth of $0."""
     index = extras.get("twr_index") or []
-    daily = extras.get("daily_equity") or []
     if not index:
         return []
-    base = micros_to_float(int(daily[0][1])) if daily else 1.0
+    equity = {d: int(e) for d, e in extras.get("daily_equity") or []}
+    base = 1.0
+    for d, v in index:
+        if equity.get(d, 0) > 0 and float(v) > 0:
+            base = micros_to_float(equity[d]) / float(v)
+            break
     return [(date.fromisoformat(d), base * float(v)) for d, v in index]
 
 

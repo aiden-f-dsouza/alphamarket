@@ -446,8 +446,13 @@ CHART_W, EQUITY_H, DRAWDOWN_H = 900, 260, 110
 def _charts(stats: dict | None, benchmarks: list | None = None) -> dict | None:
     """SVG geometry for the equity and drawdown curves. Benchmarks (sample
     pages only) share the equity axis so the lines are comparable."""
-    curve = (stats or {}).get("chart_curve") or (stats or {}).get("equity_curve")
-    if not curve:
+    if not stats:
+        return None
+    # v2 (asset) pages plot the flow-adjusted growth curve only: falling back
+    # to raw equity would chart a deposit as a gain, and its drawdown curve
+    # (from the index) would not line up with it.
+    curve = stats.get("chart_curve") if stats.get("valuation") == "v2" else stats["equity_curve"]
+    if not curve or len(stats["drawdown_curve"]) != len(curve):
         return None
     equity = [e for _, e in curve]
     dates = [d for d, _ in curve]
@@ -528,7 +533,7 @@ def _age(seconds: int | None) -> str:
 def _utc(iso: str) -> datetime:
     """An ISO timestamp as aware UTC (SQLite hands back naive ones; invariant 2)."""
     parsed = datetime.fromisoformat(iso)
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _combined_curve(views: list[dict]) -> list[tuple[str, float]]:
@@ -538,8 +543,8 @@ def _combined_curve(views: list[dict]) -> list[tuple[str, float]]:
     per_alloc = []
     for v in views:
         by_day: dict[str, float] = {}
-        for at, equity in sorted(v["curve"]):
-            by_day[at[:10]] = equity  # last snapshot of the day wins
+        for when, equity in sorted((_utc(at), e) for at, e in v["curve"]):
+            by_day[when.date().isoformat()] = equity  # last snapshot of the UTC day wins
         per_alloc.append(by_day)
     days = sorted({d for by_day in per_alloc for d in by_day})
     last: list[float | None] = [None] * len(per_alloc)
@@ -704,6 +709,7 @@ def _portfolio_activity(db: Session, allocation_ids: list[int], limit: int = 12)
                 ("Settled", f"{st.ticker} → {st.market_result}", st.revenue_micros / 1e6),
             )
         )
+    events = [(_utc(at.isoformat()), row) for at, row in events]  # one clock: aware UTC
     events.sort(key=lambda e: e[0], reverse=True)
     return [
         (at.strftime("%m-%d %H:%M"), kind, what, amt) for at, (kind, what, amt) in events[:limit]
