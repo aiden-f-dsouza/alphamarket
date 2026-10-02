@@ -57,7 +57,6 @@ from alphamarket.jobs import (
     enqueue,
     enqueue_due_syncs,
     get_schedule,
-    prune_finished,
     register_handler,
     register_page_runner,
     run_page_streams,
@@ -339,7 +338,10 @@ def pricing_venues_in_use(db: Session) -> list[str]:
         .where(VenueAccount.status.not_in(INACTIVE_ACCOUNT_STATUSES))
         .distinct()
     ).all():
-        profile = get_profile(venue)
+        try:
+            profile = get_profile(venue)
+        except ValueError:  # a venue no longer registered must not abort the tick
+            continue
         if profile.instrument is not InstrumentKind.BINARY:
             venues.add(profile.pricing_venue or venue)
     return sorted(venues)
@@ -419,8 +421,7 @@ def tick_nightly(session_factory: sessionmaker = SessionLocal) -> None:
         enqueue(db, JobKind.STATS, dedupe_key=f"stats:{day}", once=True, now=now)
         enqueue(db, JobKind.HOUSEKEEPING, dedupe_key=f"housekeeping:{day}", once=True, now=now)
         db.commit()
-        pruned = prune_finished(db, now=now)
-    logger.info("nightly jobs queued; pruned %d finished jobs", pruned)
+    logger.info("nightly jobs queued (finished jobs are pruned by housekeeping)")
 
 
 def tick_oauth(session_factory: sessionmaker = SessionLocal) -> None:

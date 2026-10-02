@@ -10,7 +10,14 @@ consent_text(venue) -> ConsentScreen(venue, version, body, sha256)
 require_consent(db, user, venue, text_sha256, request) -> ConsentScreen
     Recompute the current text; a missing or different hash raises
     HTTPException(422) (the page re-renders the screen). Inserts the
-    consent_texts row if absent.
+    consent_texts row if absent in its own short transaction before the
+    connect transaction, tolerating a concurrent first insert (append-only
+    PK: INSERT ... ON CONFLICT DO NOTHING on Postgres, savepoint-and-ignore
+    IntegrityError elsewhere).
+
+Routes: every new connect route lives in connect_pages.py. pages.py's
+connect functions (_connect_ctx, connect_page, connect_form) may be edited
+in place, but no new routes go in pages.py (w2-p8-pages owns the rest of it).
 
 record_consent(db, user, screen, account, request) -> VenueConsent
     Append the venue_consents row (ip, user agent) in the same transaction

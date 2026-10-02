@@ -10,7 +10,15 @@ apply_lifecycle(db, allocation, now) -> int
       ceil (paper_book rounding rule);
     - liquidation (Hyperliquid cross margin, plan D11) when a fresh mark
       (settings.quote_max_age_seconds) shows account value < maintenance
-      margin: close every perp at the mark (mirror_asset_fills reason
+      margin. Per open perp: notional = |q| x mark; tier = the entry of
+      Instrument.margin_tiers (ascending [{"lower_bound": str,
+      "max_leverage": int}]) with the largest lower_bound <= notional;
+      mmr = 1 / (2 x max_leverage); MM = sum notional x mmr; AV =
+      cash_micros + sum of qty x (mark - entry). margin_tiers NULL -> no
+      check for that position (never guess a leverage). Exit test: BTC
+      max_leverage 40, q 0.09998, entry 60,010: mark 51,000 no liquidation
+      (AV 96.164303 >= MM 63.73725); mark 50,500 liquidates (AV 46.174303 <
+      MM 63.112375). On liquidation close every perp at the mark (mirror_asset_fills reason
       "liquidation" + FILL_BASE and LIQUIDATION legs, ref
       "liq:<instrument_id>:<epoch>"), then portfolio.stop_allocation(...,
       "liquidated");

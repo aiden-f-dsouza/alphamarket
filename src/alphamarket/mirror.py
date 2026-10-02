@@ -379,11 +379,18 @@ def process_allocation(db: Session, allocation: Allocation) -> tuple[int, int]:
     return mirrored, settled
 
 
-def is_asset_allocation(db: Session, allocation: Allocation) -> bool:
-    """wave2: does this allocation tail an ASSET strategy (paper.py)?"""
-    from alphamarket.ingest import is_asset_venue
+def venue_of(db: Session, allocation: Allocation) -> tuple[str, str] | None:
+    """(venue, venue_env) of the strategy an allocation tails."""
     from alphamarket.models import Strategy, VenueAccount
 
     strategy = db.get(Strategy, allocation.strategy_id)
     account = db.get(VenueAccount, strategy.venue_account_id) if strategy else None
-    return account is not None and is_asset_venue(account.venue)
+    return (account.venue, account.venue_env) if account is not None else None
+
+
+def is_asset_allocation(db: Session, allocation: Allocation) -> bool:
+    """wave2: does this allocation tail an ASSET strategy (paper.py)?"""
+    from alphamarket.ingest import is_asset_venue
+
+    venue = venue_of(db, allocation)
+    return venue is not None and is_asset_venue(venue[0])

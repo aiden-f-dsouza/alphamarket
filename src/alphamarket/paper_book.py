@@ -28,6 +28,14 @@ mirror_asset_fills row: load_book derives the average-cost perp book from
 those rows, and valuation flags PERP_QTY_MISMATCH if they ever disagree
 with the FILL_BASE legs.
 
+One mirror_asset_fills row per signal and one leg per (kind, asset) per
+group (unique keys): a perp flip through zero is a single FILL_BASE leg of
+the net delta, REALIZED_PNL for the closed part only.
+
+append_group returns [] for an already-applied ref AND for a group whose
+legs all round to zero (nothing is written, so the ref stays unapplied and
+is retried next pass): callers count an event only when rows come back.
+
 Rounding (always against the follower, methodology "Paper copying v2"):
 cost and debits round UP to the micro, proceeds and credits round DOWN
 (cost_micros_up / proceeds_micros_down below). Fees follow the profile.

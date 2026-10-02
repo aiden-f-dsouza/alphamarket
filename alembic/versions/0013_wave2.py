@@ -11,8 +11,11 @@ mirror_ledger_entries, mirror_skips), market data (asset_quotes,
 funding_rates, corporate_actions), venue activity flags and consent
 (invariant 10). Indexes for housekeeping and the security page.
 
-Workstream migrations 0014-0021 are reserved and re-chained onto this one
-at merge.
+Workstream migrations, if a stream needs one (unused numbers stay unused).
+Each: file `00NN_w2_<label>.py`, revision "00NN", down_revision "0013";
+they are re-chained in merge order at integration:
+    0014 market-data   0015 stats-v2       0016 p6-signals     0017 p6-engine
+    0018 p6-lifecycle  0019 p8-connect     0020 p8-pages       0021 account-security
 """
 
 import sqlalchemy as sa
@@ -316,7 +319,11 @@ def downgrade() -> None:
 
     # Asset signals cannot survive the downgrade: binary columns are NOT NULL
     # again. Deleting them needs the append-only trigger out of the way, which
-    # is acceptable only because the rows did not exist before 0013.
+    # is acceptable only because the rows did not exist before 0013. Their
+    # dependants (mirror_skips, mirror_asset_fills) are already dropped;
+    # follows/feeds hold no FK and allocations.last_signal_id is a plain int.
+    # DISABLE TRIGGER needs table ownership, which the migration role has
+    # (docs/security_roles.sql); do not swap in session_replication_role.
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
         op.execute("ALTER TABLE signals DISABLE TRIGGER signals_append_only;")

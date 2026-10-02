@@ -280,7 +280,11 @@ class Signal(Base):
       (before it, when the fill flattened it); quantities in atoms at
       `qty_decimals`; `price` the venue's string; the quote Koine captured at
       `observed_at` copied onto the row (paper_signals.py, methodology
-      "Signals v2 and copy lag")."""
+      "Signals v2 and copy lag").
+
+    Binary-only readers (follows.signal_item, mirror.mirror_pending) are
+    reached only through the binary dispatch. Never read signals without
+    filtering on fill_id / asset_fill_id unless the code handles both shapes."""
 
     __tablename__ = "signals"
     __table_args__ = (

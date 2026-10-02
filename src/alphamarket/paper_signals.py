@@ -7,6 +7,13 @@ emit_asset_signals(db, strategy, *, limiter=None) -> int
     One Signal per post-anchor AssetFill of the strategy's account that has
     none (unique asset_fill_id), in (filled_at, id) order. Fills at or before
     the anchor never become signals; transfers and other events never do.
+    Same-instant fills (one order, several fills with one filled_at) are
+    common: position_before/after are a RUNNING position accumulated over
+    the account's asset fills in (filled_at, id) order (before = running,
+    after = before +/- qty), so fill n's after == fill n+1's before.
+    equity_before is evaluated once per distinct filled_at and reused for
+    ties (same-instant fills share creator_equity_micros). The exit test
+    includes two fills at one instant.
     Columns (models.Signal docstring): ticker = instrument symbol, side by
     the sign of the creator's position, action buy|sell, qty_atoms /
     qty_decimals / price as the fill reported, notional_micros (USD or
