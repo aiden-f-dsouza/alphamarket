@@ -642,3 +642,113 @@ reported account equity.
 **Prices.** Daily closes are Alpaca's unadjusted daily bars (share counts
 are adjusted by the split entries themselves, so prices must not be
 adjusted twice). A bar belongs to its New York trading date.
+
+<!-- wave2:stats-v2 -->
+
+## Asset strategy statistics
+
+Crypto and stock strategies are measured on the daily equity of the
+section "Asset valuation", with deposits and withdrawals taken out as in
+"External flows (time-weighted return)". Pinned by
+`tests/test_analytics_v2.py`; the code is `alphamarket/analytics_v2.py`.
+
+**Which days.** One point per UTC day, from the day the account was
+connected (the anchor day) to the last *complete* UTC day. Today is never in
+the series, because today has no close yet.
+
+**Return index.** A growth-of-$1 index built from the flow-adjusted daily
+returns:
+
+```
+I_first = 1
+I_d     = I_(d−1) × (1 + r_d),    r_d = (E_d − F_d) / E_(d−1) − 1
+```
+
+A day with no capital at risk the day before has no return, and the index
+stays flat across it.
+
+| Statistic | Formula |
+|---|---|
+| Total return | `I_last − 1`, the time-weighted return |
+| Max drawdown | `max over d of (peak_d − I_d) / peak_d` on the index, not on raw equity |
+| Sharpe | `mean(r) / stdev(r) × √365` over the days with a return; sample stdev |
+| Sortino | `mean(r) / √(mean(min(r,0)²)) × √365` |
+| Win rate | not shown: a coin or a share has no single "trade" that wins or loses |
+| Realized P&L | the venue's own realized-P&L and liquidation entries, in dollars (a stablecoin at 1.00, anything else at its close that day) |
+| Money-weighted return | Modified Dietz, shown only beside the TWR |
+
+Drawdown and the ratios read the index, so a deposit can never look like a
+gain and a withdrawal can never look like a loss. Worked example: equity
+$10,000, $10,500, then $13,605 on a day the trader deposited $3,000, then
+$12,244.50.
+
+| Day | Equity | Flow | r_d | Index |
+|---|---|---|---|---|
+| 1 | 10,000 | | | 1 |
+| 2 | 10,500 | | 10,500 / 10,000 − 1 = +5% | 1.05 |
+| 3 | 13,605 | 3,000 | (13,605 − 3,000) / 10,500 − 1 = +1% | 1.0605 |
+| 4 | 12,244.50 | | 12,244.50 / 13,605 − 1 = −10% | 0.95445 |
+
+Total return is 0.95445 − 1 = **−4.555%**. Reading the raw equity instead
+(12,244.50 / 10,000 − 1) would claim **+22.4%**: that is the deposit, not
+skill. Max drawdown is (1.0605 − 0.95445) / 1.0605 = **10%**. The
+money-weighted figure for the same days is
+(12,244.50 − 10,000 − 3,000) / (10,000 + ⅓ × 3,000) = −6.87%.
+
+**Risk score.** The same 1-to-10 formula as "Risk score", with the TWR
+drawdown, the downside deviation of the daily returns above, and, as the
+concentration term, the largest share of gross exposure on the last day
+(spot and perp of one coin count together). The stake term is 0: a coin
+account has no single "stake". Leverage is shown as a flag instead.
+
+**Holdings and exposure** are those of the last day in the series, at that
+day's closes. Next to them, the "marked equity" values the holdings right
+now at the freshest public quote, or at the last daily close when no quote
+is fresh.
+
+**Flags** (displayed, never used to delist):
+
+- **unpriced_assets**: on some day an asset held had no close at all, so it
+  was left out of that day's equity.
+- **carried_forward_prices**: a close older than the day it valued was used.
+  Stock venues are allowed 4 calendar days (weekends and market holidays
+  have no close); crypto, which trades every day, is allowed none.
+- **single_asset_concentration**: one underlying is more than 50% of gross
+  exposure on the last day.
+- **high_leverage**: on some day the perp notional, `Σ |perp qty × close|`,
+  was more than 5× equity.
+- **broker_equity_divergence**: the newest broker equity check (below)
+  failed.
+
+**Exact closes.** A close is kept as the source's decimal string whenever
+Koine has it, so a coin worth a fraction of a cent is not rounded before it
+is multiplied: 1,000,000,000 tokens at $0.00001234 are worth exactly
+$12,340, where a close rounded to whole micro-dollars ($0.000012) would
+say $12,000. The rounding rule of "Asset valuation" (truncate once, per
+position) is unchanged.
+
+## Broker equity check
+
+Some venues report their own total for the account: Alpaca's account
+equity, IBKR's net asset value, Hyperliquid's account value. At every
+reconciliation Koine compares that figure with its own equity for the same
+moment: the holdings from the ledger, valued at the freshest public quote
+(or the last daily close), with perp positions at `qty × (price − entry)`.
+
+```
+divergence = venue equity − Koine equity
+tolerance  = max($1.00, 0.5% × venue equity)
+ok         = |divergence| ≤ tolerance
+```
+
+Example: Koine computes $10,000. A venue figure of $10,040 is within
+tolerance (40 ≤ 50.20); $10,100 is not (100 > 50.50). For a $150 account
+the $1 floor applies (0.5% would be 75 cents).
+
+The tolerance is wider than the per-asset check in "Reconciliation v2"
+because the two sides use different prices taken at slightly different
+moments. For the same reason **a failed check never quarantines a
+strategy**: the per-asset balance check is what proves the ledger. A
+failed equity check shows the broker_equity_divergence flag on the
+strategy until a later check passes. Venues that report no total skip
+the check.

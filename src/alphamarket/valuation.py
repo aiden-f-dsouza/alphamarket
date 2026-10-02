@@ -9,7 +9,8 @@ Units (invariant 1, amended by platform_plan D3):
 - quantities are integer ATOMS at a stated `decimals` (one whole unit =
   10**decimals atoms), exactly as money.to_atoms parsed them;
 - USD values are integer MICROS;
-- closes are USD micros per ONE WHOLE unit (`PriceIn.usd_micros_per_unit`);
+- closes are USD micros per ONE WHOLE unit (`PriceIn.usd_micros_per_unit`),
+  or exactly the decimal `PriceIn.close` when given (wave2 D14);
 - intermediate arithmetic is exact (int / Fraction); floats never appear.
 
 Precision rule (connectors/base.py "Precision"): atoms of one asset are never
@@ -116,11 +117,32 @@ class PriceIn:
     asset: str
     day: date
     usd_micros_per_unit: int
+    # wave2 (D14): the exact close, USD per one whole unit, as the source's
+    # decimal string. Preferred over usd_micros_per_unit when present, so a
+    # sub-cent coin ("0.00001234" = 12.34 micros) keeps its precision. It
+    # must agree with usd_micros_per_unit (= close x 1e6 truncated toward zero).
+    close: str | None = None
 
     def __post_init__(self) -> None:
         _require_int(self.usd_micros_per_unit, "usd_micros_per_unit")
         if self.usd_micros_per_unit < 0:
             raise ValueError(f"close for {self.asset} on {self.day} is negative")
+        if self.close is not None:
+            exact = parse_price(self.close) * MICROS_PER_UNIT
+            if exact < 0:
+                raise ValueError(f"close for {self.asset} on {self.day} is negative")
+            if _trunc_micros(exact) != self.usd_micros_per_unit:
+                raise ValueError(
+                    f"close {self.close!r} for {self.asset} on {self.day} disagrees with "
+                    f"usd_micros_per_unit {self.usd_micros_per_unit}"
+                )
+
+    @property
+    def exact_micros(self) -> Fraction:
+        """USD micros per unit, exact: from `close` when present."""
+        if self.close is not None:
+            return parse_price(self.close) * MICROS_PER_UNIT
+        return Fraction(self.usd_micros_per_unit)
 
 
 @dataclass(frozen=True)
@@ -330,7 +352,7 @@ def perp_positions_at(
     return book.positions()
 
 
-def unrealized_pnl_micros(position: PerpPosition, close_micros: int) -> int:
+def unrealized_pnl_micros(position: PerpPosition, close_micros: int | Fraction) -> int:
     """qty x (close - entry), in USD micros, truncated toward zero. Positive
     for a long above entry and for a short below it. Realized P&L is NOT
     computed here: the venue's REALIZED_PNL leg is the truth, already in cash."""
@@ -343,21 +365,24 @@ def unrealized_pnl_micros(position: PerpPosition, close_micros: int) -> int:
 
 
 class _PriceIndex:
+    """Closes by asset and day, as EXACT USD micros per unit (PriceIn.exact_micros:
+    the decimal `close` when given, else the integer micros)."""
+
     def __init__(self, prices: Iterable[PriceIn]) -> None:
-        rows: dict[str, dict[date, int]] = {}
+        rows: dict[str, dict[date, Fraction]] = {}
         for price in prices:
             by_day = rows.setdefault(price.asset, {})
             if price.day in by_day:
                 raise ValueError(f"two closes for {price.asset} on {price.day}")
-            by_day[price.day] = price.usd_micros_per_unit
+            by_day[price.day] = price.exact_micros
         self._days = {asset: sorted(by_day) for asset, by_day in rows.items()}
         self._rows = rows
 
     def has(self, asset: str) -> bool:
         return asset in self._rows
 
-    def close(self, asset: str, day: date) -> tuple[int, date] | None:
-        """Last known close on or before `day`: (usd micros per unit, day of that close)."""
+    def close(self, asset: str, day: date) -> tuple[Fraction, date] | None:
+        """Last known close on or before `day`: (exact usd micros per unit, day of that close)."""
         days = self._days.get(asset)
         if not days:
             return None
@@ -367,7 +392,7 @@ class _PriceIndex:
         found = days[i - 1]
         return self._rows[asset][found], found
 
-    def perp_close(self, perp_asset: str, day: date) -> tuple[int, date] | None:
+    def perp_close(self, perp_asset: str, day: date) -> tuple[Fraction, date] | None:
         """A perp is valued at closes of its own asset code ("BTC-PERP") when
         any exist, else at closes of the underlying coin ("BTC")."""
         if self.has(perp_asset):
@@ -409,6 +434,7 @@ class PositionValue:
     value_micros: int  # contribution to equity
     notional_micros: int  # signed qty x close (equal to value except for perps)
     entry: Fraction | None = None  # perps only
+    # wave2 (D14): close_micros above is truncated for display; values use the exact close.
 
 
 @dataclass(frozen=True)
@@ -440,11 +466,11 @@ class _Flags:
 
 def _unit_close(
     asset: str, day: date, prices: _PriceIndex, flags: _Flags
-) -> tuple[int, date | None] | None:
+) -> tuple[Fraction, date | None] | None:
     """USD micros per unit for a non-perp asset on `day`, with the carry-forward
     and unpriced rules applied (and flagged). None means: exclude it."""
     if asset in CASH_AT_PAR:
-        return MICROS_PER_UNIT, None
+        return Fraction(MICROS_PER_UNIT), None
     found = prices.close(asset, day)
     if found is None:
         flags.add(asset, FlagReason.UNPRICED)
@@ -474,7 +500,9 @@ def _value_day(
         close, price_day = found
         value = _trunc_micros(qty.units * close)
         kind = PositionKind.CASH if asset in CASH_AT_PAR else PositionKind.ASSET
-        positions.append(PositionValue(asset, kind, qty, close, price_day, value, value))
+        positions.append(
+            PositionValue(asset, kind, qty, _trunc_micros(close), price_day, value, value)
+        )
 
     perp_assets = {a for a in holdings if a.endswith(PERP_SUFFIX)} | set(perps)
     for asset in sorted(perp_assets):
@@ -500,7 +528,7 @@ def _value_day(
                 asset,
                 PositionKind.PERP,
                 position.qty,
-                close,
+                _trunc_micros(close),
                 price_day,
                 unrealized_pnl_micros(position, close),
                 _trunc_micros(position.qty.units * close),

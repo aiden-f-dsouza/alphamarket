@@ -273,7 +273,9 @@ def _micros_toward_zero(atoms: int, decimals: int) -> int:
 def reconcile_asset_account(db: Session, account: VenueAccount) -> EquitySnapshot:
     """Reconcile v2. Writes one AssetReconciliation row per asset and a
     summary EquitySnapshot (the cash asset's numbers, overall verdict), so the
-    worker, the API and the public pages read it like any other run."""
+    worker, the API and the public pages read it like any other run. The
+    snapshot also carries the broker equity check (_check_broker_equity),
+    which flags but never quarantines."""
     anchor = latest_anchor_balances(db, account)
     if not anchor:
         raise ValueError(f"venue account {account.id} has no reconciliation anchor")
@@ -318,6 +320,7 @@ def reconcile_asset_account(db: Session, account: VenueAccount) -> EquitySnapsho
         tolerance_micros=_micros_toward_zero(cash.tolerance_atoms, cash.decimals) if cash else 0,
         reconciled=reconciled,
     )
+    _check_broker_equity(db, account, venue, now, snapshot)
     db.add(snapshot)
     if not reconciled:
         for c in checks:
@@ -333,6 +336,50 @@ def reconcile_asset_account(db: Session, account: VenueAccount) -> EquitySnapsho
             quarantine_account(db, account, _chain_reason(b), ref=f"ledger_entry:{b.entry_id}")
     db.commit()
     return snapshot
+
+
+def _check_broker_equity(
+    db: Session,
+    account: VenueAccount,
+    venue: NormalizedBalances,
+    now: datetime,
+    snapshot: EquitySnapshot,
+) -> None:
+    """wave2 (D16): when the venue reports total account equity, compare it
+    with the ledger's equity at now (holdings valued at the latest marks,
+    else the last daily close; analytics_v2.marked_valuation):
+
+        divergence = venue equity - computed equity
+        ok         = |divergence| <= max($1, 0.5% of venue equity)
+
+    The result goes on the snapshot's equity_* columns. A mismatch NEVER
+    quarantines: prices and broker valuation timing differ, so it surfaces
+    as the broker_equity_divergence stats flag instead. Venues that report
+    no equity (or a valuation that cannot be built) leave the columns NULL."""
+    if venue.equity_usd_micros is None:
+        return
+    from alphamarket.analytics_v2 import equity_tolerance_micros, marked_valuation
+
+    try:
+        marked = marked_valuation(db, account, now)
+    except Exception:  # never let the advisory check break the vector reconciliation
+        logger.exception("broker equity check failed for venue account %s", account.id)
+        return
+    if marked is None:
+        return
+    tolerance = equity_tolerance_micros(venue.equity_usd_micros)
+    snapshot.venue_equity_micros = venue.equity_usd_micros
+    snapshot.computed_equity_micros = marked.equity_micros
+    snapshot.equity_tolerance_micros = tolerance
+    snapshot.equity_reconciled = abs(venue.equity_usd_micros - marked.equity_micros) <= tolerance
+    if not snapshot.equity_reconciled:
+        logger.warning(
+            "venue account %s: broker equity %d vs computed %d micros (tolerance %d); flagged",
+            account.id,
+            venue.equity_usd_micros,
+            marked.equity_micros,
+            tolerance,
+        )
 
 
 def _chain_reason(b: ChainBreak) -> str:
