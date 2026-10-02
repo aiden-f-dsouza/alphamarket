@@ -642,3 +642,64 @@ reported account equity.
 **Prices.** Daily closes are Alpaca's unadjusted daily bars (share counts
 are adjusted by the split entries themselves, so prices must not be
 adjusted twice). A bar belongs to its New York trading date.
+
+<!-- wave2:p6-lifecycle -->
+## Paper copying v2: funding, liquidation, corporate actions
+
+A paper allocation that copies a perp or stock strategy keeps living between
+signals: perps pay or receive funding and can be liquidated, and shares are
+split and pay dividends. Each event is applied once (it is keyed by its
+source row), on every mirror pass, including for an allocation that has
+stopped copying, because what it still holds keeps accruing. Every amount is
+computed exactly, then rounded to the micro-dollar against the follower:
+credits round down and debits round up.
+
+**Funding.** For each funding rate the venue publishes after the last one
+applied to that perp (and not before the follower first traded it):
+
+```
+payment = -q x mark x rate        (q signed: + long, - short)
+mark    = the rate's own mark price, else a quote within 15 minutes of it,
+          else the last complete daily close before that day
+```
+
+A rate with no position at that moment pays nothing; a rate with no mark at
+all is skipped rather than estimated. Example: 0.09998 BTC long, rate
++0.0000125 at mark 60,000 pays 0.074985; rate -0.00001 at mark 59,000
+receives 0.0589882, credited as 0.058988. Cash 997.0001 becomes 996.925115,
+then 996.984103.
+
+**Liquidation (Hyperliquid, cross margin).** Checked whenever every open perp
+has a mark no older than 15 minutes; with any mark stale, there is no check.
+
+```
+notional = |q| x mark
+mmr      = 1 / (2 x max leverage of the tier with the largest lower bound <= notional)
+MM       = sum of notional x mmr
+AV       = cash + sum of q x (mark - entry)
+AV < MM  ->  every perp is closed at the mark and the allocation stops ("liquidated")
+```
+
+The P&L of each closed position is realized at the mark (a liquidation entry,
+no extra fee). A perp whose venue publishes no margin tiers is never given a
+guessed leverage: it adds nothing to MM, and with no tiered position there is
+no check. Example (BTC, max leverage 40, mmr 1.25%; 0.09998 long at 60,010,
+cash 996.984103): at 51,000, AV = 996.984103 - 900.8198 = 96.164303 and MM =
+5,098.98 x 1.25% = 63.73725, so nothing happens; at 50,500, AV =
+996.984103 - 950.8098 = 46.174303 < MM = 63.112375, so the position is
+closed, realizing -950.8098 and leaving cash 46.174303.
+
+**Splits.** Applied at 00:00 UTC on the ex-date to the shares held just
+before it: new shares = floor(held x new / old), at the venue's share
+precision. A fraction the split would create is dropped, with no cash in
+lieu. 10 shares in a 2-for-1 split become 20; the cash spent on them is
+unchanged. 7 whole shares in a 1-for-3 reverse split become 2.
+
+**Cash dividends.** Shares held at the end of the day before the ex-date x
+cash per share, credited at 00:00 UTC on the pay date and not before (a
+dividend whose pay date is not yet known waits). Shares bought on the
+ex-date do not count. 20 shares x $0.25 = $5.00.
+
+**Not modelled yet.** Symbol changes are logged and not applied. When two
+data sources report the same action (same symbol, kind and ex-date) it is
+applied once.
