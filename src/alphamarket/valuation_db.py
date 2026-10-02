@@ -106,7 +106,11 @@ def price_inputs(
         return []
     query = (
         select(
-            Instrument.base_asset, Instrument.venue, PriceDaily.day, PriceDaily.usd_micros_per_unit
+            Instrument.base_asset,
+            Instrument.venue,
+            PriceDaily.day,
+            PriceDaily.usd_micros_per_unit,
+            PriceDaily.close,
         )
         .join(PriceDaily, PriceDaily.instrument_id == Instrument.id)
         .where(
@@ -120,13 +124,25 @@ def price_inputs(
     if end is not None:
         query = query.where(PriceDaily.day <= end)
     rank = {venue: n for n, venue in enumerate(order)}
-    best: dict[tuple[str, date], tuple[int, int]] = {}
-    for asset, venue, day, usd in db.execute(query).all():
+    best: dict[tuple[str, date], tuple[int, int, str | None]] = {}
+    for asset, venue, day, usd, close in db.execute(query).all():
         key = (asset, day)
-        candidate = (rank[venue], usd)
+        candidate = (rank[venue], usd, close)
         if key not in best or candidate[0] < best[key][0]:
             best[key] = candidate
-    return [PriceIn(asset, day, usd) for (asset, day), (_, usd) in sorted(best.items())]
+    return [
+        _price_in(asset, day, usd, close) for (asset, day), (_, usd, close) in sorted(best.items())
+    ]
+
+
+def _price_in(asset: str, day: date, usd: int, close: str | None) -> PriceIn:
+    """D14: carry the exact close when it agrees with the stored micros (it
+    always does for a USD/at-par close written by prices.py); a row that
+    disagrees is valued at its micros rather than failing the whole job."""
+    try:
+        return PriceIn(asset, day, usd, close=close)
+    except (ValueError, TypeError, ArithmeticError):
+        return PriceIn(asset, day, usd)
 
 
 def pricing_venues(account: VenueAccount) -> tuple[str, ...]:

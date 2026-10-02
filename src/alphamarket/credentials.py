@@ -199,13 +199,13 @@ def disconnect(
     `reason` is "pending_abandoned" when housekeeping drops an unfinished
     connect (pending.abandon_stale)."""
     _revoke_oauth_grant(db, account)
-    _delete_aggregator_user(account)
+    delete_aggregator_user(account)
     revoke(db, account, actor_user_id=actor_user_id, reason=reason)
     account.status = VenueAccountStatus.DISCONNECTED
     db.commit()
 
 
-def _delete_aggregator_user(account: VenueAccount) -> None:
+def delete_aggregator_user(account: VenueAccount) -> None:
     """wave2 (D20): one aggregator user per connection, so disconnecting
     deletes it (the aggregator drops the brokerage link and stops billing).
     Needs only the user id (key_id), never the secret. Best effort: the

@@ -650,6 +650,10 @@ def build_market_data(venue: str, venue_env: str) -> MarketDataSource:
 
 # ---- venue-alpaca: OAuth providers (oauth.py) ----
 
+# Authorize endpoints the connect form may redirect to (CSP form-action,
+# security_headers.py). One entry per OAuth venue.
+OAUTH_AUTHORIZE_URLS: tuple[str, ...] = (ALPACA_OAUTH_AUTHORIZE_URL,)
+
 
 def get_oauth_provider(venue: str):
     """The OAuth provider for a venue that connects by OAuth, else None.

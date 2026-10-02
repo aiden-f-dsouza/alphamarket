@@ -147,10 +147,15 @@ def verification_tier(account: VenueAccount) -> str:
     """What the platform can vouch for on this account (see methodology):
     `reconciled`: fills verified and cash balance checked nightly;
     `fills_only`: fills verified, the venue exposes no balance to check;
+    `daily_verified`: reconciled, but the venue only reports end of day
+    (IBKR Flex, SnapTrade), a weaker claim labelled as such (wave2);
     `unclaimed`: ownership not yet proven, nothing shown publicly."""
     if not account.claimed:
         return "unclaimed"
-    return "reconciled" if get_profile(account.venue).balance_observable else "fills_only"
+    profile = get_profile(account.venue)
+    if not profile.balance_observable:
+        return "fills_only"
+    return "daily_verified" if profile.daily_resolution else "reconciled"
 
 
 def new_claim_code() -> str:

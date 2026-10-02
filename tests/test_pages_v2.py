@@ -839,7 +839,9 @@ def test_dashboard_claim_block_follows_the_ownership_proof(client, session_facto
     html = client.get("/dashboard").text
     assert "Prove this wallet is yours" in html and "koine-hype" in html  # signed message
     assert "Prove this account is yours" in html and "koine-poly" in html  # profile bio code
-    assert html.count("/claim") == 1  # only the profile-code venue has the plain claim form
+    # the profile-code venue posts the plain claim form; the wallet links to the signing page
+    assert html.count("/claim") == 2
+    assert html.count('action="/dashboard/accounts/') and "/dashboard/connect/claim/" in html
 
 
 def test_account_status_importing_needs_an_active_backfill_and_no_done_marker(db):

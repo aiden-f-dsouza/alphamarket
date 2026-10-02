@@ -30,18 +30,16 @@ from alphamarket.connectors.base import (
     ReadOnlyProof,
     VenueProfile,
 )
-from alphamarket.connectors.registry import PROFILES, get_profile
+from alphamarket.connectors.registry import PROFILES
 from alphamarket.db import get_db
 from alphamarket.models import (
     EquitySnapshot,
     Settlement,
-    Signal,
     Strategy,
     StrategyStatus,
     User,
     VenueAccount,
 )
-from alphamarket.money import from_atoms
 from alphamarket.stats import drawdown_series, micros_to_float, monthly_returns
 
 INCUBATION_DAYS = 90
@@ -74,18 +72,12 @@ def is_visible(strategy: Strategy, account: VenueAccount | None = None) -> bool:
 
 
 def verification_tier(account: VenueAccount | None) -> str | None:
-    """`reconciled` | `fills_only` | `unclaimed` (venues.verification_tier),
-    plus wave2's `daily_verified`: a reconciled account on a venue that only
-    reports end of day (IBKR Flex, SnapTrade), a weaker claim than nightly
-    reconciliation of an intraday ledger and labelled as such."""
+    """venues.verification_tier (the one definition), None without an account."""
     if account is None:
         return None
     from alphamarket.venues import verification_tier as _tier  # venues imports public
 
-    tier = _tier(account)
-    if tier == "reconciled" and get_profile(account.venue).daily_resolution:
-        return "daily_verified"
-    return tier
+    return _tier(account)
 
 
 def asset_classes_of(venue: str | None) -> tuple[str, ...]:
@@ -312,39 +304,13 @@ def v2_stats_view(extras: dict) -> dict:
 # ---- signals (both shapes) -----------------------------------------------------------------
 
 
-def asset_signal_item(strategy: Strategy, s: Signal) -> dict:
-    """An asset signal as the public feed shows it: what was traded and the
-    size relative to the creator's equity (never a follower's dollars)."""
-    qty = from_atoms(s.qty_atoms, s.qty_decimals) if s.qty_atoms is not None else None
-    stake = (
-        s.notional_micros / s.creator_equity_micros
-        if s.notional_micros is not None and s.creator_equity_micros > 0
-        else None
-    )
-    return {
-        "kind": "fill",
-        "at": s.filled_at.isoformat(),
-        "strategy_slug": strategy.slug,
-        "strategy_name": strategy.name,
-        "ticker": s.ticker,
-        "side": s.side,
-        "action": s.action,
-        "count": float(qty) if qty is not None else None,
-        "qty": f"{qty:f}" if qty is not None else None,
-        "price": float(Decimal(s.price)) if s.price is not None else None,
-        "stake_fraction": stake,
-    }
-
-
 def signal_items(db: Session, strategy: Strategy, limit: int = 20) -> list[dict]:
-    """Recent signals of a strategy, binary and asset rows alike."""
+    """Recent signals of a strategy, binary and asset rows alike (one
+    renderer for the page, the JSON API and the feed: follows.signal_item)."""
     from alphamarket.follows import signal_item
     from alphamarket.signals import recent_signals
 
-    return [
-        asset_signal_item(strategy, s) if s.is_asset else signal_item(strategy, s)
-        for s in recent_signals(db, strategy.id, limit)
-    ]
+    return [signal_item(strategy, s) for s in recent_signals(db, strategy.id, limit)]
 
 
 # ---- strategy page ---------------------------------------------------------------------------

@@ -68,6 +68,10 @@ def recheck_account(db: Session, account: VenueAccount) -> ReadOnlyEvidence:
 
 
 def suspend(db: Session, account: VenueAccount, evidence: ReadOnlyEvidence) -> None:
+    # wave2: a writable aggregator connection (SnapTrade) is released at the
+    # aggregator too, so the trade-capable brokerage link does not outlive
+    # the erased credential (best effort, like disconnect).
+    credentials.delete_aggregator_user(account)
     credentials.revoke(db, account, reason="scope_writable")
     account.status = VenueAccountStatus.SUSPENDED
     account.last_sync_error = (

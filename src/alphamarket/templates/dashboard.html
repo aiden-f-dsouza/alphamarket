@@ -40,6 +40,7 @@
   <div class="body" style="gap:14px;border-bottom:1px solid var(--line)">
     <div class="stack" style="gap:6px"><h3>Prove this wallet is yours</h3>
       <span class="small text2" style="line-height:1.55">Anyone can paste a public address, so your page stays hidden until you sign a short Koine message with this wallet. The message contains your claim code <code class="mono">{{ a.claim_code }}</code>, moves no funds and costs no gas.</span></div>
+    <a class="btn" href="/dashboard/connect/claim/{{ a.id }}">Sign to claim</a>
   </div>
   {% elif row.tier == "unclaimed" %}
   <div class="body" style="gap:14px;border-bottom:1px solid var(--line)">

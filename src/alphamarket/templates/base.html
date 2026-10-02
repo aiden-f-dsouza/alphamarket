@@ -193,7 +193,7 @@
   </div>
   <div class="nav-right">
     {% if user %}
-      {% if settings.demo_mode %}<a href="/portfolio" class="{{ 'active' if nav == 'portfolio' }}">Portfolio</a>{% endif %}
+      {% if settings.demo_mode or user %}<a href="/portfolio" class="{{ 'active' if nav == 'portfolio' }}">Portfolio</a>{% endif %}
       <a href="/dashboard" class="{{ 'active' if nav == 'dashboard' }}">Dashboard</a>
       <details class="menu account">
         <summary class="avatar" title="Account menu" aria-label="Account menu">{{ user.display_name[:2]|upper }}</summary>
@@ -222,7 +222,7 @@
         {% for key, href, label, hint in learn %}<a href="{{ href }}" class="{{ 'on' if nav == key }}">{{ label }}</a>{% endfor %}
         <hr>
         {% if user %}
-          {% if settings.demo_mode %}<a href="/portfolio">Portfolio</a>{% endif %}
+          {% if settings.demo_mode or user %}<a href="/portfolio">Portfolio</a>{% endif %}
           <a href="/dashboard">Dashboard</a>
           <a href="/dashboard/security">Security</a>
           <form method="post" action="/logout-form"><button type="submit">Log out</button></form>

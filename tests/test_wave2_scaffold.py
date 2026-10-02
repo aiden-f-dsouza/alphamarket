@@ -236,8 +236,9 @@ def test_price_inputs_prefer_the_pricing_venue_then_the_fallback(db):
     db.commit()
     prices = valuation_db.price_inputs(db, {"ETH"}, None, None, ("kraken",))
     assert [(p.day, p.usd_micros_per_unit) for p in prices] == [(DM1, 3_000 * M), (D, 3_100 * M)]
+    # The exact close rides along (D14).
     assert valuation_db.price_inputs(db, {"ETH"}, D, D, ("kraken",)) == [
-        PriceIn("ETH", D, 3_100 * M)
+        PriceIn("ETH", D, 3_100 * M, close="3100")
     ]
 
 
