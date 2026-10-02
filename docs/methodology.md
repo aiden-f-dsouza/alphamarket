@@ -654,7 +654,8 @@ section "Asset valuation", with deposits and withdrawals taken out as in
 
 **Which days.** One point per UTC day, from the day the account was
 connected (the anchor day) to the last *complete* UTC day. Today is never in
-the series, because today has no close yet.
+the series, because today has no close yet, and no figure on the page uses
+a close before its day is complete.
 
 **Return index.** A growth-of-$1 index built from the flow-adjusted daily
 returns:
@@ -674,7 +675,7 @@ stays flat across it.
 | Sharpe | `mean(r) / stdev(r) × √365` over the days with a return; sample stdev |
 | Sortino | `mean(r) / √(mean(min(r,0)²)) × √365` |
 | Win rate | not shown: a coin or a share has no single "trade" that wins or loses |
-| Realized P&L | the venue's own realized-P&L and liquidation entries, in dollars (a stablecoin at 1.00, anything else at its close that day) |
+| Realized P&L | the venue's own realized-P&L and liquidation entries, in dollars (a stablecoin at 1.00, anything else at its close that day, or the last close before it) |
 | Money-weighted return | Modified Dietz, shown only beside the TWR |
 
 Drawdown and the ratios read the index, so a deposit can never look like a
@@ -703,8 +704,9 @@ account has no single "stake". Leverage is shown as a flag instead.
 
 **Holdings and exposure** are those of the last day in the series, at that
 day's closes. Next to them, the "marked equity" values the holdings right
-now at the freshest public quote, or at the last daily close when no quote
-is fresh.
+now at the freshest public quote, or at the last complete day's close when
+no quote is fresh. On the day an account connects there is no complete day
+yet: holdings are shown at the previous day's closes and no return is shown.
 
 **Flags** (displayed, never used to delist):
 

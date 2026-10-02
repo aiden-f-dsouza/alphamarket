@@ -27,6 +27,7 @@ from alphamarket.money import to_atoms
 from alphamarket.valuation import (
     AnchorIn,
     EquityPoint,
+    LegIn,
     PerpPosition,
     PriceIn,
     Qty,
@@ -302,8 +303,9 @@ def test_exit_series_from_the_ledger(db, exit_case):
     assert x["asset_classes"] == ["crypto"] and x["price_sources"] == ["kraken"]
     assert x["broker_equity"] is None
     # No fresh mark (prices.latest_mark is None): marked equity = holdings now at
-    # the last close on or before D5, which is D5's 40,000: 0.2 x 40,000 + 3,000.
-    assert x["marked_equity_micros"] == 11_000 * M
+    # the last close of a COMPLETE day, D4's 46,222.5: 0.2 x 46,222.5 + 3,000.
+    # D5's stored 40,000 is not known at D5 06:00 and is never looked ahead to.
+    assert x["marked_equity_micros"] == 12_244_500_000
     assert x["n_open_positions"] == 1
     assert db.scalars(select(StrategyStats)).one().id == row.id
 
@@ -338,12 +340,48 @@ def test_marked_equity_prefers_a_fresh_mark(db, exit_case, monkeypatch):
 
 def test_connected_today_has_no_returns_yet(db, exit_case):
     _, strategy = exit_case
+    btc = db.scalars(select(Instrument).where(Instrument.base_asset == "BTC")).one()
+    d0 = D1 - timedelta(days=1)
+    db.add(
+        PriceDaily(
+            instrument_id=btc.id, day=d0, close="49000", usd_micros_per_unit=49_000 * M, source="x"
+        )
+    )
+    db.commit()
     row = analytics_v2.compute_asset_stats(db, strategy, as_of=at(D1, 20))
     assert (row.track_days, row.total_return, row.max_drawdown, row.sharpe) == (0, None, 0.0, None)
     assert row.extras["daily_equity"] == [] and row.extras["twr_index"] == []
-    # Holdings still show, valued at D1's close: 0.2 x 50,000.
-    assert row.equity_micros == 10_000 * M
-    assert row.extras["holdings"][0]["value_micros"] == 10_000 * M
+    # Holdings still show, valued at the last COMPLETE day's close (D0's 49,000;
+    # D1's 50,000 is not known at D1 20:00): 0.2 x 49,000.
+    assert row.equity_micros == 9_800 * M
+    assert row.extras["holdings"][0]["value_micros"] == 9_800 * M
+    assert row.extras["holdings"][0]["price_day"] == d0.isoformat()
+    # Carrying D0's close into today is expected, not stale: no flag.
+    assert row.extras["valuation_flags"]["carried_forward_days"] == 1
+    assert row.flags == ["single_asset_concentration"]
+
+
+def test_realized_pnl_prices_each_leg_and_truncates_once():
+    # USDC +10.5 (at par) + BTC -0.00000001 at D1's 50,000.5 (-500.005 micros)
+    # + ETH 0.000001 on D2, carried from D1's 3,000.0000005 (+3,000.0000005 micros)
+    # + a XYZ leg with no close (left out); funding is not realized.
+    # Sum = 10,500,000 - 500.005 + 3,000.0000005 = 10,502,499.9950005 -> 10,502,499.
+    t1, t2 = at(D1), at(D2)
+    legs = [
+        LegIn("USDC", 10_500_000, 6, LegKind.REALIZED_PNL, t1),
+        LegIn("BTC", -1, 8, LegKind.LIQUIDATION, t1),
+        LegIn("ETH", 1, 6, LegKind.REALIZED_PNL, t2),
+        LegIn("XYZ", 5, 0, LegKind.REALIZED_PNL, t2),
+        LegIn("USDC", -7 * M, 6, LegKind.FUNDING, t2),
+    ]
+    closes = [
+        PriceIn("BTC", D1, 50_000_500_000, close="50000.5"),
+        PriceIn("ETH", D1, 3_000_000_000, close="3000.0000005"),
+    ]
+    assert analytics_v2.realized_pnl_micros(legs, closes) == 10_502_499
+    # A net loss truncates toward zero: -500.005 -> -500.
+    assert analytics_v2.realized_pnl_micros(legs[1:2], closes) == -500
+    assert analytics_v2.realized_pnl_micros([], closes) == 0
 
 
 def test_unpriced_and_carried_forward_flags(db):

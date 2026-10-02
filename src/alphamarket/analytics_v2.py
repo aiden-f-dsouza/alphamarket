@@ -193,7 +193,8 @@ def _mark_prices(
 def marked_valuation(db: Session, account: VenueAccount, now: datetime) -> DayValuation | None:
     """The account's holdings at `now` (anchor + every leg and perp fill at or
     before it), valued at the freshest mark per asset (prices.latest_mark),
-    else the last daily close on or before now's UTC day (carried forward).
+    else the last close of a COMPLETE UTC day before now's (carried forward):
+    now's own day has no close yet, so a stored one is never looked ahead to.
     None when the account was never anchored."""
     now = aware(now).astimezone(UTC)
     inputs = valuation_db.account_inputs(db, account)
@@ -204,12 +205,10 @@ def marked_valuation(db: Session, account: VenueAccount, now: datetime) -> DayVa
     assets = _price_assets(inputs.assets | {f.asset for f in fills})
     today = now.date()
     closes = valuation_db.price_inputs(
-        db, assets, None, today, valuation_db.pricing_venues(account)
+        db, assets, None, today - timedelta(days=1), valuation_db.pricing_venues(account)
     )
     marks = _mark_prices(db, account, assets, now)  # a perp may mark via its coin
-    marked = {p.asset for p in marks}
-    priced = [p for p in closes if not (p.day == today and p.asset in marked)] + marks
-    return valuation.valuation_on(inputs.anchor, legs, priced, fills, today)
+    return valuation.valuation_on(inputs.anchor, legs, [*closes, *marks], fills, today)
 
 
 def _price_sources(db: Session, account: VenueAccount, assets: set[str], end: date) -> list[str]:
@@ -414,12 +413,15 @@ def compute_asset_stats(
     fills = [f for f in inputs.perp_fills if f.occurred_at <= as_of]
     held_assets = inputs.assets | {f.asset for f in fills}
     price_assets = _price_assets(held_assets)
+    # Closes of complete days only: as_of's own day has no close yet, so none is
+    # looked ahead to (by the series, the realized P&L or a connected-today view).
     closes = valuation_db.price_inputs(
-        db, price_assets, None, as_of.date(), valuation_db.pricing_venues(account)
+        db, price_assets, None, last_day, valuation_db.pricing_venues(account)
     )
     series = valuation.daily_equity_series(inputs.anchor, legs, closes, fills, days)
     # Connected today: no complete day yet; holdings and exposure come from the
-    # anchor day's valuation, and every return statistic is undefined.
+    # anchor day's valuation at the previous day's closes, and every return
+    # statistic is undefined.
     latest = (
         series[-1]
         if series
@@ -445,7 +447,9 @@ def compute_asset_stats(
 
     profile = get_profile(account.venue)
     allowance = EQUITY_CARRY_ALLOWANCE_DAYS if "equities" in profile.asset_classes else 0
-    vflags, stale = _valuation_flags(series or [latest], allowance)
+    # Connected today: the day being valued is today, whose close cannot exist yet,
+    # so carrying the previous day's close is expected (one more day allowed).
+    vflags, stale = _valuation_flags(series or [latest], allowance if series else allowance + 1)
     broker = _latest_broker_check(db, strategy, as_of)
     marked = marked_valuation(db, account, as_of)
 
@@ -496,7 +500,7 @@ def compute_asset_stats(
             "holdings": [_holding_row(p, kinds) for p in latest.positions],
             "exposure": _exposure_dict(current),
             "asset_classes": list(profile.asset_classes),
-            "price_sources": _price_sources(db, account, price_assets, as_of.date()),
+            "price_sources": _price_sources(db, account, price_assets, last_day),
             "valuation_flags": vflags,
             "broker_equity": broker,
             "marked_equity_micros": marked.equity_micros if marked else latest.equity_micros,
