@@ -32,10 +32,13 @@ deliberately out of scope).
   (idempotent ingestion: binary fills plus ledger v2 legs, per-event dedupe,
   page runners), `ledger.py` (legs, balance vectors, cash curve over USD
   legs), `valuation.py` (pure: holdings, perp entry, daily equity,
-  flow-adjusted TWR, exposure; not yet wired into stats), `reconcile.py`
-  (per-asset vectors + running balances vs the venue; quarantine), `stats.py`
-  (returns/drawdown/Sharpe/risk score/flags, pure functions), `analytics.py`
-  (persists strategy_stats), `jobs.py` (Postgres job queue: SKIP LOCKED
+  flow-adjusted TWR, exposure, `equity_before` a fill), `valuation_db.py`
+  (the only bridge from ledger rows to valuation inputs), `reconcile.py`
+  (per-asset vectors + running balances vs the venue; quarantine; broker
+  equity check, flag only), `stats.py` (returns/drawdown/Sharpe/risk
+  score/flags, pure functions), `analytics.py` (persists strategy_stats;
+  binary venues, unchanged) + `analytics_v2.py` (asset venues: TWR-based
+  stats from valuation, extras marked `"valuation": "v2"`), `jobs.py` (Postgres job queue: SKIP LOCKED
   claims, one running job per account, leases, backoff, dead letter, handler
   and page-runner registries), `venue_limits.py` (outbound token buckets per
   credential and per egress IP, adaptive 429 backoff, circuit breaker),
@@ -49,14 +52,28 @@ deliberately out of scope).
   `redaction.py` (log/secret scrubbing), `scopecheck.py` (nightly read-only
   re-proof; writable keys are erased and the account suspended),
   `strategies.py` (listing editor), `public.py` (public page data + JSON API
-  + marketplace listing), `charts.py` (SVG polyline geometry, pure),
+  + marketplace listing; venue/asset filters), `charts.py` (SVG polyline
+  geometry, pure),
   `demo.py` (SAMPLE data for DEMO_MODE; invariant 7), `marks.py`
   (deterministic strategy sigils + tag colours, pure), `marketdata.py`
-  (public quotes -> `market_prices`, marks), `signals.py` (creator fills ->
-  append-only `signals`), `follows.py` (follow/unfollow + `/api/feed`),
-  `mirror.py` (paper mirroring: sizing, fee model, settlement), `execution.py`
-  (Executor; paper only, live raises), `portfolio.py` (allocation valuation,
-  drawdown stop, snapshots), `tails.py` (allocations API + `/api/portfolio`),
+  (binary public quotes -> `market_prices`, marks), `prices.py` (asset
+  market data: `prices_daily`, `asset_quotes`, funding rates, corporate
+  actions, margin tiers, CoinGecko fallback via `connectors/coingecko.py`),
+  `signals.py` (creator fills -> append-only `signals`; asset venues go to
+  `paper_signals.py`, signals v2 with the quote captured at observed_at),
+  `follows.py` (follow/unfollow + `/api/feed`; the one signal renderer),
+  `mirror.py` (binary paper mirroring: sizing, fee model, settlement; asset
+  allocations dispatch to `paper.py`: sizing, fill price, fees over the
+  `paper_book.py` follower ledger, and `paper_lifecycle.py`: funding,
+  liquidation, splits, dividends), `execution.py` (Executor; paper only,
+  live raises), `portfolio.py` (allocation valuation, drawdown stop,
+  snapshots), `tails.py` (allocations API + `/api/portfolio`),
+  `consent.py` + `connect_pages.py` + `pending.py` (consent screens,
+  Hyperliquid signed claim, SnapTrade portal and PENDING accounts),
+  `rotate.py` (replace a key on an existing account), `oauth_jobs.py`
+  (OAuth refresh tick/job), `housekeeping.py` (nightly pruning),
+  `activity_flags.py` + `account_status.py` (unsupported activity,
+  dashboard state),
   `pages.py`
   + `templates/` (Jinja HTML: `/` investor landing, `/creators`,
   `/marketplace` (`/explore` redirects), `/s/{slug}`, `/s/{slug}/tail`,
@@ -93,7 +110,9 @@ deliberately out of scope).
   `build_connector(venue, env, key_id, secret, account_ref)`,
   `build_market_data`) is the only import path core code may use
 - `alembic/` — migrations, hand-written for ledger tables (0009 ledger v2,
-  0010 jobs, 0011 auth, 0012 vault/audit)
+  0010 jobs, 0011 auth, 0012 vault/audit, 0013 wave 2: signals v2, paper
+  asset book, market data, consent, activity flags; 0014 market data
+  coverage)
 - `docs/methodology.md` — public methodology page source; every ledger/stats
   formula lands here alongside its unit test. `docs/security.md` (served at
   /security), `docs/launch.md` (M5 outreach), `docs/deploy.md` + `Dockerfile`
@@ -123,8 +142,10 @@ deliberately out of scope).
 3. `fills` and `settlements` are APPEND-ONLY. No UPDATE, no DELETE, ever.
    Corrections are new rows. Idempotency comes from unique venue ids.
    `signals`, `mirror_fills`, `mirror_settlements`, `ledger_entries`,
-   `asset_fills`, `ledger_quarantines` and `audit_log` share the rule (ORM
-   guard + Postgres `<table>_append_only` triggers; preflight checks the set).
+   `asset_fills`, `ledger_quarantines`, `audit_log`, `mirror_asset_fills`,
+   `mirror_ledger_entries`, `venue_activity_flags`, `consent_texts` and
+   `venue_consents` share the rule (ORM guard + Postgres
+   `<table>_append_only` triggers; preflight checks the set).
 4. Venue credentials (keys, OAuth grants, report tokens) must be read-only
    and are never logged, never committed, never returned by any API. They
    live only in `venue_credentials`, envelope-encrypted with a KMS-wrapped
@@ -147,7 +168,10 @@ deliberately out of scope).
 9. Koine never accepts a venue username or password: only API keys, OAuth
    grants, report tokens, aggregator connections or public addresses.
 10. A venue is connectable only with a `docs/venues/<venue>.md` terms
-    position and a consent screen. `requires_partner_approval=True` refuses
+    position and a consent screen. Every connect path (form, JSON
+    `POST /venues`, OAuth state, SnapTrade start) carries `consent_sha256`
+    of the exact text shown, stored in `consent_texts`/`venue_consents`;
+    JSON `POST /venues` refuses OAuth and aggregator venues. `requires_partner_approval=True` refuses
     connects until the written approval is on file (the flag flips);
     `ENABLE_UNAPPROVED_VENUES` opens them for dev only and preflight refuses it.
 11. Connecting a venue needs a verified email, TOTP and a fresh step-up
