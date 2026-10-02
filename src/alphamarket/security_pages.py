@@ -13,6 +13,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from alphamarket import account, mfa, ratelimit, sessions
+from alphamarket.audit import AuditAction
 from alphamarket.auth import optional_user, totp_enabled
 from alphamarket.connectors.registry import PROFILES
 from alphamarket.db import get_db
@@ -100,6 +101,7 @@ def _security_ctx(request: Request, db: Session, user: User, **extra) -> dict:
 # ---- wave2:account-security: audit trail ---------------------------------------------
 
 AUDIT_TRAIL_LIMIT = 50
+AUDIT_TRAIL_DECRYPTS = 10  # the newest key uses, merged into the list
 AUDIT_LABELS = {
     "credential.connect": "Key stored",
     "credential.rejected": "Key refused (not read-only)",
@@ -141,12 +143,23 @@ def audit_trail(db: Session, user: User, limit: int = AUDIT_TRAIL_LIMIT) -> list
         conditions.append(
             (AuditLog.target_type == "venue_account") & AuditLog.target_id.in_(list(venues_by_id))
         )
-    rows = db.scalars(
-        select(AuditLog)
-        .where(or_(*conditions))
-        .order_by(AuditLog.at.desc(), AuditLog.id.desc())
-        .limit(limit)
+    # Every sync decrypts, so a busy account writes a decrypt row every few
+    # minutes: one query for the rest and a short one for decrypts keeps a
+    # sign-in or a password change from being pushed off the list by them.
+    newest = (AuditLog.at.desc(), AuditLog.id.desc())
+    decrypt = AuditLog.action == AuditAction.CREDENTIAL_DECRYPT
+    others = db.scalars(
+        select(AuditLog).where(or_(*conditions), ~decrypt).order_by(*newest).limit(limit)
     ).all()
+    decrypts = db.scalars(
+        select(AuditLog)
+        .where(or_(*conditions), decrypt)
+        .order_by(*newest)
+        .limit(min(limit, AUDIT_TRAIL_DECRYPTS))
+    ).all()
+    rows = sorted([*others, *decrypts], key=lambda r: (sessions.aware(r.at), r.id), reverse=True)[
+        :limit
+    ]
     out = []
     for row in rows:
         details = row.details if isinstance(row.details, dict) else {}
@@ -281,6 +294,7 @@ def recovery_codes_form(request: Request, code: str = Form(""), db: Session = De
 def revoke_all_form(request: Request, db: Session = Depends(get_db)):
     user = _need_user(request, db)
     if user is not None:
+        account.cancel_email_changes(db, user.id)  # committed by revoke_all
         sessions.revoke_all(db, user.id)
     sessions.revoke_current(db, request)
     return RedirectResponse("/login", status_code=303)

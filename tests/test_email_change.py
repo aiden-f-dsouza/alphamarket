@@ -202,3 +202,41 @@ def test_security_page_form_takes_a_code_when_not_stepped_up(client, member, ses
         data={"new_email": NEW, "current_password": PASSWORD, "code": code(member["totp"], 1)},
     )
     assert resp.status_code == 200 and "confirmation link is on its way" in resp.text
+
+
+@pytest.mark.parametrize("bad", ["a@b", "x@example.com\nBcc: y@example.org"])
+def test_security_page_form_validates_the_address(client, member, session_factory, outbox, bad):
+    sent = len(outbox.outbox)
+    resp = client.post(
+        "/dashboard/security/email", data={"new_email": bad, "current_password": PASSWORD}
+    )
+    assert resp.status_code == 422 and "Enter a valid email address." in resp.text
+    assert len(outbox.outbox) == sent
+    with session_factory() as db:
+        assert not db.scalars(select(AuthToken).where(AuthToken.kind == "email_change")).all()
+
+
+@pytest.mark.parametrize("cancel", ["password_change", "password_reset", "sign_out_everywhere"])
+def test_securing_the_account_cancels_a_pending_change(client, member, session_factory, cancel):
+    """The alert to the old address says: change your password or sign out
+    everywhere. Either must kill a link already sitting in another inbox."""
+    _request(client)
+    token = last_token(NEW, "/account/email/confirm")
+    if cancel == "password_change":
+        resp = client.post(
+            "/auth/password/change",
+            json={"current_password": PASSWORD, "new_password": "new-password-123"},
+        )
+        assert resp.status_code == 204
+    elif cancel == "password_reset":
+        client.post("/auth/password-reset/request", json={"email": OLD})
+        reset = last_token(OLD, "/reset-password")
+        resp = client.post(
+            "/auth/password-reset/confirm", json={"token": reset, "password": "new-password-123"}
+        )
+        assert resp.status_code == 200
+    else:
+        assert client.post("/auth/sessions/revoke-all").status_code == 204
+    assert "cannot be used" in client.get(f"/account/email/confirm?token={token}").text
+    with session_factory() as db:
+        assert db.get(User, member["id"]).email == OLD

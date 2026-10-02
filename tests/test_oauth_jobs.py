@@ -255,3 +255,57 @@ def test_refresh_that_grants_a_write_scope_is_a_reconnect(session_factory, captu
         assert json.loads(opened.secret)["access_token"] == "old-access"  # never stored
         assert cred.expires_at.replace(tzinfo=UTC) == NOW + timedelta(minutes=2)
     assert len(captured_alerts) == 1
+
+
+@respx.mock
+def test_a_try_later_error_code_is_retried_not_a_reconnect(session_factory, captured_alerts):
+    # _token_request reports the body's error code over the HTTP status, so a
+    # 503 with {"error": "temporarily_unavailable"} must still count as transient.
+    respx.post(TOKEN_URL).mock(
+        return_value=httpx.Response(503, json={"error": "temporarily_unavailable"})
+    )
+    with session_factory() as db:
+        account_id = _seed(db, NOW + timedelta(minutes=2))
+    oauth_jobs.tick(session_factory, now=NOW)
+    _runner(session_factory).run_once()
+    with session_factory() as db:
+        assert db.get(VenueAccount, account_id).status == VenueAccountStatus.ACTIVE
+        job = db.scalars(select(Job)).one()
+        assert job.status == JobStatus.PENDING and job.attempts == 1
+    assert captured_alerts == []
+
+
+@respx.mock
+def test_lazy_path_keeps_the_unexpired_token_when_the_endpoint_is_down(session_factory):
+    route = respx.post(TOKEN_URL).mock(return_value=httpx.Response(503))
+    with session_factory() as db:
+        account_id = _seed(db, NOW + timedelta(minutes=2))  # due (5 min margin), not expired
+        account = db.get(VenueAccount, account_id)
+        opened = credentials.open_credential(db, account, purpose="sync")
+        assert oauth_jobs.refresh_if_due(db, account, opened, now=NOW) is None
+        assert route.call_count == 1
+        assert db.get(VenueAccount, account_id).status == VenueAccountStatus.ACTIVE
+        # Once it has expired there is nothing to fall back on: the error surfaces.
+        with pytest.raises(oauth.OAuthError):
+            oauth_jobs.refresh_if_due(db, account, opened, now=NOW + timedelta(minutes=3))
+
+
+def test_an_expired_token_without_a_refresh_token_is_marked_once(session_factory, captured_alerts):
+    expired = NOW - timedelta(minutes=1)
+    with session_factory() as db:
+        account_id = _seed(db, expired)
+        account = db.get(VenueAccount, account_id)
+        record = json.loads(_record(expired))
+        del record["refresh_token"]
+        credentials.store(db, account, json.dumps(record), kind="oauth2", expires_at=expired)
+        db.commit()
+    assert oauth_jobs.tick(session_factory, now=NOW) == 1
+    _runner(session_factory).run_once()
+    with session_factory() as db:
+        account = db.get(VenueAccount, account_id)
+        assert account.status == VenueAccountStatus.ERROR
+        assert account.last_sync_error.startswith("Reconnect Alpaca")
+        (row,) = _refresh_rows(db, account_id)
+        assert row.details["error"] == "no_refresh_token"
+    assert [a.kind for a in captured_alerts] == ["oauth_reconnect"]
+    assert oauth_jobs.tick(session_factory, now=NOW) == 0  # no 15-minute decrypt loop

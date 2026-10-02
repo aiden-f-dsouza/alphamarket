@@ -10,6 +10,8 @@ stored, with an expiry, and `used_at` makes each one single-use.
   Tokens last 1 hour. A successful reset revokes every session and every
   other outstanding reset token, and emails a security alert.
 - Change: needs the current password; other sessions are revoked.
+- A password reset or change, and signing out everywhere, also cancel any
+  pending email-change link (cancel_email_changes).
 - Email change (wave2): needs the current password and a fresh step-up.
   The confirmation link (1 hour, an EMAIL_CHANGE token carrying new_email)
   goes to the NEW address; the old one is told at once. The request answers
@@ -24,7 +26,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, TypeAdapter, ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -174,7 +176,8 @@ def reset_password(db: Session, token: str, new_password: str) -> User:
         update(AuthToken)
         .where(
             AuthToken.user_id == user.id,
-            AuthToken.kind == AuthTokenKind.PASSWORD_RESET,
+            # A pending email change dies too: it may be how the account was taken.
+            AuthToken.kind.in_([AuthTokenKind.PASSWORD_RESET, AuthTokenKind.EMAIL_CHANGE]),
             AuthToken.used_at.is_(None),
         )
         .values(used_at=now)
@@ -194,6 +197,7 @@ def change_password(
     ensure_password_fits(new_password)
     ensure_not_breached(new_password)
     user.password_hash = hash_password(new_password)
+    cancel_email_changes(db, user.id)
     db.commit()
     current = sessions.load(db, request)
     sessions.revoke_all(db, user.id, except_id=current.id if current else None)
@@ -273,6 +277,7 @@ def sign_out_everywhere(
     request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)
 ) -> None:
     """Sign out everywhere, this browser included."""
+    cancel_email_changes(db, user.id)  # committed by revoke_all
     sessions.revoke_all(db, user.id)
     sessions.revoke_current(db, request)
 
@@ -306,6 +311,7 @@ def revoke_session(
 # ---- wave2:account-security: email change -------------------------------------------
 
 EMAIL_CHANGE_TTL = timedelta(hours=1)
+_EMAIL = TypeAdapter(EmailStr)
 EMAIL_CHANGE_REQUESTED = (
     "If that address can be used, a confirmation link is on its way to it. "
     "The link lasts 1 hour; your address changes only when you open it."
@@ -322,7 +328,8 @@ ALERT_SUBJECTS.setdefault(
 ALERT_LEADS.setdefault(
     "email_change_requested",
     "Someone signed in to your account asked to change its email address. Nothing "
-    "changes unless the link sent to the new address is opened within 1 hour.",
+    "changes unless the link sent to the new address is opened within 1 hour. If this "
+    "was not you, change your password or sign out everywhere: either cancels the link.",
 )
 ALERT_SUBJECTS.setdefault("email_changed", "Your Koine email address was changed")
 ALERT_LEADS.setdefault(
@@ -352,6 +359,22 @@ def _email_taken(db: Session, address: str, except_user_id: int) -> bool:
     return found is not None
 
 
+def cancel_email_changes(db: Session, user_id: int, now: datetime | None = None) -> None:
+    """Spend every pending email-change link. A password reset or change and
+    "sign out everywhere" call this: they are what the owner does after an
+    unexpected "email change requested" alert, and a link already in an
+    intruder's inbox must not outlive them. Not committed."""
+    db.execute(
+        update(AuthToken)
+        .where(
+            AuthToken.user_id == user_id,
+            AuthToken.kind == AuthTokenKind.EMAIL_CHANGE,
+            AuthToken.used_at.is_(None),
+        )
+        .values(used_at=now or datetime.now(UTC))
+    )
+
+
 def _new_email_change_token(db: Session, user: User, new_email: str) -> str:
     token = secrets.token_urlsafe(32)
     now = datetime.now(UTC)
@@ -379,7 +402,12 @@ def request_email_change(
     if not verify_password(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Current password is wrong.")
     mfa.ensure_step_up(request, db, user)
-    new_email = new_email.strip().lower()
+    # The HTML form posts a bare string: validate it as the JSON route does,
+    # so no malformed address (or one carrying a newline) is stored or mailed.
+    try:
+        new_email = _EMAIL.validate_python(new_email.strip()).lower()
+    except ValidationError:
+        raise HTTPException(status_code=422, detail="Enter a valid email address.") from None
     if new_email == user.email:
         raise HTTPException(status_code=422, detail="That is already your email address.")
     ratelimit.check(request, "email_change_user", user.id)

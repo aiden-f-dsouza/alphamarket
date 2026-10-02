@@ -228,3 +228,45 @@ def test_housekeeping_on_postgres(pg_session_factory):
         for table, kinds in left.items():
             assert kinds["old"] == set(), table
             assert kinds["fresh"] == seeded[table]["fresh"], table
+
+
+def test_a_dormant_users_newest_session_is_kept_for_the_new_sign_in_alert(session_factory):
+    """Every session of this user died long ago. All but the newest full one
+    go; that one stays so sessions.has_prior_sessions still sees the user has
+    signed in before, and a login from a new IP is still alerted."""
+    from alphamarket import sessions
+
+    with session_factory() as db:
+        user = User(email="dormant@example.com", password_hash="x", display_name="D")
+        db.add(user)
+        db.flush()
+        ids = []
+        for created, pending in ((NOW - 200 * D, False), (NOW - 100 * D, False)):
+            row = UserSession(
+                token_hash=uuid.uuid4().hex,
+                user_id=user.id,
+                created_at=created,
+                last_seen_at=created,
+                mfa_pending=pending,
+                ip="203.0.113.7",
+            )
+            db.add(row)
+            db.flush()
+            ids.append(row.id)
+        pending_row = UserSession(
+            token_hash=uuid.uuid4().hex,
+            user_id=user.id,
+            created_at=NOW - 90 * D,
+            last_seen_at=NOW - 90 * D,
+            mfa_pending=True,
+        )
+        db.add(pending_row)
+        db.commit()
+        pending_id = pending_row.id
+
+        assert housekeeping.prune_sessions(db, NOW, timedelta(days=30)) == 2
+        left = set(db.scalars(select(UserSession.id).where(UserSession.user_id == user.id)))
+        assert left == {ids[1]}  # the newest full session, not the newer pending one
+        assert pending_id not in left
+        assert sessions.has_prior_sessions(db, user.id)
+        assert not sessions.seen_ip_before(db, user.id, "198.51.100.1")

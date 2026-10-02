@@ -93,13 +93,23 @@ def _error_code(exc: Exception) -> str:
     return text.rsplit(": ", 1)[-1][:60] if ": " in text else type(exc).__name__
 
 
+# OAuth error codes that mean "try again later", not "the grant is dead".
+# oauth._token_request reports the body's `error` field in preference to the
+# HTTP status, so a 503 answering {"error": "temporarily_unavailable"} arrives
+# here as that code, never as "503" (RFC 6749 4.1.2.1 defines both codes;
+# providers send them from the token endpoint too).
+TRANSIENT_ERROR_CODES = frozenset({"temporarily_unavailable", "server_error", "slow_down"})
+
+
 def is_transient(exc: Exception) -> bool:
-    """Network trouble, or the token endpoint answering 5xx/429: retry later.
-    Anything else from the endpoint (invalid_grant, invalid_client, a write
-    scope on refresh) is a refusal."""
+    """Network trouble, or the token endpoint answering 5xx/429 or a
+    "try later" error code: retry later. Anything else from the endpoint
+    (invalid_grant, invalid_client, a write scope on refresh) is a refusal."""
     if isinstance(exc, httpx.HTTPError):
         return True
     code = _error_code(exc)
+    if code in TRANSIENT_ERROR_CODES:
+        return True
     return code.isdigit() and (int(code) >= 500 or int(code) == 429)
 
 
@@ -225,8 +235,14 @@ def run(ctx) -> None:
     try:
         record = json.loads(opened.secret)
     except ValueError:
-        return
+        record = None
     if not isinstance(record, dict) or not record.get("refresh_token"):
+        # Nothing to refresh with. Once the token has expired only a new
+        # grant helps: mark it, which also stops the tick re-queueing (and
+        # re-decrypting) this account every 15 minutes.
+        if expires_at <= now:
+            dead = oauth.OAuthError("refresh: no_refresh_token")
+            mark_reconnect(db, account, dead, trigger="job")
         return
     try:
         fresh = oauth.refresh_token(provider, record, now=now)
@@ -249,6 +265,15 @@ def refresh_if_due(
         secret = oauth.ensure_fresh(account.venue, opened.secret, now=now)
     except (oauth.OAuthError, httpx.HTTPError) as exc:
         if is_transient(exc):
+            # The token endpoint is down but the current token still works
+            # (ensure_fresh refreshes up to 5 min early): sync with it rather
+            # than failing the sync; the next build or the tick retries.
+            expires_at = _aware(opened.expires_at)
+            if expires_at is not None and expires_at > (now or datetime.now(UTC)):
+                logger.warning(
+                    "venue account %s: oauth refresh deferred (%s)", account.id, _error_code(exc)
+                )
+                return None
             raise
         mark_reconnect(db, account, exc, trigger="sync")
         raise ReconnectRequired(reconnect_message(account)) from None

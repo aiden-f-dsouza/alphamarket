@@ -114,3 +114,21 @@ def test_a_user_with_no_accounts_sees_only_their_own_actions(client, member, ses
         _account(db, other.id, "kraken", "x")
         rows = audit_trail(db, db.get(User, member))
         assert rows and all(r["venue"] == "" for r in rows)
+
+
+def test_routine_decrypts_do_not_push_security_events_off_the_list(client, member, session_factory):
+    """A sync decrypts every few minutes. 60 of them, all newer than the
+    sign-up's events, still leave room for those events: decrypts are capped
+    at the newest AUDIT_TRAIL_DECRYPTS, merged in time order."""
+    from alphamarket.security_pages import AUDIT_TRAIL_DECRYPTS
+
+    with session_factory() as db:
+        mine = _account(db, member, "kraken", "mine")
+        with audit.job_context("sync"):
+            for _ in range(60):
+                credentials.open_credential(db, mine, purpose="sync")
+        rows = audit_trail(db, db.get(User, member))
+    actions = [r["action"] for r in rows]
+    assert actions.count("credential.decrypt") == AUDIT_TRAIL_DECRYPTS == 10
+    assert "security.totp_enabled" in actions and "credential.connect" in actions
+    assert actions[:10] == ["credential.decrypt"] * 10  # still newest first

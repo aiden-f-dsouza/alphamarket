@@ -14,7 +14,8 @@ Every table pruned here is coordination or convenience state, not evidence:
   (sessions.is_live): idle timeout after last_seen_at, absolute limit after
   created_at, or 10 minutes for a password-only (mfa_pending) session. Dead
   sessions are kept `session_retention_days` so the sessions page and the
-  new-sign-in alert can still see recent ones, then deleted.
+  new-sign-in alert can still see recent ones, then deleted, except each
+  user's newest full session (prune_sessions says why).
 - auth_tokens: only hashes are stored; a token used or expired more than
   `token_retention_days` ago can never be redeemed again.
 - asset_quotes: signals copy the quote they used, so no evidence lives only
@@ -26,7 +27,7 @@ leaves the others done.
 
 from datetime import timedelta
 
-from sqlalchemy import delete, or_
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from alphamarket import pending, ratelimit, sessions
@@ -36,6 +37,15 @@ from alphamarket.models import AssetQuote, AuthToken, UserSession
 
 def prune_sessions(db: Session, now, retention: timedelta) -> int:
     cutoff = now - retention
+    # Each user's newest full session is kept whatever its age: the
+    # new-sign-in alert fires only for a user who has signed in before
+    # (sessions.has_prior_sessions), so pruning every row of a dormant
+    # account would silence the alert for exactly the login it matters for.
+    newest_full = (
+        select(func.max(UserSession.id))
+        .where(UserSession.mfa_pending.is_(False))
+        .group_by(UserSession.user_id)
+    )
     result = db.execute(
         delete(UserSession).where(
             or_(
@@ -44,7 +54,8 @@ def prune_sessions(db: Session, now, retention: timedelta) -> int:
                 & (UserSession.created_at < cutoff - sessions.PENDING_TTL),
                 UserSession.last_seen_at < cutoff - sessions.idle_timeout(),
                 UserSession.created_at < cutoff - sessions.absolute_timeout(),
-            )
+            ),
+            UserSession.id.not_in(newest_full),
         )
     )
     db.commit()

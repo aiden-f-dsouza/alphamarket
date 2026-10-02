@@ -330,7 +330,8 @@ current password and a code confirmed in the last 10 minutes.
   the link is opened.
 - Your **current** address is told about the request straight away, with
   the new address partly masked. If it was not you, change your password
-  and sign out everywhere.
+  and sign out everywhere: a password change or reset, or signing out
+  everywhere, cancels any pending link.
 - The answer is the same whether or not the new address already has a Koine
   account, so the form cannot be used to find out who has one. An address
   that is taken gets a short notice instead of a link. When the link is
@@ -352,6 +353,9 @@ The security page lists your last 50 security events, newest first:
 - everything done to your connections, including **every time Koine
   decrypted one of your keys and why** (sync, reconcile, the nightly
   read-only re-check, token refresh). Background jobs show as "Koine worker".
+  Syncs decrypt every few minutes, so only the 10 newest decrypts are shown,
+  in time order with everything else; they never push a sign-in or a
+  password change off the list.
 
 Each row shows only the event, its purpose, the venue, the time and the IP
 address. You never see another user's events, and no row shows a secret.

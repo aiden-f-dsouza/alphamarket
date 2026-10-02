@@ -236,13 +236,20 @@ history) and sets `account_schedules.backfill_done_at` when it finishes.
   error code only), and the owner gets one `oauth_reconnect` alert. The
   alert is sent only on that transition. The job completes; the tick skips
   `error` accounts.
-- **A 5xx, a 429 or a network error** is re-raised, so the job backs off and
-  retries like any other failure, and the account is unchanged.
+- **A 5xx, a 429, a network error or a "try later" code**
+  (`temporarily_unavailable`, `server_error`, `slow_down`) is re-raised, so
+  the job backs off and retries like any other failure, and the account is
+  unchanged.
+- **No refresh token in the record.** Nothing can refresh it, so once the
+  token has expired the account is marked for reconnect as above (which
+  also stops the tick queueing it again).
 - **Lazy path.** `ingest.connector_for` calls `oauth_jobs.refresh_if_due`
   before it builds an OAuth connector: the 5-minute margin plus jitter
   (`oauth.ensure_fresh`). On a refresh it stores and commits the new record.
   A refusal marks the account as above and raises `ReconnectRequired`, so the
-  sync fails with the reconnect message instead of a 401.
+  sync fails with the reconnect message instead of a 401. A transient error
+  while the current token has not yet expired is logged and the sync goes
+  ahead with that token.
 
 **`housekeeping`** is queued nightly by `tick_nightly`, with dedupe key
 `housekeeping:<day>` and `once=True`. `housekeeping.run` deletes, committing
@@ -251,7 +258,7 @@ each category on its own:
 | Category | Deleted when | Setting (default) |
 |---|---|---|
 | `rate_limit_counters` | the window has ended | none |
-| `sessions` | revoked, or expired (idle 24 h after last seen, 30 d after creation, 10 min for a password-only session), more than N days ago | `SESSION_RETENTION_DAYS` (30) |
+| `sessions` | revoked, or expired (idle 24 h after last seen, 30 d after creation, 10 min for a password-only session), more than N days ago; each user's newest full session is always kept, so the new-sign-in alert still knows the user | `SESSION_RETENTION_DAYS` (30) |
 | `auth_tokens` | used, or expired, more than N days ago | `TOKEN_RETENTION_DAYS` (7) |
 | `asset_quotes` | `as_of` older than N days | `QUOTE_RETENTION_DAYS` (30) |
 | pending accounts | `pending.abandon_stale` (unfinished SnapTrade connects) | `PENDING_CONNECT_TTL_HOURS` (24) |
