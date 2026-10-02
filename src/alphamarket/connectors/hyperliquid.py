@@ -1028,6 +1028,10 @@ class HyperliquidMarketData(_Info, AssetMarketData):
     spot pairs, "xyz:XYZ100" for a HIP-3 perp."""
 
     venue = "hyperliquid"
+    # HIP-3 dexes margin in these instead of USDC (collateral_of); they are
+    # dollar stablecoins, valued at 1.00 like USDC and USDT [VERIFY the
+    # collateral list against perpDexs before launch].
+    STABLECOINS_AT_PAR = AssetMarketData.STABLECOINS_AT_PAR | frozenset({"USDT0", "USDH"})
 
     def __init__(self, info_url: str = INFO_URL, client: httpx.Client | None = None) -> None:
         self._init_info(info_url, client)

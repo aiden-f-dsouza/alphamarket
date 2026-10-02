@@ -67,7 +67,7 @@ from alphamarket.connectors.base import (
     NormalizedInstrument,
     RateLimited,
 )
-from alphamarket.connectors.registry import build_market_data, get_profile
+from alphamarket.connectors.registry import CASH_AT_PAR, build_market_data, get_profile
 from alphamarket.ingest import upsert_instrument
 from alphamarket.jobs import INACTIVE_ACCOUNT_STATUSES, Defer, aware
 from alphamarket.models import (
@@ -132,10 +132,10 @@ class PricesDailyError(Exception):
 
 def usd_micros_per_unit(close: str, quote_asset: str) -> int | None:
     """USD micros one unit is worth: `close` x 1e6 truncated toward zero when
-    the quote asset is USD or a stablecoin held at par (USDC, USDT), else None
+    the quote asset is USD or a stablecoin held at par (registry.CASH_AT_PAR), else None
     (a BTC-quoted close is not a USD value; it needs a second price).
     Exact: the decimal string is never passed through a float."""
-    if quote_asset not in MarketDataSource.STABLECOINS_AT_PAR:
+    if quote_asset not in CASH_AT_PAR:
         return None
     return int(Fraction(close.strip()) * 1_000_000)
 

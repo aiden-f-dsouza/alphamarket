@@ -379,7 +379,7 @@ first rescaled to the finest precision seen before anything is added. Example:
 **Equity at the end of each UTC day `d`:**
 
 ```
-E_d = Σ cash assets (USD, USDC, USDT)   qty × 1.00
+E_d = Σ cash assets (USD, stablecoins)  qty × 1.00
     + Σ coins and shares                qty × close_d
     + Σ open perpetual positions        qty × (close_d − entry)
 ```
@@ -658,7 +658,11 @@ with one rule: the first spot or equity instrument whose base is the asset and
 whose quote is USD, then USDC, then USDT. A staked or bonded Kraken variant
 (`ETH2.S`) is priced as its underlying coin. A perpetual contract (`BTC-PERP`)
 is priced only by that venue's own perpetual contract, never by the spot coin.
-Cash and stablecoins (USD, USDC, USDT) need no price: they are worth 1.00.
+Cash and stablecoins need no price: they are worth 1.00. That is USD, USDC
+and USDT, plus each venue's own codes for them: Kraken's held and earning
+balances (USD.HOLD, USD.M, USDC.M, USDC.F, USDT.M, USDT.F) and the tokens
+Hyperliquid's HIP-3 markets settle in (USDT0, USDH). One list is used for the
+creator's equity, the statistics, signals and paper books alike.
 
 **Fallback pricing.** An asset the venue does not list is priced from
 CoinGecko, which is a source of daily prices only (no quotes, no fills, never
@@ -680,7 +684,7 @@ no close.
 **From close to dollars.** A close is stored exactly as the source sent it. Its
 USD value per unit is that decimal times 1,000,000 micro-dollars, truncated
 toward zero, and only when the quote asset is USD or a stablecoin held at par
-(USDC, USDT):
+(the list above):
 
 ```
 61234.5 USD          -> 61,234.5 x 1,000,000       = 61,234,500,000 micros
@@ -848,7 +852,7 @@ recommendation, and it is never edited afterwards.
 ```
 qty, price          exactly as the venue reported the fill
 notional            qty x price in USD, rounded down to $0.000001;
-                    only when the pair is quoted in USD, USDC or USDT,
+                    only when the pair is quoted in USD or a stablecoin at par,
                     otherwise left empty (a BTC-quoted pair has no USD notional)
 position before     the creator's signed holding of the asset just before the fill
 position after      before + qty for a buy, before - qty for a sell
@@ -913,8 +917,11 @@ hand-computed test (`tests/test_paper_engine.py`).
 allocation started. A signal Koine observed more than 6 hours after the fill
 (3 days on venues that only publish daily reports: IBKR, SnapTrade) is
 skipped as stale, because a follower could not have traded near that price.
-Instruments not quoted in USD or a stablecoin (USDC, USDT) are skipped. Every
-skip is recorded with its reason and counted on the follower's portfolio.
+Instruments not quoted in USD or a stablecoin held at par (see "Daily prices
+and fallback pricing") are skipped. Every skip is recorded with its reason and
+counted on the follower's portfolio. A signal that makes the paper engine
+fail is skipped on its own ("engine error") and logged for us to fix, so it
+never holds back the follower's later signals, funding or liquidation check.
 
 **Fill price.** A paper fill happens when Koine observed the creator's fill,
 at the venue's public quote captured at that moment: buys at the ask, sells
@@ -928,6 +935,14 @@ sell:  price = creator_price x 0.995
 
 The fill records which rule priced it ("ask", "bid" or
 "creator_price_penalty") and the quote's timestamp.
+
+**Late signals.** A paper fill is never dated before an event already in the
+follower's book (funding, a dividend, an earlier paper fill). If Koine's own
+processing fell behind and a signal arrives after such a later event was
+booked, the fill keeps its price but takes that event's time, so no booked
+payment is ever recomputed against a position it did not see. For a stock,
+if that later time would cross the ex-date of a split, the signal is skipped
+("late signal") instead: its size is in pre-split shares.
 
 **Sizing.** F is the follower's equity (cash plus holdings at the freshest
 mark, below) and C the creator's equity just before the fill.
@@ -1013,8 +1028,8 @@ stopped copying, because what it still holds keeps accruing. Every amount is
 computed exactly, then rounded to the micro-dollar against the follower:
 credits round down and debits round up.
 
-**Funding.** For each funding rate the venue publishes after the last one
-applied to that perp (and not before the follower first traded it):
+**Funding.** For each funding rate the venue publishes for a perp the
+follower holds (not before the follower first traded it):
 
 ```
 payment = -q x mark x rate        (q signed: + long, - short)
@@ -1022,8 +1037,9 @@ mark    = the rate's own mark price, else a quote within 15 minutes of it,
           else the last complete daily close before that day
 ```
 
-A rate with no position at that moment pays nothing; a rate with no mark at
-all is skipped rather than estimated. Example: 0.09998 BTC long, rate
+A rate with no position at that moment pays nothing. A rate with no mark yet
+is never estimated: it is retried on later passes (the day's close or a
+quote may still arrive) for 7 days, then given up. Example: 0.09998 BTC long, rate
 +0.0000125 at mark 60,000 pays 0.074985; rate -0.00001 at mark 59,000
 receives 0.0589882, credited as 0.058988. Cash 997.0001 becomes 996.925115,
 then 996.984103.
@@ -1059,9 +1075,12 @@ cash per share, credited at 00:00 UTC on the pay date and not before (a
 dividend whose pay date is not yet known waits). Shares bought on the
 ex-date do not count. 20 shares x $0.25 = $5.00.
 
-**Not modelled yet.** Symbol changes are logged and not applied. When two
-data sources report the same action (same symbol, kind and ex-date) it is
-applied once.
+**Not modelled yet.** Symbol changes are not applied to paper books. A
+follower who still holds a stock whose symbol changed sees it on the
+portfolio: the position stays under the old symbol at its last price, and
+the creator's trades in the new symbol cannot reduce it. When two data
+sources report the same action (same symbol, kind and ex-date) it is applied
+once.
 
 <!-- wave2:p8-pages -->
 

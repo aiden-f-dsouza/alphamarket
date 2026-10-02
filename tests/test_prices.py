@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 import respx
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, delete, func, select, update
 from sqlalchemy.orm import Session
 
 from alphamarket import prices, valuation_db
@@ -1056,6 +1056,11 @@ def test_run_daily_on_postgres_matches_the_migrated_schema(pg_url):
                 autoflush=False,
             )
             try:
+                # Other pg tests share this database and may have left fresh
+                # margin tiers or coverage behind, which would make run_daily
+                # skip the fetches under test. Start from none (rolled back).
+                db.execute(delete(MarketDataCoverage))
+                db.execute(update(Instrument).values(margin_tiers=None, margin_tiers_at=None))
                 make_account(db, "kraken", {"BTC": (10**8, 8), "NOPE": (5, 8)}, key="pgk")
                 make_account(db, "hyperliquid", {"BTC-PERP": (1_000, 5)}, key="pgh")
                 db.commit()

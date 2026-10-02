@@ -46,7 +46,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from fractions import Fraction
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from alphamarket.connectors.base import InstrumentType, LegKind
@@ -156,6 +156,18 @@ def load_book(db: Session, allocation: Allocation, at: datetime | None = None) -
         legs=legs,
         perp_fills=perp_fills,
         refs=frozenset(e.ref for e in entries if aware(e.occurred_at) <= t),
+    )
+
+
+def booked_through(db: Session, allocation: Allocation) -> datetime | None:
+    """The latest occurred_at in the allocation's book (None while empty).
+    A new paper fill is never dated before it (paper.py: late signals)."""
+    return aware(
+        db.scalar(
+            select(func.max(MirrorLedgerEntry.occurred_at)).where(
+                MirrorLedgerEntry.allocation_id == allocation.id
+            )
+        )
     )
 
 

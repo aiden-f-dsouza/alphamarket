@@ -37,14 +37,16 @@ from enum import StrEnum
 from fractions import Fraction
 from typing import Protocol
 
-from alphamarket.connectors.base import EXTERNAL_FLOW_KINDS, LegKind, MarketDataSource
+from alphamarket.connectors import registry
+from alphamarket.connectors.base import EXTERNAL_FLOW_KINDS, LegKind
 from alphamarket.money import MAX_DECIMALS, MICROS_PER_UNIT
 
 PERP_SUFFIX = "-PERP"
 """Perp positions are the asset "<COIN>-PERP" (connectors/base.py asset codes)."""
 
-CASH_AT_PAR: frozenset[str] = MarketDataSource.STABLECOINS_AT_PAR
-"""Assets valued at exactly 1.00 USD per unit, never looked up in prices."""
+CASH_AT_PAR: frozenset[str] = registry.CASH_AT_PAR
+"""Assets valued at exactly 1.00 USD per unit, never looked up in prices
+(USD, USDC, USDT and each venue's own codes for them: registry.CASH_AT_PAR)."""
 
 
 # ---- validation helpers -------------------------------------------------------

@@ -661,6 +661,7 @@ def portfolio_view(summary: dict, handles: dict[str, str], now: datetime | None 
                 "positions": rows,
                 "copy_lag": _age(v.get("copy_lag_median_seconds")),
                 "skipped": sorted(skipped.items()),
+                "symbol_changes": v.get("symbol_changes") or [],
                 "venue": v.get("venue"),
             }
         )

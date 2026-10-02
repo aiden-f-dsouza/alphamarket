@@ -400,15 +400,134 @@ def test_funding_without_any_mark_is_skipped_not_guessed(db, hl):
     assert _cash(db, alloc) == to_micros("997.0001")
 
 
-def test_funding_watermark_is_the_latest_funding_leg(db, hl):
+def _close(db, inst, day, usd):
+    db.add(
+        PriceDaily(
+            instrument_id=inst.id,
+            day=day,
+            close=str(usd),
+            usd_micros_per_unit=usd * M,
+            source="hyperliquid",
+        )
+    )
+    db.commit()
+
+
+def test_a_funding_row_that_lands_after_a_later_one_is_still_booked(db, hl):
     alloc, perp = hl
     _funding(db, perp, at(D, 14), "0.0000125", "60000")
     assert apply_lifecycle(db, alloc, at(D, 15)) == 1
     db.commit()
-    # A row that lands later but is dated before the watermark is not applied.
-    _funding(db, perp, at(D, 13), "0.5", "60000")
-    assert apply_lifecycle(db, alloc, at(D, 15)) == 0
-    assert _cash(db, alloc) == to_micros("996.925115")
+    # -0.09998 x 60,000 x 0.0000125 = -0.074985.
+    assert _cash(db, alloc) == to_micros("997.0001") - 74_985
+    # 13:00 arrives late: the follower held the position then, so it owes it.
+    # -0.09998 x 60,000 x 0.0001 = -0.59988.
+    _funding(db, perp, at(D, 13), "0.0001", "60000")
+    assert apply_lifecycle(db, alloc, at(D, 15)) == 1
+    db.commit()
+    assert _cash(db, alloc) == to_micros("997.0001") - 74_985 - 599_880
+    assert apply_lifecycle(db, alloc, at(D, 15)) == 0  # idempotent
+
+
+def test_a_funding_row_without_a_mark_is_retried_not_lost(db, hl):
+    alloc, perp = hl
+    # 13:00 has no mark anywhere yet; 14:00 carries its own and is booked.
+    _funding(db, perp, at(D, 13), "0.0001")
+    _funding(db, perp, at(D, 14), "0.0000125", "60000")
+    assert apply_lifecycle(db, alloc, at(D, 15)) == 1
+    db.commit()
+    assert _cash(db, alloc) == to_micros("997.0001") - 74_985
+    # The close for D-1 (59,000) lands: 13:00 is booked on the next pass, not
+    # lost behind 14:00. -0.09998 x 59,000 x 0.0001 = -0.589882.
+    _close(db, perp, D - timedelta(days=1), 59_000)
+    assert apply_lifecycle(db, alloc, at(D, 16)) == 1
+    db.commit()
+    assert _cash(db, alloc) == to_micros("997.0001") - 74_985 - 589_882
+    refs = db.scalars(
+        select(MirrorLedgerEntry.ref).where(MirrorLedgerEntry.kind == LegKind.FUNDING)
+    ).all()
+    assert sorted(refs) == sorted(f"fund:{perp.id}:{int(at(D, h).timestamp())}" for h in (13, 14))
+
+
+def test_an_unpriced_funding_row_is_given_up_after_the_retry_window(db, hl):
+    alloc, perp = hl
+    _funding(db, perp, at(D, 13), "0.0001")  # no mark
+    later = D + timedelta(days=9)
+    _funding(db, perp, at(later, 13), "0.0000125", "60000")
+    assert apply_lifecycle(db, alloc, at(later, 14)) == 1
+    db.commit()
+    # The D-1 close lands nine days on: 13:00 on D is older than both the
+    # newest booked payment and now - 7 days, so it is no longer looked at.
+    _close(db, perp, D - timedelta(days=1), 59_000)
+    assert timedelta(days=7) == paper_lifecycle.FUNDING_RETRY_WINDOW
+    assert apply_lifecycle(db, alloc, at(later, 15)) == 0
+    assert _cash(db, alloc) == to_micros("997.0001") - 74_985
+
+
+def test_a_flat_perp_stops_the_funding_scan_at_its_last_fill(db, hl):
+    alloc, perp = hl
+    # The follower closes the whole 0.09998 at 18:00 on D (no P&L legs needed
+    # for the window: only the fill and the book's position matter).
+    closed_at = at(D, 18)
+    db.add(
+        MirrorAssetFill(
+            allocation_id=alloc.id,
+            reason="signal",
+            mode="paper",
+            instrument_id=perp.id,
+            action="sell",
+            qty_atoms=9_998,
+            qty_decimals=5,
+            price="60010",
+            notional_micros=to_micros("5999.7998"),
+            price_basis="bid",
+            filled_at=closed_at,
+        )
+    )
+    paper_book.append_group(
+        db,
+        alloc,
+        ref="sig:2",
+        occurred_at=closed_at,
+        legs=[LegSpec("BTC-PERP", -9_998, 5, LegKind.FILL_BASE, perp.id)],
+    )
+    db.commit()
+    book = paper_book.load_book(db, alloc)
+    now = at(D + timedelta(days=30))
+    since, until = paper_lifecycle._funding_window(db, alloc, perp, book, now)
+    assert (since, until) == (at(D), closed_at)
+    # A month of hourly rows after the close owes nothing and is never read.
+    _funding(db, perp, at(D, 19), "0.5", "60000")
+    assert apply_lifecycle(db, alloc, now) == 0
+
+
+def test_a_lifecycle_stage_that_raises_does_not_stop_liquidation(db, hl, monkeypatch):
+    alloc, perp = hl
+
+    def broken(db, allocation, now):
+        db.add(cash_leg_row(allocation))  # written, then rolled back with the stage
+        db.flush()
+        raise ZeroDivisionError("funding bug")
+
+    def cash_leg_row(allocation):
+        return MirrorLedgerEntry(
+            allocation_id=allocation.id,
+            asset="USD",
+            delta_atoms=1_000 * M,
+            decimals=6,
+            kind=LegKind.FUNDING,
+            ref="fund:bug",
+            group_ref="fund:bug",
+            occurred_at=at(D, 13),
+        )
+
+    monkeypatch.setattr(paper_lifecycle, "apply_funding", broken)
+    # Mark 50,500: AV 46.174303 < MM 63.112375 (the exit test): liquidated.
+    _quote(db, perp, at(D, 14), last="50500")
+    assert apply_lifecycle(db, alloc, at(D, 14, 1)) == 1
+    db.commit()
+    assert alloc.status == AllocationStatus.STOPPED
+    assert db.scalar(select(MirrorLedgerEntry).where(MirrorLedgerEntry.ref == "fund:bug")) is None
 
 
 def test_a_short_receives_positive_funding(db):

@@ -32,6 +32,13 @@ process_asset_allocation(db, allocation) -> tuple[int, int]
     asset)); valuation's _PerpBook already resets the entry on a flip.
     (Also: creator_position_unknown, when a sell or a perp signal carries
     no position_before_atoms, so the fraction to copy is unknown.)
+    Each signal runs in its own savepoint: one the engine raises on is
+    rolled back alone and skipped as engine_error, so it cannot hold back
+    later signals or the lifecycle pass. A paper fill is dated at
+    observed_at, but never before the newest event already in the book (a
+    SIGNALS backlog): it takes that event's time instead, and a late equity
+    signal whose new time would cross a split's ex-date is skipped as
+    late_signal (its size is in pre-split shares).
 
 value_asset_allocation(db, allocation, marks=None, *, now=None) -> portfolio.AllocationValue
     cash_micros = paper_book cash; open_value = holdings at the freshest
@@ -48,28 +55,32 @@ asset_view_extras(db, allocation, value) -> dict
     symbol, side long|short, qty str, cost float, mark str|None,
     mark_source quote|close|cost, mark_as_of iso|None, value float,
     unrealized float, entry str|None}), "venue", "asset_class",
-    "copy_lag_median_seconds" (int|None), "skipped" ({reason: count}).
-    Per kind: spot/equity cost = average cost of the holding (cash paid,
-    fees excluded), value = qty x mark (or cost), unrealized = value - cost,
-    entry None. Perps: cost = |qty| x entry (the notional at entry), value =
-    unrealized = qty x (mark - entry), the position's contribution to
-    equity (margin is cash); 0 while unpriced. So for every allocation
-    equity = cash + sum of position values.
+    "copy_lag_median_seconds" (int|None), "skipped" ({reason: count}),
+    "symbol_changes" (symbol_change_notices: held equities whose symbol
+    changed, which paper books do not convert yet). Per kind: spot/equity
+    cost = average cost of the holding (cash paid, fees excluded), value =
+    qty x mark (or cost), unrealized = value - cost, entry None. Perps:
+    cost = |qty| x entry (the notional at entry), value = unrealized =
+    qty x (mark - entry), the position's contribution to equity (margin is
+    cash); 0 while unpriced. So for every allocation equity = cash + sum of
+    position values.
 """
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, replace
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from fractions import Fraction
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.orm import Session
 
 from alphamarket import paper_book, prices, valuation_db
 from alphamarket.connectors.base import (
     Action,
+    CorporateActionKind,
     InstrumentType,
     LegKind,
     PaperFeeModel,
@@ -81,6 +92,7 @@ from alphamarket.jobs import aware
 from alphamarket.models import (
     Allocation,
     AllocationStatus,
+    CorporateActionRow,
     Instrument,
     MirrorAssetFill,
     MirrorLedgerEntry,
@@ -113,6 +125,8 @@ INSUFFICIENT_CASH = "insufficient_cash"
 NO_POSITION = "no_position"
 FOLLOWER_EQUITY_ZERO = "follower_equity_zero"
 INSTRUMENT_UNKNOWN = "instrument_unknown"  # a signal without an instrument (never emitted)
+ENGINE_ERROR = "engine_error"  # the engine raised on this signal; rolled back alone
+LATE_SIGNAL = "late_signal"  # booking it would cross a split already past in the book
 
 CENT_MICROS = 10_000
 
@@ -464,6 +478,24 @@ def _precheck(signal: Signal, instrument: Instrument | None, profile: VenueProfi
     return None
 
 
+def _split_between(db: Session, instrument: Instrument, start: datetime, end: datetime) -> bool:
+    """A split of this equity takes effect (00:00 UTC of its ex-date) in
+    (start, end]: a fill sized in pre-split shares cannot be booked after it."""
+    if instrument.type != InstrumentType.EQUITY:
+        return False
+    found = db.scalar(
+        select(CorporateActionRow.id)
+        .where(
+            CorporateActionRow.symbol == instrument.base_asset,
+            CorporateActionRow.kind == CorporateActionKind.SPLIT,
+            CorporateActionRow.ex_date > start.astimezone(UTC).date(),
+            CorporateActionRow.ex_date <= end.astimezone(UTC).date(),
+        )
+        .limit(1)
+    )
+    return found is not None
+
+
 def _position_atoms(book: FollowerBook, instrument: Instrument) -> int:
     """The follower's signed position in the instrument at its qty_decimals
     (floored toward zero if the book holds finer atoms)."""
@@ -545,6 +577,12 @@ def mirror_asset_signal(
     ref = f"sig:{signal.id}"
     if paper_book.has_group(db, allocation, ref):
         return None  # already applied (a pass that died before advancing last_signal_id)
+    booked = paper_book.booked_through(db, allocation)
+    observed = aware(signal.observed_at) or aware(signal.filled_at)
+    late = booked is not None and observed < booked
+    if late and _split_between(db, instrument, observed, booked):
+        _skip(db, allocation, signal, LATE_SIGNAL)
+        return None
     executor = get_asset_executor(allocation.mode)
     action = Action(signal.action)
     price = executor.quote(signal, action, profile)
@@ -579,6 +617,12 @@ def mirror_asset_signal(
     executed = executor.execute(
         allocation, signal, instrument, action, sized.qty_atoms, price, profile
     )
+    if booked is not None and executed.filled_at < booked:
+        # A late signal (a SIGNALS backlog) arriving after a later event was
+        # booked (funding, a dividend, another paper fill): dated at that
+        # event instead, so no booked event is ever recomputed against a
+        # position it did not see.
+        executed = replace(executed, filled_at=booked)
     row = MirrorAssetFill(
         allocation_id=allocation.id,
         signal_id=signal.id,
@@ -636,11 +680,38 @@ def mirror_asset_pending(db: Session, allocation: Allocation, now: datetime | No
     mirrored = 0
     for signal in signals:
         copyable = signal.is_asset and aware(signal.filled_at) >= started
-        if copyable and mirror_asset_signal(db, allocation, signal, profile, now) is not None:
+        if copyable and _mirror_isolated(db, allocation, signal, profile, now):
             mirrored += 1
         allocation.last_signal_id = signal.id
     db.flush()
     return mirrored
+
+
+def _mirror_isolated(
+    db: Session,
+    allocation: Allocation,
+    signal: Signal,
+    profile: VenueProfile,
+    now: datetime | None,
+) -> bool:
+    """mirror_asset_signal inside a savepoint. A signal the engine raises on
+    is rolled back alone and recorded as an engine_error skip, so one bad
+    signal cannot hold back the allocation's later signals or its lifecycle
+    pass (funding, liquidation). A lost or unusable database connection is
+    not the signal's fault: it propagates and the whole pass is retried."""
+    try:
+        with db.begin_nested():
+            return mirror_asset_signal(db, allocation, signal, profile, now) is not None
+    except (OperationalError, InterfaceError):
+        raise
+    except Exception:
+        logger.exception(
+            "allocation %s: signal %s raised in the paper engine; skipped",
+            allocation.id,
+            signal.id,
+        )
+        _skip(db, allocation, signal, ENGINE_ERROR)
+        return False
 
 
 def process_asset_allocation(
@@ -867,6 +938,48 @@ def skipped_counts(db: Session, allocation: Allocation) -> dict[str, int]:
     return {reason: count for reason, count in sorted(rows)}
 
 
+def symbol_change_notices(
+    db: Session, allocation: Allocation, now: datetime | None = None
+) -> list[dict]:
+    """Symbol changes paper books do not apply yet (paper_lifecycle logs and
+    skips them): one notice per equity the follower still holds whose symbol
+    changed since the allocation started. The position stays under the old
+    symbol, so the creator's trades in the new one cannot reduce it.
+    {"symbol", "new_symbol" (None when no source named it), "ex_date" iso}."""
+    today = aware(now or utcnow()).astimezone(UTC).date()
+    held = {
+        asset
+        for asset, qty in paper_book.load_book(db, allocation).holdings.items()
+        if qty.atoms > 0
+    }
+    equities = sorted(
+        asset
+        for asset, inst in _instruments_by_asset(db, allocation).items()
+        if asset in held and inst.type == InstrumentType.EQUITY
+    )
+    if not equities:
+        return []
+    query = select(CorporateActionRow).where(
+        CorporateActionRow.symbol.in_(equities),
+        CorporateActionRow.kind == CorporateActionKind.SYMBOL_CHANGE,
+        CorporateActionRow.ex_date <= today,
+    )
+    if allocation.started_at is not None:
+        query = query.where(
+            CorporateActionRow.ex_date >= aware(allocation.started_at).astimezone(UTC).date()
+        )
+    notices: dict[tuple[str, date], dict] = {}
+    for row in db.scalars(query.order_by(CorporateActionRow.id)).all():
+        # One action reported by several sources: the first that names the new symbol.
+        notice = notices.setdefault(
+            (row.symbol, row.ex_date),
+            {"symbol": row.symbol, "new_symbol": None, "ex_date": row.ex_date.isoformat()},
+        )
+        if notice["new_symbol"] is None and row.new_symbol:
+            notice["new_symbol"] = row.new_symbol
+    return [notices[key] for key in sorted(notices)]
+
+
 def asset_view_extras(db: Session, allocation: Allocation, value) -> dict:
     account = _account_of(db, allocation)
     profile = get_profile(account.venue) if account is not None else None
@@ -876,4 +989,5 @@ def asset_view_extras(db: Session, allocation: Allocation, value) -> dict:
         "asset_class": profile.asset_classes[0] if profile and profile.asset_classes else None,
         "copy_lag_median_seconds": copy_lag_median_seconds(db, allocation),
         "skipped": skipped_counts(db, allocation),
+        "symbol_changes": symbol_change_notices(db, allocation),
     }

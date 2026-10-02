@@ -25,7 +25,8 @@ apply_lifecycle(db, allocation, now) -> int
     - corporate_actions for held equities (ref "ca:<id>"): split ->
       SPLIT leg floor(q x new/old) - q (fraction dropped); cash dividend ->
       holding at end of ex-date minus one day x cash_per_share, credited on
-      pay_date (floor); symbol_change -> skipped in v2 (flagged).
+      pay_date (floor); symbol_change -> not applied in v2; the follower
+      sees it on /portfolio (paper.symbol_change_notices).
     Returns the number of events applied.
 
 Implementation notes (methodology "Paper copying v2: funding, liquidation,
@@ -36,13 +37,20 @@ corporate actions"; tests/test_paper_lifecycle.py pins every number):
 - Every USD amount is computed exactly (Fraction) and then FLOORED to the
   micro: a credit rounds down, a debit rounds up in magnitude (against the
   follower, paper_book's rule).
-- Funding: per perp instrument the allocation ever traded, rate rows with
-  `at` after the watermark (the latest FUNDING leg's occurred_at for that
-  instrument; before any, from the first paper fill of it) and `at <= now`.
-  The position is the paper position at `at` (inclusive). A row with no
-  position is skipped; a row with no mark at all is skipped and logged
-  (never guessed). The quote is used only when within quote_max_age of
-  `at`; the close is the last complete UTC daily close before `at`'s day.
+- Funding: per perp instrument the allocation ever traded, every rate row
+  from the first paper fill of it to `now` that is not booked yet (its ref
+  is the idempotency key). Once a payment is booked, rows older than both
+  the newest booked payment and now - FUNDING_RETRY_WINDOW (7 days) are
+  not looked at again; while the position is flat, rows after its last
+  fill are not either (nothing is owed). The position is the paper
+  position at `at` (inclusive). A row with no position is skipped; a row
+  with no mark yet is left unbooked and retried on later passes (a close
+  or a quote can arrive later), never guessed, and given up once it leaves
+  the window. The quote is used only when within quote_max_age of `at`;
+  the close is the last complete UTC daily close before `at`'s day.
+- Each stage (funding, corporate actions, liquidation) runs in its own
+  savepoint: a stage that raises is rolled back and logged, and the next
+  stage still runs, so a funding bug never stops the liquidation check.
 - Liquidation is checked only when EVERY open perp has a fresh mark
   (prices.latest_mark, and its age re-checked here) and a known entry, and
   at least one has a margin tier. Positions without a tier add their P&L to
@@ -58,7 +66,8 @@ corporate actions"; tests/test_paper_lifecycle.py pins every number):
   at 00:00 UTC of the ex-date to the holding just before it; a dividend is
   computed on that same holding (end of ex-date minus one day) and
   credited at 00:00 UTC of the pay date, not before. A dividend without a
-  pay date waits. Symbol changes are logged and skipped.
+  pay date waits. Symbol changes are logged and skipped here; the
+  portfolio page tells the follower (paper.symbol_change_notices).
 - A source row that cannot be parsed (funding rate or mark, margin tiers,
   cash per share) is skipped and logged, never guessed, and never allowed
   to fail the pass (the caller commits signals and lifecycle together).
@@ -75,6 +84,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from fractions import Fraction
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.orm import Session
 
 from alphamarket import paper_book, prices
@@ -98,16 +108,34 @@ logger = logging.getLogger(__name__)
 MICROS = 1_000_000
 LIQUIDATED = "liquidated"
 _EPSILON = timedelta(microseconds=1)
+# How long a funding row that has no mark yet is retried (a close for D-1, or
+# a quote near `at`, can arrive later) before it is given up.
+FUNDING_RETRY_WINDOW = timedelta(days=7)
 
 
 def apply_lifecycle(db: Session, allocation: Allocation, now: datetime) -> int:
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("now must be timezone-aware (invariant 2)")
     now = now.astimezone(UTC)
-    applied = apply_funding(db, allocation, now)
-    applied += apply_corporate_actions(db, allocation, now)
-    applied += check_liquidation(db, allocation, now)
+    applied = 0
+    for stage in (apply_funding, apply_corporate_actions, check_liquidation):
+        applied += _stage_isolated(db, allocation, stage, now)
     return applied
+
+
+def _stage_isolated(db: Session, allocation: Allocation, stage, now: datetime) -> int:
+    """One stage inside a savepoint: a stage that raises is rolled back and
+    logged, and the next stage still runs (a funding bug must never stop the
+    liquidation check). Every stage is idempotent, so the next pass retries
+    it. A lost database connection propagates (the whole pass retries)."""
+    try:
+        with db.begin_nested():
+            return stage(db, allocation, now)
+    except (OperationalError, InterfaceError):
+        raise
+    except Exception:
+        logger.exception("allocation %s: lifecycle stage %s raised", allocation.id, stage.__name__)
+        return 0
 
 
 # ---- shared helpers ----------------------------------------------------------------
@@ -225,6 +253,58 @@ def _funding_mark(db: Session, inst: Instrument, row: FundingRateRow) -> Fractio
     return _close_before(db, inst, at)
 
 
+def _last_fill_at(db: Session, allocation: Allocation, inst: Instrument) -> datetime | None:
+    return aware(
+        db.scalar(
+            select(func.max(MirrorAssetFill.filled_at)).where(
+                MirrorAssetFill.allocation_id == allocation.id,
+                MirrorAssetFill.instrument_id == inst.id,
+            )
+        )
+    )
+
+
+def _booked_funding_refs(
+    db: Session, allocation: Allocation, inst: Instrument, since: datetime
+) -> set[str]:
+    return set(
+        db.scalars(
+            select(MirrorLedgerEntry.ref)
+            .where(
+                MirrorLedgerEntry.allocation_id == allocation.id,
+                MirrorLedgerEntry.instrument_id == inst.id,
+                MirrorLedgerEntry.kind == LegKind.FUNDING,
+                MirrorLedgerEntry.occurred_at >= since,
+            )
+            .distinct()
+        ).all()
+    )
+
+
+def _funding_window(
+    db: Session, allocation: Allocation, inst: Instrument, book, now: datetime
+) -> tuple[datetime, datetime] | None:
+    """[since, until] of the funding rows to look at for one perp, or None.
+
+    since: the first paper fill of the perp, then (once funding is booked)
+    the earlier of the newest booked payment and now - FUNDING_RETRY_WINDOW,
+    so a row that had no mark is retried for that long before it is given
+    up. until: now, or the last fill of the perp while the position is flat
+    (no row after it can owe anything)."""
+    first = _first_fill_at(db, allocation, inst)
+    if first is None:
+        return None
+    since = first
+    watermark = _funding_watermark(db, allocation, inst)
+    if watermark is not None:
+        since = max(first, min(watermark, now - FUNDING_RETRY_WINDOW))
+    until = now
+    if inst.base_asset not in book.perps:
+        last = _last_fill_at(db, allocation, inst)
+        until = min(now, last) if last is not None else now
+    return (since, until) if since <= until else None
+
+
 def apply_funding(db: Session, allocation: Allocation, now: datetime) -> int:
     applied = 0
     instruments = _perp_instruments(db, allocation)
@@ -232,19 +312,22 @@ def apply_funding(db: Session, allocation: Allocation, now: datetime) -> int:
         return 0
     book = paper_book.load_book(db, allocation)
     for inst in instruments:
-        watermark = _funding_watermark(db, allocation, inst)
+        window = _funding_window(db, allocation, inst, book, now)
+        if window is None:
+            continue
+        since, until = window
+        booked = _booked_funding_refs(db, allocation, inst, since)
         query = select(FundingRateRow).where(
-            FundingRateRow.instrument_id == inst.id, FundingRateRow.at <= now
+            FundingRateRow.instrument_id == inst.id,
+            FundingRateRow.at >= since,
+            FundingRateRow.at <= until,
         )
-        if watermark is not None:
-            query = query.where(FundingRateRow.at > watermark)
-        else:
-            first = _first_fill_at(db, allocation, inst)
-            if first is None:
-                continue
-            query = query.where(FundingRateRow.at >= first)
+        unpriced: list[datetime] = []
         for row in db.scalars(query.order_by(FundingRateRow.at, FundingRateRow.id)).all():
             at = aware(row.at)
+            ref = f"fund:{inst.id}:{_epoch(at)}"
+            if ref in booked:
+                continue
             position = perp_positions_at(book.anchor, book.perp_fills, at).get(inst.base_asset)
             if position is None:
                 continue
@@ -262,23 +345,29 @@ def apply_funding(db: Session, allocation: Allocation, now: datetime) -> int:
                 )
                 continue
             if mark is None:
-                logger.warning(
-                    "allocation %s: no mark for %s funding at %s; skipped",
-                    allocation.id,
-                    inst.base_asset,
-                    at.isoformat(),
-                )
+                unpriced.append(at)  # retried next pass, until it leaves the window
                 continue
             payment = funding_payment_micros(position.qty.units, mark, rate)
             rows = paper_book.append_group(
                 db,
                 allocation,
-                ref=f"fund:{inst.id}:{_epoch(at)}",
+                ref=ref,
                 legs=[LegSpec(CASH_ASSET, payment, CASH_DECIMALS, LegKind.FUNDING, inst.id)],
                 occurred_at=at,
             )
             if rows:
                 applied += 1
+                booked.add(ref)
+        if unpriced:
+            logger.warning(
+                "allocation %s: %d %s funding payments have no mark yet (oldest %s); "
+                "each is retried for %s, then given up",
+                allocation.id,
+                len(unpriced),
+                inst.base_asset,
+                unpriced[0].isoformat(),
+                FUNDING_RETRY_WINDOW,
+            )
     return applied
 
 

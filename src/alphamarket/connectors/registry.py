@@ -656,6 +656,19 @@ def price_asset(venue: str, asset: str) -> str:
     return mapper(asset) if mapper is not None else asset
 
 
+# Every asset code worth exactly 1.00 USD whichever account holds it: the
+# common stablecoins plus each venue's own codes for them (Kraken's held and
+# earning variants, Hyperliquid's HIP-3 collateral tokens). One set, so the
+# creator's equity, stats, signals and the paper book all agree
+# (valuation.CASH_AT_PAR). A venue's market data class lists its codes in
+# STABLECOINS_AT_PAR so no close is ever fetched for them.
+CASH_AT_PAR: frozenset[str] = (
+    MarketDataSource.STABLECOINS_AT_PAR
+    | KrakenMarketData.STABLECOINS_AT_PAR
+    | hyperliquid.HyperliquidMarketData.STABLECOINS_AT_PAR
+)
+
+
 def build_market_data(venue: str, venue_env: str) -> MarketDataSource:
     """Public (unauthenticated) market data for a venue environment."""
     try:

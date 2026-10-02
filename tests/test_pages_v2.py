@@ -590,6 +590,27 @@ def test_portfolio_for_a_logged_in_user_shows_a_perp_with_unrealized_value(
     )
 
 
+def test_portfolio_tells_the_follower_about_an_unconverted_symbol_change(
+    client, session_factory, viewer, monkeypatch
+):
+    view = {
+        **PERP_VIEW,
+        "positions": [],
+        "venue": "alpaca",
+        "asset_class": "equity",
+        "symbol_changes": [{"symbol": "AAPL", "new_symbol": "AAPX", "ex_date": "2026-09-12"}],
+    }
+    monkeypatch.setattr("alphamarket.paper.asset_view_extras", lambda db, a, v: dict(view))
+    with session_factory() as db:
+        s = _strategy(db, "alpaca", "stocks", "Stocks")
+        _tail(db, s, viewer)
+        db.commit()
+    html = client.get("/portfolio").text
+    assert "AAPL changed symbol to AAPX on 2026-09-12" in html
+    assert "do not convert symbol changes yet" in html
+    assert "trades in AAPX will not reduce it" in html
+
+
 def test_portfolio_activity_lists_paper_fills_and_settlements(client, session_factory, viewer):
     with session_factory() as db:
         s = _strategy(db, "kalshi", "kx-act", "KX Act")

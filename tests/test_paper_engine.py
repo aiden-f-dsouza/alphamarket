@@ -946,3 +946,235 @@ def test_mirror_ledger_rows_are_append_only_after_a_copy(db, kraken):
     db.delete(leg)
     with pytest.raises(AppendOnlyViolation):
         db.flush()
+
+
+# ---- wave 2 follow-ups: poison signals, late signals, symbol changes ----------------------------
+
+
+def test_a_signal_the_engine_raises_on_is_skipped_alone(db, kraken, monkeypatch):
+    from alphamarket import paper_book
+
+    alloc = kraken.allocation("1000")
+    s1 = kraken.signal(kraken.btc, "buy", "0.1", "60000", before="0", after="0.1", ask="60030")
+    s2 = kraken.signal(
+        kraken.btc,
+        "buy",
+        "0.1",
+        "60000",
+        before="0.1",
+        after="0.2",
+        ask="60030",
+        filled_at=T0 + timedelta(minutes=1),
+    )
+    s3 = kraken.signal(
+        kraken.btc,
+        "buy",
+        "0.1",
+        "60000",
+        before="0.2",
+        after="0.3",
+        ask="60030",
+        filled_at=T0 + timedelta(minutes=2),
+    )
+    real = paper_book.append_group
+
+    def poisoned(db, allocation, *, ref, **kw):
+        rows = real(db, allocation, ref=ref, **kw)  # the fill and its legs are written...
+        if ref == f"sig:{s2.id}":
+            raise ArithmeticError("engine bug")  # ...then the engine fails on s2
+        return rows
+
+    monkeypatch.setattr(paper_book, "append_group", poisoned)
+    assert process_allocation(db, alloc) == (2, 0)
+    assert [f.signal_id for f in fills_of(db, alloc)] == [s1.id, s3.id]
+    assert legs_of(db, alloc, f"sig:{s2.id}") == {}  # rolled back with its savepoint
+    assert skips_of(db, alloc) == {s2.id: "engine_error"}
+    assert alloc.last_signal_id == s3.id
+    assert process_allocation(db, alloc) == (0, 0)  # never retried, never blocks
+
+
+def test_a_database_failure_still_fails_the_whole_pass(db, kraken, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    from alphamarket import paper_book
+
+    alloc = kraken.allocation("1000")
+    kraken.signal(kraken.btc, "buy", "0.1", "60000", before="0", after="0.1", ask="60030")
+
+    def connection_lost(*args, **kwargs):
+        raise OperationalError("INSERT ...", {}, ConnectionError("server closed the connection"))
+
+    monkeypatch.setattr(paper_book, "append_group", connection_lost)
+    with pytest.raises(OperationalError):
+        process_allocation(db, alloc)
+    # Not the signal's fault: nothing is skipped, and the next pass retries it.
+    assert skips_of(db, alloc) == {}
+    assert fills_of(db, alloc) == []
+    assert not db.get(Allocation, alloc.id).last_signal_id
+
+
+def test_a_late_signal_is_dated_after_the_events_already_booked(db, hyperliquid):
+    from alphamarket.jobs import aware
+    from alphamarket.models import FundingRateRow
+
+    alloc = hyperliquid.allocation("1000")
+    # Follower q = 0.1 x 1,000 / 10,000 x 60,000 / 60,010 = 0.0099983... -> 0.00999.
+    s1 = hyperliquid.signal(
+        hyperliquid.perp, "buy", "0.1", "60000", before="0", after="0.1", ask="60010"
+    )
+    one_pm = T0 + timedelta(hours=1)
+    db.add(
+        FundingRateRow(
+            instrument_id=hyperliquid.perp.id,
+            at=one_pm,
+            rate="0.0001",
+            mark_price="60000",
+            source="hyperliquid",
+        )
+    )
+    db.commit()
+    assert process_allocation(db, alloc) == (1, 1)
+    # A fill at 12:20 (observed 12:25) is signalled only after 13:00's funding
+    # was booked on s1's position alone: -0.00999 x 60,000 x 0.0001 = -0.05994.
+    s2 = hyperliquid.signal(
+        hyperliquid.perp,
+        "buy",
+        "0.1",
+        "60000",
+        before="0.1",
+        after="0.2",
+        ask="60010",
+        filled_at=T0 + timedelta(minutes=20),
+        lag=timedelta(minutes=5),
+    )
+    assert process_allocation(db, alloc) == (1, 0)
+    f1, f2 = fills_of(db, alloc)
+    assert (f1.signal_id, f2.signal_id) == (s1.id, s2.id)
+    assert aware(f2.filled_at) == one_pm  # not 12:25: never before a booked event
+    legs = db.scalars(
+        select(MirrorLedgerEntry).where(MirrorLedgerEntry.allocation_id == alloc.id)
+    ).all()
+    assert {aware(e.occurred_at) for e in legs if e.ref == f"sig:{s2.id}"} == {one_pm}
+    assert [e.delta_atoms for e in legs if e.kind == LegKind.FUNDING] == [-59_940]
+
+
+def test_a_late_equity_signal_is_not_booked_across_a_split(db, alpaca):
+    from alphamarket.connectors.base import CorporateActionKind
+    from alphamarket.models import CorporateActionRow
+
+    alloc = alpaca.allocation("1000")
+    db.add(
+        CorporateActionRow(
+            source="alpaca",
+            symbol="AAPL",
+            kind=CorporateActionKind.SPLIT,
+            ex_date=D + timedelta(days=1),
+            ratio_new=2,
+            ratio_old=1,
+        )
+    )
+    db.commit()
+    # A buy the day after the 2:1 split is copied first...
+    alpaca.signal(
+        alpaca.aapl,
+        "buy",
+        "1",
+        "100",
+        before="0",
+        after="1",
+        ask="100.05",
+        filled_at=T0 + timedelta(days=1),
+    )
+    assert process_allocation(db, alloc) == (1, 0)
+    # ...then a pre-split buy (D 12:00) arrives. Dated after the booked fill it
+    # would cross the ex-date with a pre-split size: skipped instead.
+    late = alpaca.signal(alpaca.aapl, "buy", "1", "200", before="1", after="2", ask="200.10")
+    assert process_allocation(db, alloc) == (0, 0)
+    assert skips_of(db, alloc) == {late.id: "late_signal"}
+    assert len(fills_of(db, alloc)) == 1
+
+
+def test_a_held_equity_whose_symbol_changed_is_shown_to_the_follower(db, alpaca):
+    from alphamarket.connectors.base import CorporateActionKind
+    from alphamarket.models import CorporateActionRow
+
+    alloc = alpaca.allocation("1000")
+    alpaca.signal(alpaca.aapl, "buy", "1", "100", before="0", after="1", ask="100.05")
+    assert process_allocation(db, alloc) == (1, 0)
+    change = D + timedelta(days=2)
+
+    def symbol_change(source, symbol, ex_date, new_symbol):
+        db.add(
+            CorporateActionRow(
+                source=source,
+                symbol=symbol,
+                kind=CorporateActionKind.SYMBOL_CHANGE,
+                ex_date=ex_date,
+                new_symbol=new_symbol,
+            )
+        )
+
+    symbol_change("alpaca", "AAPL", change, None)  # two sources, one names the new symbol
+    symbol_change("ibkr", "AAPL", change, "AAPX")
+    symbol_change("alpaca", "MSFT", change, "MSFX")  # not held
+    symbol_change("alpaca", "AAPL", START.date() - timedelta(days=1), "OLD")  # before the start
+    db.commit()
+    expected = [{"symbol": "AAPL", "new_symbol": "AAPX", "ex_date": "2026-09-12"}]
+    assert paper.symbol_change_notices(db, alloc, now=T0 + timedelta(days=3)) == expected
+    assert paper.symbol_change_notices(db, alloc, now=T0) == []  # not effective yet
+    value = paper.value_asset_allocation(db, alloc, now=T0 + timedelta(days=3))
+    assert "symbol_changes" in paper.asset_view_extras(db, alloc, value)
+
+
+@pytest.mark.pg
+def test_one_signals_database_error_does_not_abort_the_pass_on_postgres(pg_url, monkeypatch):
+    """On Postgres a failed statement aborts the whole transaction unless it ran
+    inside a savepoint. Runs in an outer transaction that is rolled back, so the
+    shared test database is left untouched."""
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import Session
+
+    from alphamarket import paper_book
+
+    engine = create_engine(pg_url)
+    try:
+        with engine.connect() as conn:
+            outer = conn.begin()
+            db = Session(
+                bind=conn,
+                join_transaction_mode="create_savepoint",
+                expire_on_commit=False,
+                autoflush=False,
+            )
+            try:
+                w = World(db, "kraken")
+                w.btc = w.instrument("XXBTZUSD", "BTC", min_qty_atoms=10_000, min_notional="0.5")
+                alloc = w.allocation("1000")
+                s1 = w.signal(w.btc, "buy", "0.1", "60000", before="0", after="0.1", ask="60030")
+                s2 = w.signal(
+                    w.btc,
+                    "buy",
+                    "0.1",
+                    "60000",
+                    before="0",
+                    after="0.1",
+                    ask="60030",
+                    filled_at=T0 + timedelta(minutes=1),
+                )
+                real = paper_book.append_group
+
+                def poisoned(db, allocation, *, ref, **kw):
+                    if ref == f"sig:{s1.id}":
+                        db.execute(text("SELECT 1 / 0"))  # DataError: division by zero
+                    return real(db, allocation, ref=ref, **kw)
+
+                monkeypatch.setattr(paper_book, "append_group", poisoned)
+                assert process_allocation(db, alloc) == (1, 0)
+                assert skips_of(db, alloc) == {s1.id: "engine_error"}
+                assert [f.signal_id for f in fills_of(db, alloc)] == [s2.id]
+                assert alloc.last_signal_id == s2.id
+            finally:
+                db.close()
+                outer.rollback()
+    finally:
+        engine.dispose()
