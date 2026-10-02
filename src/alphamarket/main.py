@@ -62,6 +62,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(mfa.router)
     app.include_router(account.router)
+    app.include_router(account.email_router)  # wave2: POST /account/email
     app.include_router(security_pages.router)
     app.include_router(venues.router)
     app.include_router(oauth.router)

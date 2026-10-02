@@ -223,6 +223,67 @@ def assemble_secret(profile, payload: ConnectIn) -> str | None:
     raise HTTPException(status_code=422, detail="Passphrase is required.")
 
 
+WRITABLE_KEY_DETAIL = (
+    "This API key has write (trading) scope. Koine only accepts "
+    "read-only keys: create a new key with read-only scope and connect that."
+)
+
+
+def verify_new_credential(
+    db: Session,
+    user: User,
+    venue: str,
+    venue_env: str,
+    key_id: str,
+    secret: str | None,
+    account_ref: str | None,
+    *,
+    reject_target: tuple[str, str | int],
+    reject_details: dict | None = None,
+    writable_detail: str = WRITABLE_KEY_DETAIL,
+):
+    """The checks every new credential passes before Koine stores it (connect,
+    finishing a pending connect, rotate): build the connector, make the
+    cheapest authenticated call, and prove the credential read-only. A
+    writable credential is audited (CREDENTIAL_REJECTED on `reject_target`)
+    and committed before the 422, since offering one is a security event even
+    though nothing is stored. Returns (connector, evidence). Error details are
+    generic on purpose: no exception text may echo key material back."""
+    profile = get_profile(venue)
+    try:
+        connector = build_connector(venue, venue_env, key_id, secret, account_ref=account_ref)
+        connector.check_connection()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Could not authenticate with the venue using this key."
+                if profile.needs_secret
+                else f"{profile.display_name} does not know this account."
+            ),
+        ) from None
+    evidence = prove(connector)
+    if evidence.read_only is False:
+        target_type, target_id = reject_target
+        audit.record(
+            db,
+            AuditAction.CREDENTIAL_REJECTED,
+            actor_user_id=user.id,
+            target_type=target_type,
+            target_id=target_id,
+            details={
+                "reason": "scope_writable",
+                **(reject_details or {}),
+                **evidence_json(evidence),
+            },
+        )
+        db.commit()
+        raise HTTPException(status_code=422, detail=writable_detail)
+    return connector, evidence
+
+
 def connect_account(
     db: Session,
     user: User,
@@ -288,45 +349,16 @@ def connect_account(
         screen = consent.require_consent(db, user, payload.venue, payload.consent_sha256, request)
 
     venue_env = get_settings().venue_env(payload.venue)
-    try:
-        connector = build_connector(
-            payload.venue, venue_env, key_id, secret, account_ref=payload.account_ref
-        )
-        connector.check_connection()
-    except HTTPException:
-        raise
-    except Exception:
-        # Deliberately generic: no exception detail can be allowed to echo key
-        # material back, so none of it leaves the server.
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Could not authenticate with the venue using this key."
-                if profile.needs_secret
-                else f"{profile.display_name} does not know this account."
-            ),
-        ) from None
-
-    evidence = prove(connector)
-    if evidence.read_only is False:
-        # Audited and committed before refusing: a writable key offered to
-        # Koine is a security event even though nothing is stored.
-        audit.record(
-            db,
-            AuditAction.CREDENTIAL_REJECTED,
-            actor_user_id=user.id,
-            target_type="venue",
-            target_id=payload.venue,
-            details={"reason": "scope_writable", **evidence_json(evidence)},
-        )
-        db.commit()
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "This API key has write (trading) scope. Koine only accepts "
-                "read-only keys: create a new key with read-only scope and connect that."
-            ),
-        )
+    connector, evidence = verify_new_credential(
+        db,
+        user,
+        payload.venue,
+        venue_env,
+        key_id,
+        secret,
+        payload.account_ref,
+        reject_target=("venue", payload.venue),
+    )
 
     # Reconciliation anchor: the balance at this moment is what every later
     # equity number is measured from (see ledger.py).

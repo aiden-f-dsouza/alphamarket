@@ -42,7 +42,7 @@ from alphamarket import audit, credentials, email, mfa, ratelimit
 from alphamarket.audit import AuditAction
 from alphamarket.auth import current_user, optional_user
 from alphamarket.connectors.base import CredentialKind
-from alphamarket.connectors.registry import build_connector, get_profile
+from alphamarket.connectors.registry import get_profile
 from alphamarket.db import get_db
 from alphamarket.ingest import is_asset_venue
 from alphamarket.jobs import PRIORITY_URGENT, JobKind, enqueue
@@ -54,8 +54,8 @@ from alphamarket.models import (
     VenueCredential,
 )
 from alphamarket.ratelimit import rate_limit
-from alphamarket.scopecheck import apply_evidence, evidence_json, prove
-from alphamarket.venues import ensure_venue_open
+from alphamarket.scopecheck import apply_evidence, evidence_json
+from alphamarket.venues import ensure_venue_open, verify_new_credential
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["rotate"])
@@ -77,13 +77,6 @@ ROTATABLE_STATUSES = (
 WRITABLE_KEY = (
     "This API key has write (trading) scope. Koine only accepts read-only keys: "
     "create a new key with read-only scope and use that."
-)
-
-# The alert email's subject and lead (email.send_security_alert looks kinds up
-# here). Registered at import; integration may move them into email.py.
-email.ALERT_SUBJECTS.setdefault("key_rotated", "A venue key on your Koine account was replaced")
-email.ALERT_LEADS.setdefault(
-    "key_rotated", "The read-only key for one of your venue connections was replaced."
 )
 
 
@@ -171,36 +164,18 @@ def rotate_credential(
     secret = payload.secret
     account_ref = payload.account_ref or _previous_account_ref(db, account)
 
-    try:
-        connector = build_connector(
-            account.venue, account.venue_env, payload.key_id, secret, account_ref=account_ref
-        )
-        connector.check_connection()
-    except HTTPException:
-        raise
-    except Exception:
-        # Generic on purpose: no exception text may echo key material back.
-        raise HTTPException(
-            status_code=422, detail="Could not authenticate with the venue using this key."
-        ) from None
-
-    evidence = prove(connector)
-    if evidence.read_only is False:
-        audit.record(
-            db,
-            AuditAction.CREDENTIAL_REJECTED,
-            actor_user_id=user.id,
-            target_type="venue_account",
-            target_id=account.id,
-            details={
-                "reason": "scope_writable",
-                "trigger": "rotate",
-                "venue": account.venue,
-                **evidence_json(evidence),
-            },
-        )
-        db.commit()
-        raise HTTPException(status_code=422, detail=WRITABLE_KEY)
+    _connector, evidence = verify_new_credential(
+        db,
+        user,
+        account.venue,
+        account.venue_env,
+        payload.key_id,
+        secret,
+        account_ref,
+        reject_target=("venue_account", account.id),
+        reject_details={"trigger": "rotate", "venue": account.venue},
+        writable_detail=WRITABLE_KEY,
+    )
 
     previous_status = str(account.status)
     previous = credentials.active_credential(db, account)

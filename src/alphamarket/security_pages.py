@@ -22,7 +22,6 @@ from alphamarket.pages import _render
 
 router = APIRouter(include_in_schema=False)
 # wave2: POST /account/email (JSON) rides on this router, which main.py includes.
-router.include_router(account.email_router)
 
 
 def _safe_next(next_url: str | None, default: str = "/dashboard/security") -> str:

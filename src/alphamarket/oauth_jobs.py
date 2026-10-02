@@ -37,7 +37,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from alphamarket import alerts, audit, credentials, email, oauth
+from alphamarket import alerts, audit, credentials, oauth
 from alphamarket.audit import AuditAction
 from alphamarket.connectors import registry
 from alphamarket.connectors.base import CredentialKind
@@ -52,13 +52,6 @@ logger = logging.getLogger(__name__)
 TICK_HORIZON = 2 * oauth.REFRESH_MARGIN
 # In every reconnect message; a failed sync's "<Exc>: <message>" keeps it.
 RECONNECT_MARK = "no longer accepts Koine's access"
-
-email.ALERT_SUBJECTS.setdefault("oauth_reconnect", "Reconnect a venue on your Koine account")
-email.ALERT_LEADS.setdefault(
-    "oauth_reconnect",
-    "A venue stopped accepting Koine's read-only access, so syncing has paused. "
-    "Reconnect it from your dashboard to resume.",
-)
 
 
 class ReconnectRequired(RuntimeError):

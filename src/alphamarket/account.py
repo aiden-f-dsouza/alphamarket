@@ -37,8 +37,6 @@ from alphamarket.auth import current_user, ensure_password_fits, hash_password, 
 from alphamarket.config import get_settings
 from alphamarket.db import get_db
 from alphamarket.email import (
-    ALERT_LEADS,
-    ALERT_SUBJECTS,
     security_event,
     send_email,
     send_security_alert,
@@ -317,26 +315,6 @@ EMAIL_CHANGE_REQUESTED = (
     "The link lasts 1 hour; your address changes only when you open it."
 )
 EMAIL_CHANGE_FAILED = "This link is invalid, has expired, or the address is already in use."
-
-# Per-user budget for change requests (each one sends two emails). Registered
-# here so ratelimit.RULES' literal stays untouched; integration may move it.
-ratelimit.RULES.setdefault("email_change_user", ratelimit.Rule("email_change_user", 5, 3600))
-
-ALERT_SUBJECTS.setdefault(
-    "email_change_requested", "A change of your Koine email address was requested"
-)
-ALERT_LEADS.setdefault(
-    "email_change_requested",
-    "Someone signed in to your account asked to change its email address. Nothing "
-    "changes unless the link sent to the new address is opened within 1 hour. If this "
-    "was not you, change your password or sign out everywhere: either cancels the link.",
-)
-ALERT_SUBJECTS.setdefault("email_changed", "Your Koine email address was changed")
-ALERT_LEADS.setdefault(
-    "email_changed",
-    "The email address on your Koine account was changed and every other session was "
-    "signed out. This address no longer receives Koine email.",
-)
 
 
 @dataclass(frozen=True)

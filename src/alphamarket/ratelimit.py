@@ -73,6 +73,7 @@ RULES: dict[str, Rule] = {
         Rule("api_ip", 60, 60),
         Rule("follow_user", 60, 3600),  # follow and allocate
         Rule("verify_resend_user", 3, 3600),
+        Rule("email_change_user", 5, 3600),  # wave2: each request sends two emails
     )
 }
 
