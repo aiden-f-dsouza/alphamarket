@@ -642,3 +642,73 @@ reported account equity.
 **Prices.** Daily closes are Alpaca's unadjusted daily bars (share counts
 are adjusted by the split entries themselves, so prices must not be
 adjusted twice). A bar belongs to its New York trading date.
+
+<!-- wave2:p8-pages -->
+
+## Reading an asset strategy's page
+
+A strategy on a crypto or stock venue is valued by the asset statistics (the
+time-weighted return, see "External flows"), and its page is drawn from that
+series, never from the raw equity curve. A deposit or a withdrawal changes
+the money in the account, not the return, so it must not bend the picture.
+
+```
+index(d)     = growth of 1.0 with external flows removed (time-weighted)
+growth(d)    = equity(first day) x index(d)          the chart, in dollars
+drawdown(d)  = (max over s <= d of index(s) - index(d)) / max over s <= d of index(s)
+month return = index(month end) / index(prior month end) - 1
+               (the first month is measured from the first day's index)
+```
+
+Worked example: equity 10,000, 10,500, 13,605 (a 3,000 deposit at the start
+of day 3), 12,244.5. The index is 1.0, 1.05, 1.0605, 0.95445, so the return
+is -4.555% and the worst drawdown 10% (peak 1.0605 on day 3). The raw
+equity would say +22.4%, which is the deposit counted as profit. The chart
+plots 10,000, 10,500, 10,605, 9,544.5. The page still lists the actual equity
+in its JSON, because that is also true.
+
+**Holdings and exposure.** The holdings panel lists the positions at the last
+complete UTC close, largest first, each at the day's close and valued as
+described under "Asset valuation". Cash is not exposure.
+
+```
+share of a holding = value / sum of all position values      (cash, spot, equity)
+gross exposure     = sum over spot, equity and perp of |notional|
+largest exposure   = the underlying with the largest share of gross (BTC spot and
+                     BTC-PERP count together)
+perp leverage      = sum over perps of |quantity x close| / equity
+```
+
+A perpetual's value is its unrealized profit or loss, quantity x (close -
+entry), so the panel shows its notional separately and does not give it a
+share. An asset with no price, or a perp with no known entry, is listed under
+the table as not valued and carries no value; days valued at the last
+available close are counted. Nothing is estimated.
+
+**Verification tiers for asset venues.** *Reconciled*: an intraday venue whose
+cash and holdings are re-read and checked every night. *Daily verified*:
+a venue that reports end of day only (Interactive Brokers Flex statements,
+SnapTrade). The record is checked against the latest daily statement, so it
+is verified at day resolution and intraday activity between statements is
+not independently checked; the page says so. Where a broker reports its own
+account equity, the page shows it next to the equity Koine computes; a
+difference beyond the tolerance flags the statistics and never hides them.
+
+**What proves the credential cannot trade.** Each page states the method for
+its venue: a read-only API key whose scope is read back from the venue; a key
+proven read-only because a validate-only order or withdrawal is refused; a
+read-only OAuth grant approved inside the account; a reporting-only token (the
+token type cannot place orders); an aggregator's read-only connection (the
+aggregator offers no independent proof, and the page says that rests on its
+connection type); or a public wallet address with no key, whose ownership is
+proven by a message signed with the wallet or a code in the venue profile.
+
+**Unsupported activity.** Activity Koine skipped rather than guess at (a short
+sale, an option, a stock dividend) is counted on the page by reason. Only the
+reason and the count are public, not the symbol or the size.
+
+**Paper portfolios.** A follower's page lists each position at the freshest
+public quote, else the last daily close, else at cost, with the unrealized
+profit or loss, the median delay between the creator's fill and Koine seeing
+it (copy lag) and the signals that were skipped, by reason. The portfolio value
+is the sum of its allocations' equity; its drawdown is measured on that sum.

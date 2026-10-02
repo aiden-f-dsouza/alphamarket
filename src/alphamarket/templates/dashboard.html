@@ -14,15 +14,17 @@
 {% if not totp_on or not email_verified %}<div class="notice" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap"><span style="display:inline-flex;align-items:center;gap:10px">{{ m.icon("lock", 14, "var(--text2)") }}{% if not email_verified and not totp_on %}Confirm your email and turn on two-factor authentication before connecting a venue.{% elif not email_verified %}Confirm your email before connecting a venue.{% else %}Turn on two-factor authentication before connecting a venue.{% endif %}</span><a class="btn secondary sm" href="/dashboard/security">Security settings</a></div>{% endif %}
 
 {% for row in rows %}
-{% set a = row.account %}{% set s = row.strategy %}{% set st = row.stats %}
+{% set a = row.account %}{% set s = row.strategy %}{% set st = row.stats %}{% set ax = row.status %}{% set v2 = st and st.extras.get("valuation") == "v2" %}
 <div class="card">
   <div class="row">
     <div class="stack" style="gap:6px">
       <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap"><h3 style="font-size:22px">{{ s.name if s else "Strategy" }}</h3><span class="mono small muted">{{ a.venue }} · {{ a.venue_env }}</span></div>
       <div class="badges">
-        {% if a.status == "active" %}<span class="badge good">connected</span>{% elif a.status == "error" %}<span class="badge bad">sync error</span>{% else %}<span class="badge">disconnected</span>{% endif %}
+        {% if a.status == "active" %}<span class="badge good">connected</span>{% elif a.status == "error" %}<span class="badge bad">sync error</span>{% elif a.status == "pending" %}<span class="badge warn">connection not finished</span>{% elif a.status == "suspended" %}<span class="badge bad">suspended</span>{% else %}<span class="badge">disconnected</span>{% endif %}
+        {% if ax.importing %}<span class="badge warn">Importing history{% if ax.pages %} · {{ ax.pages }} page{{ "s" if ax.pages != 1 }} so far{% endif %}</span>{% endif %}
+        {% if ax.n_flags %}<span class="badge warn" title="Activity Koine skipped instead of guessing at">{{ m.icon("x", 12, "currentColor", 2) }}{{ ax.n_flags }} unsupported {{ "activity" if ax.n_flags == 1 else "activities" }}</span>{% endif %}
         {% if not row.profile.needs_secret %}<span class="badge good">{{ m.icon("lock", 12, "currentColor", 2) }}no key held</span>{% elif a.scope_checked_at %}<span class="badge good">{{ m.icon("lock", 12, "currentColor", 2) }}read-only verified</span>{% else %}<span class="badge warn">scope unverified</span>{% endif %}
-        {% if row.tier == "unclaimed" %}<span class="badge warn">ownership unclaimed</span>{% elif row.tier == "fills_only" %}<span class="badge">fills verified · balance not reconciled</span>{% endif %}
+        {% if row.tier == "unclaimed" %}<span class="badge warn">ownership unclaimed</span>{% elif row.tier == "fills_only" %}<span class="badge">fills verified · balance not reconciled</span>{% elif row.tier == "daily_verified" %}<span class="badge">daily verified · end-of-day data</span>{% endif %}
         {% if s %}<span class="badge {{ 'warn' if s.status == 'quarantined' else ('good' if s.status == 'live' else '') }}">{{ s.status }}</span>{% endif %}
         {% if row.visible and s %}<a class="small text2" href="/s/{{ s.slug }}" style="display:inline-flex;align-items:center;gap:6px;margin-left:8px;font-weight:500">Public page {{ m.icon("arrow", 12) }}</a>{% else %}<span class="mono small muted" style="margin-left:8px">public page hidden</span>{% endif %}
       </div>
@@ -34,7 +36,12 @@
     </div>
   </div>
 
-  {% if row.tier == "unclaimed" %}
+  {% if row.tier == "unclaimed" and row.profile.ownership == "signed_message" %}
+  <div class="body" style="gap:14px;border-bottom:1px solid var(--line)">
+    <div class="stack" style="gap:6px"><h3>Prove this wallet is yours</h3>
+      <span class="small text2" style="line-height:1.55">Anyone can paste a public address, so your page stays hidden until you sign a short Koine message with this wallet. The message contains your claim code <code class="mono">{{ a.claim_code }}</code>, moves no funds and costs no gas.</span></div>
+  </div>
+  {% elif row.tier == "unclaimed" %}
   <div class="body" style="gap:14px;border-bottom:1px solid var(--line)">
     <div class="stack" style="gap:6px"><h3>Prove this account is yours</h3>
       <span class="small text2" style="line-height:1.55">Anyone can paste a public address, so your page stays hidden until we see this code in your {{ row.profile.display_name }} profile bio. Add it, save the bio on {{ row.profile.display_name }}, then press Claim. You can remove it afterwards.</span></div>
@@ -45,14 +52,29 @@
   </div>
   {% endif %}
 
+  {% if ax.importing or ax.finish_url or ax.rotate_url or ax.n_flags or a.status in ("suspended", "error") %}
+  <div class="body" style="gap:12px;border-bottom:1px solid var(--line)">
+    {% if ax.importing %}<div class="stack" style="gap:4px"><span style="font-weight:500">Importing history</span><span class="small text2">Koine is reading your full venue history in the background{% if ax.pages %}: {{ ax.pages }} page{{ "s" if ax.pages != 1 }} so far{% endif %}. Statistics appear once it finishes.</span></div>{% endif %}
+    {% if a.status == "suspended" %}<div class="stack" style="gap:4px"><span style="font-weight:500">Suspended</span><span class="small text2">This key could not be confirmed read-only and was erased. Nothing is synced until you replace it with a read-only key.</span></div>{% endif %}
+    {% if a.status == "error" and ax.last_sync_error %}<div class="stack" style="gap:4px"><span style="font-weight:500">Last sync failed</span><span class="small text2 bad">{{ ax.last_sync_error }}</span></div>{% endif %}
+    {% if ax.n_flags %}<div class="stack" style="gap:4px"><span style="font-weight:500">Unsupported activity</span><span class="small text2">{% for label, n in ax.flags.by_reason %}{{ n }} {{ label }}{{ ", " if not loop.last }}{% endfor %} skipped, not estimated. Numbers after these may not reconcile; the public page says so.</span></div>{% endif %}
+    {% if ax.finish_url or ax.rotate_url %}<div style="display:flex;gap:12px;flex-wrap:wrap">
+      {% if ax.finish_url %}<a class="btn" href="{{ ax.finish_url }}">Finish connecting</a>{% endif %}
+      {% if ax.rotate_url %}<a class="btn" href="{{ ax.rotate_url }}">Replace key</a>{% endif %}
+    </div>{% endif %}
+  </div>
+  {% endif %}
+
   {% if st %}
   <div class="stats six" style="border-bottom:1px solid var(--line)">
     <div class="stat"><span class="label">Equity</span><span class="v">{{ m.usd(st.equity_micros / 1000000) }}</span></div>
     {% if st.total_return is none and st.extras.get("return_on_peak_invested") is not none %}<div class="stat"><span class="label">Return on peak invested</span><span class="v {{ 'good' if st.extras.get("return_on_peak_invested") >= 0 else 'bad' }}">{{ m.pct(st.extras.get("return_on_peak_invested")) }}</span></div>
+    {% elif v2 %}<div class="stat"><span class="label">Return, time-weighted</span><span class="v {{ 'good' if (st.total_return or 0) >= 0 else 'bad' }}">{{ m.pct(st.total_return) }}</span></div>
     {% else %}<div class="stat"><span class="label">Total return</span><span class="v {{ 'good' if (st.total_return or 0) >= 0 else 'bad' }}">{{ m.pct(st.total_return) }}</span></div>{% endif %}
     <div class="stat"><span class="label">Worst drawdown</span><span class="v bad">{{ m.pct(-st.max_drawdown) }}</span></div>
     <div class="stat"><span class="label">Risk score</span><span class="v">{{ st.risk_score }}<small>/10</small></span></div>
-    <div class="stat"><span class="label">Win rate</span><span class="v">{{ "%.0f"|format((st.win_rate or 0) * 100) }}%</span></div>
+    {% if v2 %}<div class="stat"><span class="label">Open positions</span><span class="v">{{ st.extras.get("n_open_positions") if st.extras.get("n_open_positions") is not none else "—" }}</span></div>
+    {% else %}<div class="stat"><span class="label">Win rate</span><span class="v">{{ "%.0f"|format((st.win_rate or 0) * 100) }}%</span></div>{% endif %}
     <div class="stat"><span class="label">Track</span><span class="v">{{ st.track_days }}<small>days</small></span></div>
   </div>
   {% if st.flags %}<div class="body" style="padding-bottom:0"><span class="warn small">Flags: {{ st.flags|join(", ") }}</span></div>{% endif %}
@@ -62,7 +84,7 @@
 
   {% if row.snapshots %}
   <div class="body">
-    <div class="spread" style="align-items:baseline"><span class="label">Nightly reconciliation</span>{% if st %}<span class="mono small muted">{{ st.n_fills }} fills · {{ st.n_settlements }} settlements · stats as of {{ st.as_of.strftime("%Y-%m-%d") }}</span>{% endif %}</div>
+    <div class="spread" style="align-items:baseline"><span class="label">Nightly reconciliation</span>{% if st %}<span class="mono small muted">{{ st.n_fills }} fills{% if not v2 %} · {{ st.n_settlements }} settlements{% endif %} · stats as of {{ st.as_of.strftime("%Y-%m-%d") }}</span>{% endif %}</div>
     <table>
       <tr><th>Run (UTC)</th><th class="num">Venue balance</th><th class="num">Computed cash</th><th class="num">Divergence</th><th>Result</th></tr>
       {% for snap in row.snapshots %}
@@ -75,10 +97,12 @@
 
   {% if a.status != "disconnected" %}
   <div class="actions">
+    {% if a.status in ("active", "error") %}
     <form class="inline" method="post" action="/dashboard/accounts/{{ a.id }}/sync"><button class="btn secondary">{{ m.icon("sync", 14) }}Sync now</button></form>
     {% if row.reconcilable %}<form class="inline" method="post" action="/dashboard/accounts/{{ a.id }}/reconcile"><button class="btn secondary">Reconcile now</button></form>{% else %}<span class="mono small muted">no venue balance to reconcile against</span>{% endif %}
+    {% endif %}
     <span style="flex-grow:1"></span>
-    <form class="inline" method="post" action="/dashboard/accounts/{{ a.id }}/disconnect" data-confirm="Disconnect this account?"><button class="btn danger">{{ "Disconnect and erase key" if row.profile.needs_secret else "Disconnect" }}</button></form>
+    <form class="inline" method="post" action="/dashboard/accounts/{{ a.id }}/disconnect" data-confirm="{{ 'Cancel this connection?' if a.status == 'pending' else 'Disconnect this account?' }}"><button class="btn danger">{{ "Cancel connection" if a.status == "pending" else ("Disconnect and erase key" if row.profile.needs_secret else "Disconnect") }}</button></form>
   </div>
   {% endif %}
 </div>
@@ -111,7 +135,7 @@
 {% else %}
 <div class="card"><div class="body" style="padding:40px;align-items:flex-start;gap:16px">
   <h3>No account connected yet.</h3>
-  <p class="text2" style="max-width:560px">Connect a Kalshi read-only key or a Polymarket wallet address. We import your fills, compute the record ourselves, and (where the venue exposes a balance) reconcile against it nightly. Your public page goes live once the ledger checks out.</p>
+  <p class="text2" style="max-width:560px">Connect a read-only key, a brokerage, or a public wallet address. We import your fills, compute the record ourselves, and (where the venue exposes a balance) reconcile against it nightly. Your public page goes live once the ledger checks out.</p>
   <div style="display:flex;gap:8px;flex-wrap:wrap">{% for p in profiles %}<a class="btn {{ 'secondary' if not loop.first else '' }}" href="/dashboard/connect?venue={{ p.venue }}">Connect {{ p.display_name }}</a>{% endfor %}</div>
 </div></div>
 {% endfor %}
