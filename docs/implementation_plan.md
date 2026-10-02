@@ -400,6 +400,20 @@ audit trail of your own keys).
 
 ---
 
+## 4b. Decisions made in wave 2 (2026-10-01)
+
+| # | Decision | Why |
+|---|---|---|
+| E8 | Asset signals extend `signals` (nullable binary columns, `asset_fill_id`, CHECK one source) | One cursor, feed and allocation flow for every venue |
+| E9 | The quote is captured once at signal emission and copied onto the signal | Every follower fills at the same re-derivable price |
+| E10 | Fills more than `max_copy_lag_seconds` (6 h; 3 d daily venues) after the fact are not copied | A follower could not have traded near that price |
+| E11 | Creator equity at a fill = holdings before it at the last complete close | No intraday price is assumed; same rule as the daily series |
+| E12 | Followers keep their own leg ledger (`mirror_ledger_entries`) valued by `valuation.py` | Creators and followers are valued by one code path |
+| E13 | Perp followers mirror leverage via notional and are liquidated on cross margin at a fresh mark | Paper perp results would otherwise be fiction |
+| E14 | Asset stats use the flow-adjusted TWR index for return, drawdown and ratios | Deposits are never gains |
+| E15 | Broker equity is checked with a tolerance and only flags | Close vs live mark timing legitimately differs |
+| E16 | Consent text hash on every connect path; aggregator users are registered by Koine, one per connection | Invariant 10; clean deletion |
+
 ## 5. What Aiden needs to set up outside the repo
 
 Ordered by when it blocks work. Costs are approximate and should be checked at signup.
@@ -512,21 +526,59 @@ use unconfirmed), **SnapTrade** (re-packaging end-user data). Open without
 approval: Kalshi*, Polymarket, Hyperliquid, Binance.US. (*Kalshi's written
 permission is still the older open item.)
 
-Wave 2 (next):
+Wave 2 (done 2026-10-01; plan with decisions D1-D21 in the session plan,
+summarised as E8-E16 in section 4b below). Scaffold 54fac47 + review fixes
+d453676 (migration 0013, contracts, dispatch hooks; Fable review: 6
+must-fixes); 8 workstreams built and reviewed on `wip/w2-<label>` and merged
+in plan order; integration commits after the merges. 1006 tests pass
+(SQLite + Postgres), ruff clean, one migration head (0014), the pinned binary
+tests (test_mirror, test_stats, test_ledger_parity, test_analytics,
+test_valuation) unchanged since the scaffold. `tests/test_wave2_e2e_pg.py`
+drives the real job runner end to end (Kraken spot copy + stats v2;
+Hyperliquid perp copy, funding and liquidation).
 
-- [ ] P6 paper copy v2: signals from `asset_fills`, sizing by equity ratio,
-      fills at the quote at `observed_at` (E5), fee models per profile,
-      perp funding + liquidation, splits/dividends for followers
-- [ ] Wire valuation into stats/analytics; a `prices_daily` job per venue
-      (`pricing_symbol`), CoinGecko fallback; reconcile broker equity
-- [ ] P8 product surface: Hyperliquid sign-message claim UI, SnapTrade
-      portal connect flow, multi-asset strategy and portfolio pages,
-      marketplace venue/asset filters, "importing history" state, surfacing
-      Alpaca "unsupported activity" flags
-- [ ] OAuth refresh job wiring (`oauth_refresh`), credential rotate
-      endpoint (TOTP-gated) for suspended accounts, email-change flow
-- [ ] Housekeeping jobs: prune rate-limit counters, expired sessions/tokens
+- [x] P6 paper copy v2: signals v2 from `asset_fills` with the quote captured
+      at observed_at (`paper_signals.py`), sizing by equity ratio, fill at
+      ask/bid (E5) else creator price + 50 bps, fee models per profile
+      (`paper.py` over the `paper_book.py` ledger), perp funding,
+      cross-margin liquidation, splits and dividends (`paper_lifecycle.py`)
+- [x] Valuation wired into stats (`analytics_v2.py`, TWR-based), daily
+      closes per pricing venue + CoinGecko fallback (`prices.py`,
+      `connectors/coingecko.py`), broker equity check (flag only, live marks)
+- [x] P8: consent screens (invariant 10), per-credential connect forms,
+      Hyperliquid signed claim (`static/claim.js` + pasted signature),
+      SnapTrade portal with PENDING accounts, multi-asset strategy pages,
+      marketplace venue/asset filters, real `/portfolio`, dashboard importing
+      / flags / finish / replace-key states, unsupported-activity flags
+- [x] Key rotation (`rotate.py`), OAuth refresh tick + job, email change,
+      security-page audit trail, housekeeping
 - [ ] P7 streaming (after P6)
+
+Wave 2 follow-ups (known, not blocking):
+
+- [ ] A poison signal (one that raises in the engine) blocks its allocation's
+      pass, including liquidation; isolate per signal with a savepoint
+- [ ] Paper fills are stamped at observed_at; a SIGNALS backlog could mirror a
+      signal after a lifecycle event booked later in time. Clamp or order
+- [ ] Funding rows without a mark and no quote/close are skipped for good
+      behind the funding watermark (Hyperliquid fundingHistory has no mark)
+- [ ] paper_signals recomputes equity per instant over all legs; switch to
+      one forward sweep before high-frequency creators arrive
+- [ ] Hyperliquid collateral variants (USDT0, USDH) are not valued at par
+- [ ] SnapTrade: retry deleteUser when it fails; the picker page is not
+      rate limited and its calls bypass the outbound limiter
+- [ ] Paper symbol changes are only logged (no flag for followers)
+
+New [VERIFY] items from wave 2: SEC Section 31 FY2026 rate and FINRA TAF
+rate/cap/rounding (`registry.US_EQUITY_REGULATORY_FEES`); Hyperliquid
+maintenance margin = 1/(2 x maxLeverage) per tier, liquidation fee (none
+modelled) and funding mark; CoinGecko endpoint, demo limits, history window,
+attribution and every curated coin id; Alpaca corporate-actions range and
+symbol limits; SnapTrade customRedirect, deleteUser and per-user billing;
+real-wallet personal_sign; legal review of the consent texts; whether the
+judgement-call defaults stand (50 bps fallback penalty, broker equity
+tolerance max($1, 0.5%), one SnapTrade user per connection, 4-day close
+carry for equity venues, unpriced assets excluded from creator equity).
 
 Needs the founder / outside the repo:
 

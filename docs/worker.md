@@ -25,20 +25,23 @@ Postgres is the only queue (decision E3: no Redis). Enqueueing is idempotent
 |---|---|---|
 | `tick_syncs` | `WORKER_SYNC_TICK_SECONDS` (30 s) | `sync` for each account whose `next_sync_at` has come; one global `mirror` sweep; a `backfill` for paged venues not yet backfilled |
 | `tick_prices` | `PRICE_REFRESH_INTERVAL_SECONDS` (300 s) | one global `prices` |
-| `tick_nightly` | 04:15 UTC | `reconcile` per reconcilable account, `prices`, one global `stats`; prunes finished jobs (done > 7 days, dead > 30 days) |
+| `tick_nightly` | 04:15 UTC | `scope_recheck`, `reconcile` per reconcilable account, `prices`, one `prices_daily` per pricing venue in use, one global `stats`, one `housekeeping` (which prunes finished jobs: done > 7 days, dead > 30 days) |
+| `tick_oauth` | 15 min | `oauth_refresh` for OAuth accounts whose token expires within twice the refresh margin |
 
 ## Job kinds
 
 | Kind | Scope | Handler does | Registered by |
 |---|---|---|---|
 | `sync` | account | Binary venues: `ingest.sync_account`. Paged venues: every page stream from its resume cursor. Then queues `signals` | worker.py |
-| `backfill` | account | Every page stream from the start of history; resumable (below) | worker.py |
-| `reconcile` | account | `reconcile.reconcile_account` (skipped for fills-only venues) | worker.py |
-| `prices` | global | Public quotes for every possibly-open ticker, per venue | worker.py |
-| `stats` | global | Strategy stats, incubation promotion, allocation valuations. Waits (up to 1 h) while any `reconcile` is still active | worker.py |
+| `backfill` | account | Every page stream from the start of history; resumable (below). Then queues `signals` (post-anchor fills it imported become signals; stale ones are not copied) | worker.py |
+| `reconcile` | account | `reconcile.reconcile_account` (skipped for fills-only venues); asset venues also run the broker equity check with fresh quotes | worker.py |
+| `prices` | global | Binary: public quotes for every possibly-open ticker, per venue. Asset: `prices.refresh_asset_marks` (quotes and funding rates for instruments in open paper books) | worker.py |
+| `prices_daily` | venue | `prices.run_daily`: missing daily closes, perp margin tiers, corporate actions for held equities; CoinGecko fallback | worker.py (wave 2) |
+| `stats` | global | Strategy stats (asset venues: `analytics_v2`), incubation promotion, allocation valuations. Waits (up to 1 h) while any `reconcile` or `prices_daily` is still active | worker.py |
+| `housekeeping` | global | Prunes rate-limit counters, dead sessions and tokens, old asset quotes, finished jobs; abandons stale pending connects | worker.py (wave 2) |
 | `signals` | account or global | Creator fills to signals; then queues `mirror` for that strategy | worker.py |
 | `mirror` | strategy or global | Paper copying: signals and settlements to allocations | worker.py |
-| `oauth_refresh` | account | Refresh an OAuth access token | P3/P5 (`register_handler`) |
+| `oauth_refresh` | account | Refresh an OAuth access token (`oauth_jobs.run`) | worker.py (wave 2) |
 | `key_rotate` | global | Re-encrypt credentials under a new data key | P3 |
 | `scope_recheck` | account | Re-prove a credential is read-only | P3 |
 
@@ -58,7 +61,7 @@ Lower runs first; within a priority, the older `run_after` first.
 | 5 | `oauth_refresh` (an expired token would fail every sync of that account) |
 | 10 | `sync` for creators with followers or active paper allocations; `signals`, `mirror` (copy lag) |
 | 20 | every other `sync` |
-| 30 | `reconcile`, `stats`, `prices`, `scope_recheck`, `key_rotate` |
+| 30 | `reconcile`, `stats`, `prices`, `prices_daily`, `housekeeping`, `scope_recheck`, `key_rotate` |
 | 40 | `backfill` |
 
 Re-enqueueing an already-pending job with a more urgent priority raises its
