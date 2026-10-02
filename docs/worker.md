@@ -212,3 +212,54 @@ history) and sets `account_schedules.backfill_done_at` when it finishes.
 | `WORKER_SYNC_TICK_SECONDS` | 30 | how often due syncs are enqueued |
 | `RATE_LIMITER_BACKEND` | `postgres` | `postgres` or `memory` |
 | `INGEST_INTERVAL_SECONDS` | 300 | sync interval per account |
+
+<!-- wave2:market-data -->
+## Market data jobs (wave 2)
+
+| Kind | Scope | Handler does | Code |
+|---|---|---|---|
+| `prices_daily` | global, payload `{"venue": <pricing venue>}` | Daily closes for every asset held by an account priced by that venue (anchors, creator legs, follower paper legs), perpetual margin tiers, corporate actions for stocks held by followers | `prices.run_daily` |
+
+**Nightly tick.** `tick_nightly` enqueues one `prices_daily` per pricing venue
+in use (`dedupe_key = prices_daily:<venue>:<day>`, once per day). The `stats`
+barrier waits (up to its 1 h cap) while any `prices_daily` job is active, so
+tonight's closes are in before tonight's valuations.
+
+**Cursor.** The missing days are the cursor. A budget stop (Koine's own
+outbound bucket spent, the circuit open, or a 429 from the source) commits
+what was fetched and raises `Defer(retry_after)`: the job is re-queued without
+counting an attempt and the rerun asks only for what is still missing. Rerun
+cost is zero when nothing is missing: what has been asked of a source is kept
+in `market_data_coverage` (closes by instrument, corporate actions by symbol
+and day, assets no source prices), so a second run the same day makes no HTTP
+request. The last `LATE_CLOSE_GRACE_DAYS` (4) days without a close are re-asked
+by the next night's tail request (the same single request, so a late bar is not
+lost); older gaps such as weekends are not asked for again. An asset no source
+prices is re-checked once per UTC day.
+
+**Other failures.** An asset whose source call fails (not a budget stop) is
+logged and skipped so the others still get their prices; after everything else
+ran, the job raises `PricesDailyError` and the normal retry/backoff applies. The
+retry is cheap for the same reason as above.
+
+**Sources and budgets.** Closes come from the pricing venue's public market data
+(Kraken OHLC, Hyperliquid candles, Alpaca bars) through the venue's own bucket
+(`limiter.throttle(venue, None)`). CoinGecko is the fallback, throttled by
+`registry.DATA_SOURCE_BUDGETS["coingecko"]` (30 calls a minute per egress IP,
+shared by all workers behind it) with `COINGECKO_API_KEY` as the demo key. It
+has no venue profile and cannot be connected.
+
+**Asset marks inside `prices`.** After the binary quotes, every `prices` job calls
+`prices.refresh_asset_marks`: for each instrument an active follower paper book
+holds (net non-zero in its ledger) it stores the venue's top of book in
+`asset_quotes` and, for perpetuals, the funding rates since the newest stored one
+(the first fetch starts at the earliest open fill). A source that is out of
+budget, rate-limited or circuit-open is skipped for the rest of that pass; the
+next tick retries. `asset_quotes` rows older than `QUOTE_RETENTION_DAYS` are
+pruned by housekeeping.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `COINGECKO_API_KEY` | empty | demo key, sent as `x-cg-demo-api-key` |
+| `COINGECKO_BASE_URL` | `https://api.coingecko.com/api/v3` | API base |
+| `QUOTE_MAX_AGE_SECONDS` | 900 | a quote older than this is not a mark |

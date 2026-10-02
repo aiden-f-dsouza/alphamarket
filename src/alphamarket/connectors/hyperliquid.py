@@ -65,6 +65,7 @@ from alphamarket.connectors.base import (
     FundingRate,
     InstrumentType,
     LegKind,
+    MarginTier,
     NormalizedAssetFill,
     NormalizedBalance,
     NormalizedBalances,
@@ -1065,6 +1066,38 @@ class HyperliquidMarketData(_Info, AssetMarketData):
                 continue
             out.append(DailyClose(symbol=symbol, day=day, close=_s(c["c"])))
         return out
+
+    def fetch_margin_tiers(self, symbol: str) -> list[MarginTier]:
+        """Maintenance-margin tiers of a perp coin, ascending by lower bound,
+        from the marginTables the dex's `meta` already carries (no extra
+        request once `meta` is cached). `lower_bound` is the venue's own
+        string (USD notional), `max_leverage` the tier's integer.
+
+        A coin whose marginTableId has no table in the response (HIP-3 dexes
+        publish an empty marginTables list) gets one tier from the coin's own
+        maxLeverage. An unknown coin gets no tiers. [VERIFY] that a tier's
+        maxLeverage is what the maintenance rate 1 / (2 x maxLeverage) is
+        defined on for every table id; Hyperliquid documents the rate that way
+        for the first tier only."""
+        info = self.perp_dex(perp_dex_of(symbol))
+        entry = next((u for u in info.universe if str(u.get("name")) == symbol), None)
+        if entry is None:
+            return []
+        table = (
+            info.margin_tables.get(int(entry["marginTableId"]))
+            if "marginTableId" in entry
+            else None
+        )
+        raw = list((table or {}).get("marginTiers") or [])
+        if raw:
+            tiers = [
+                MarginTier(lower_bound=_s(t["lowerBound"]), max_leverage=int(t["maxLeverage"]))
+                for t in raw
+            ]
+            return sorted(tiers, key=lambda t: Decimal(t.lower_bound))
+        if entry.get("maxLeverage") is None:
+            return []
+        return [MarginTier(lower_bound="0", max_leverage=int(entry["maxLeverage"]))]
 
     def fetch_mids(self) -> dict[str, str]:
         """Every coin's mid (the last trade when a book is empty), one call."""

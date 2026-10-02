@@ -680,3 +680,61 @@ def resolve_oauth_account_id(venue: str, venue_env: str, secret: str) -> str:
     if venue != "alpaca":
         raise ValueError(f"{venue} does not connect by OAuth")
     return _build_alpaca(venue_env, "", secret).fetch_account_id()
+
+
+# ---- wave2:market-data ----
+# CoinGecko fallback prices (connectors/coingecko.py, plan D13). A market data
+# source only: it has no profile, so it never appears in PROFILES and can never
+# be connected (build_connector raises for it).
+#
+# Curated asset code -> CoinGecko coin id. No search: an asset missing here
+# stays unpriced rather than being matched by ticker (tickers collide). Asset
+# codes are the canonical ledger codes (Kraken XBT -> BTC, XDG -> DOGE).
+# [VERIFY] every id against https://api.coingecko.com/api/v3/coins/list before
+# launch; ids occasionally change when a coin migrates. Stablecoins are priced
+# at par (MarketDataSource.STABLECOINS_AT_PAR) and are deliberately absent.
+COINGECKO_COIN_IDS: dict[str, str] = {
+    "BTC": "bitcoin",
+    "ETH": "ethereum",
+    "SOL": "solana",
+    "XRP": "ripple",
+    "ADA": "cardano",
+    "DOGE": "dogecoin",
+    "LTC": "litecoin",
+    "BCH": "bitcoin-cash",
+    "DOT": "polkadot",
+    "LINK": "chainlink",
+    "AVAX": "avalanche-2",
+    "ATOM": "cosmos",
+    "XLM": "stellar",
+    "UNI": "uniswap",
+    "AAVE": "aave",
+    "ETC": "ethereum-classic",
+    "FIL": "filecoin",
+    "ALGO": "algorand",
+    "NEAR": "near",
+    "APT": "aptos",
+    "SUI": "sui",
+    "TRX": "tron",
+    "SHIB": "shiba-inu",
+    "PEPE": "pepe",
+    "ARB": "arbitrum",
+    "OP": "optimism",
+    "HYPE": "hyperliquid",
+    "POL": "polygon-ecosystem-token",
+    "MATIC": "matic-network",
+}
+
+
+def _build_coingecko(venue_env: str) -> MarketDataSource:
+    from alphamarket.connectors.coingecko import CoinGeckoMarketData
+
+    settings = get_settings()
+    return CoinGeckoMarketData(
+        coin_ids=COINGECKO_COIN_IDS,
+        api_key=settings.coingecko_api_key,
+        base_url=settings.coingecko_base_url,
+    )
+
+
+_MARKET_DATA_BUILDERS["coingecko"] = _build_coingecko

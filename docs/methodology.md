@@ -642,3 +642,81 @@ reported account equity.
 **Prices.** Daily closes are Alpaca's unadjusted daily bars (share counts
 are adjusted by the split entries themselves, so prices must not be
 adjusted twice). A bar belongs to its New York trading date.
+
+<!-- wave2:market-data -->
+## Daily prices and fallback pricing
+
+Every number that values a coin, a share or a perpetual contract in US
+dollars comes from a daily close stored in `prices_daily`. The code is
+`alphamarket/prices.py`; `tests/test_prices.py` and `tests/test_coingecko.py`
+pin the rules below with hand-computed values.
+
+**Which instrument prices an asset.** The venue whose public market data
+prices the account (the venue itself, except IBKR and SnapTrade accounts,
+which are priced from Alpaca's market data) picks one instrument per asset
+with one rule: the first spot or equity instrument whose base is the asset and
+whose quote is USD, then USDC, then USDT. A staked or bonded Kraken variant
+(`ETH2.S`) is priced as its underlying coin. A perpetual contract (`BTC-PERP`)
+is priced only by that venue's own perpetual contract, never by the spot coin.
+Cash and stablecoins (USD, USDC, USDT) need no price: they are worth 1.00.
+
+**Fallback pricing.** An asset the venue does not list is priced from
+CoinGecko, which is a source of daily prices only (no quotes, no fills, never
+a venue). Koine keeps a curated list of asset codes and CoinGecko coin ids and
+never searches by ticker, because tickers collide: an asset that is not on the
+list stays unpriced, and its holding is shown without a value instead of being
+matched to whatever coin shares its ticker. Every fallback close is labelled
+`source = coingecko`, and the pricing venue's own close always wins when both
+exist.
+
+**Which day a close belongs to.** The close of UTC day `d` is the last price of
+that day. Exchange candles are read as the venue publishes them (Alpaca stamps
+a bar with its New York trading date). CoinGecko publishes a price at an
+instant, so the close of day `d` is its price at 00:00 UTC of `d + 1`: the
+sample nearest to that midnight within 30 minutes, the earlier one on a tie,
+and no close at all if there is none that near. The day still in progress has
+no close.
+
+**From close to dollars.** A close is stored exactly as the source sent it. Its
+USD value per unit is that decimal times 1,000,000 micro-dollars, truncated
+toward zero, and only when the quote asset is USD or a stablecoin held at par
+(USDC, USDT):
+
+```
+61234.5 USD          -> 61,234.5 x 1,000,000       = 61,234,500,000 micros
+100.5 USDT           -> 100.5 x 1,000,000          = 100,500,000 micros (par)
+61234.56789123 USD   -> 61,234,567,891.23          -> 61,234,567,891 micros
+0.0000004 USD        -> 0.4                        -> 0 micros
+0.052 BTC            -> no value (quoted in BTC; it would need a second price)
+```
+
+The decimal is never passed through a floating-point number, so no digit of a
+sub-cent price is lost before the truncation. The stored close keeps every
+digit, which is what lets very small prices be valued exactly elsewhere.
+
+**Which days are fetched.** For each priced instrument, only the days that are
+missing: from the day before the earliest account anchor or paper allocation
+start that holds the asset (the creator's equity at a fill uses the previous
+complete close, so a fill on the anchor day needs it) up to yesterday UTC. A
+day of the last four that the source has not published yet is asked for again
+by the next night's request, so a close published late is still stored; an
+older day without a close (weekends and holidays for stocks) is taken as one
+the source never publishes and is not asked for again. A close that is already
+stored is never rewritten.
+
+**Perpetual contract margin tiers.** For Hyperliquid perpetuals Koine stores
+the contract's maintenance-margin tiers, refreshed once per UTC day: a list of
+`(notional lower bound in USD, maximum leverage)` ascending by lower bound, read
+from the venue's published margin tables. A contract whose table is not
+published gets one tier from its own maximum leverage. [VERIFY] that the
+maintenance rate 1 / (2 x maximum leverage) of a tier is the venue's definition
+for every table.
+
+**Quotes, funding and corporate actions.** The latest quote of an instrument held
+in an open paper book is stored with its time and source. It is a mark only while
+younger than `QUOTE_MAX_AGE_SECONDS` (15 minutes): the mid of the bid and ask when
+both are quoted, otherwise the last trade; an older quote is not a mark. Funding rates of held
+perpetuals are stored as the venue publishes them, one row per interval. Splits,
+cash dividends and symbol changes are stored for US stocks held by paper books,
+looked ahead 30 days so an announced action is known before its ex-date, and
+re-read for the last 14 days each night.
