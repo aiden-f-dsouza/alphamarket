@@ -57,6 +57,7 @@ from fractions import Fraction
 from itertools import groupby
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from alphamarket import prices, valuation_db
@@ -89,7 +90,9 @@ class _Quote:
 _NO_QUOTE = _Quote(None, None, None, None, None)
 
 
-def notional_usd_micros(qty_atoms: int, qty_decimals: int, price: str, quote_asset: str):
+def notional_usd_micros(
+    qty_atoms: int, qty_decimals: int, price: str, quote_asset: str
+) -> int | None:
     """qty x price in USD micros, truncated toward zero, when the quote asset
     is USD or a stablecoin at par (valuation.CASH_AT_PAR); None otherwise."""
     if quote_asset not in CASH_AT_PAR:
@@ -114,7 +117,10 @@ def _side(before: int, after: int, action: str) -> str:
 def _capture(db: Session, account: VenueAccount, instrument: Instrument, limiter) -> _Quote:
     """One quote for `instrument` through prices.capture_quote. A spent budget,
     a 429 or any source error leaves the signal without a quote (the engine
-    then prices with the fallback penalty); it never blocks the signal."""
+    then prices with the fallback penalty); it never blocks the signal.
+    A database error is re-raised: capture_quote writes asset_quotes in this
+    session, and a failed flush leaves the transaction unusable, so carrying
+    on would only fail later at commit with the real cause hidden."""
     try:
         row: AssetQuote | None = prices.capture_quote(
             db, account.venue, account.venue_env, instrument, limiter
@@ -122,6 +128,8 @@ def _capture(db: Session, account: VenueAccount, instrument: Instrument, limiter
     except (BudgetExhausted, RateLimited) as exc:
         logger.info("no quote for %s/%s: %s", account.venue, instrument.symbol, exc)
         return _NO_QUOTE
+    except SQLAlchemyError:
+        raise
     except Exception as exc:  # noqa: BLE001  (a quote is best-effort, the signal is not)
         logger.warning(
             "quote capture failed for %s/%s: %s",

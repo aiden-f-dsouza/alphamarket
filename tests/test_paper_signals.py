@@ -9,6 +9,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from alphamarket import paper_signals, prices
 from alphamarket.connectors.base import BudgetExhausted, InstrumentType, LegKind
@@ -260,6 +261,23 @@ def test_same_instant_fill_arriving_in_a_later_sync_continues_the_chain(db, krak
     assert s2.creator_equity_micros == s3.creator_equity_micros == 8_000 * M
 
 
+def test_a_fee_charged_in_the_base_asset_shows_in_the_next_before(db, kraken, quotes):
+    # Positions are the ledger's holdings, not a sum of fill sizes: buy 1 ETH
+    # paying a 0.001 ETH fee at 12:00, so the 14:00 sell starts from
+    # 1 + 1 - 0.001 = 1.999 ETH (the 12:00 signal's "after" was 2.0).
+    acct, strategy, eth = kraken
+    legs = [("USD", -3_100 * M, 6), ("fee:ETH", -100_000, 8)]
+    _fill(db, acct, eth, "f1", "buy", "1", "3100", at(D, 12), quote_legs=legs)
+    _fill(db, acct, eth, "f2", "sell", "0.5", "3150", at(D, 14), quote_legs=[("USD", 1_575 * M, 6)])
+    db.commit()
+    assert emit_signals(db, strategy) == 2
+    s1, s2 = _signals(db, strategy)
+    assert (s1.position_before_atoms, s1.position_after_atoms) == (ETH, 2 * ETH)
+    assert (s2.position_before_atoms, s2.position_after_atoms) == (199_900_000, 149_900_000)
+    # E(14:00-) = 5,000 - 3,100 + 1.999 x 3,000 = 1,900 + 5,997 = 7,897.
+    assert s2.creator_equity_micros == 7_897 * M
+
+
 def test_fills_at_or_before_the_anchor_never_become_signals(db, kraken, quotes):
     acct, strategy, eth = kraken
     _fill(db, acct, eth, "old", "buy", "0.1", "2900", at(DM1, 0) - timedelta(hours=1))
@@ -362,6 +380,31 @@ def test_budget_exhausted_quote_still_stores_the_signal(db, kraken, monkeypatch)
     assert double.calls == ["XETHZUSD"]
     assert (s.quote_bid, s.quote_ask, s.quote_last, s.quote_at, s.quote_source) == (None,) * 5
     assert s.creator_equity_micros == 8_000 * M
+
+
+def test_a_failing_quote_source_still_stores_the_signal(db, kraken, monkeypatch):
+    acct, strategy, eth = kraken
+    double = QuoteDouble(raises=RuntimeError("source down"))
+    monkeypatch.setattr(prices, "capture_quote", double)
+    _fill(db, acct, eth, "f1", "buy", "0.5", "3100", at(D, 12), quote_legs=[("USD", -1_550 * M, 6)])
+    db.commit()
+    assert emit_signals(db, strategy) == 1
+    [s] = _signals(db, strategy)
+    assert (s.quote_bid, s.quote_ask, s.quote_last, s.quote_at, s.quote_source) == (None,) * 5
+
+
+def test_a_database_error_in_quote_capture_is_not_swallowed(db, kraken, monkeypatch):
+    # capture_quote writes asset_quotes in the same session: a failed flush
+    # leaves the transaction unusable, so the pass must fail, not carry on.
+    acct, strategy, eth = kraken
+    error = IntegrityError("INSERT INTO asset_quotes", {}, Exception("boom"))
+    monkeypatch.setattr(prices, "capture_quote", QuoteDouble(raises=error))
+    _fill(db, acct, eth, "f1", "buy", "0.5", "3100", at(D, 12), quote_legs=[("USD", -1_550 * M, 6)])
+    db.commit()
+    with pytest.raises(IntegrityError):
+        emit_signals(db, strategy)
+    db.rollback()
+    assert _signals(db, strategy) == []
 
 
 def test_a_signal_stale_when_observed_gets_no_quote(db, kraken, quotes):
