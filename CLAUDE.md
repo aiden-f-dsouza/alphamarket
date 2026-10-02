@@ -32,8 +32,8 @@ deliberately out of scope).
   (idempotent ingestion: binary fills plus ledger v2 legs, per-event dedupe,
   page runners), `ledger.py` (legs, balance vectors, cash curve over USD
   legs), `valuation.py` (pure: holdings, perp entry, daily equity,
-  flow-adjusted TWR, exposure, `equity_before` a fill), `valuation_db.py`
-  (the only bridge from ledger rows to valuation inputs), `reconcile.py`
+  flow-adjusted TWR, exposure, `equity_before` a fill, `LedgerSweep` for
+  many fills in one pass), `valuation_db.py` (the only bridge from ledger rows to valuation inputs), `reconcile.py`
   (per-asset vectors + running balances vs the venue; quarantine; broker
   equity check, flag only), `stats.py` (returns/drawdown/Sharpe/risk
   score/flags, pure functions), `analytics.py` (persists strategy_stats;
@@ -41,9 +41,12 @@ deliberately out of scope).
   stats from valuation, extras marked `"valuation": "v2"`), `jobs.py` (Postgres job queue: SKIP LOCKED
   claims, one running job per account, leases, backoff, dead letter, handler
   and page-runner registries), `venue_limits.py` (outbound token buckets per
-  credential and per egress IP, adaptive 429 backoff, circuit breaker),
+  credential and per egress IP, adaptive 429 backoff, circuit breaker;
+  `call_venue` makes web-request calls fail fast as "busy"),
   `worker.py` (APScheduler ticks enqueue; JobRunner runs sync, backfill,
-  reconcile, stats, prices, signals, mirror, scope_recheck, key_rotate),
+  reconcile, stats, prices, signals, mirror, scope_recheck, key_rotate,
+  aggregator_delete_user: `aggregator_jobs.py` retries a failed SnapTrade
+  deleteUser),
   `auth.py` + `sessions.py` + `mfa.py` + `account.py` (DB sessions, TOTP +
   step-up, email verify/reset, sessions page), `ratelimit.py` (inbound limits,
   memory or Postgres), `email.py` (console or SMTP; `security_event` audits

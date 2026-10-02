@@ -556,29 +556,52 @@ Hyperliquid perp copy, funding and liquidation).
 
 Wave 2 follow-ups (known, not blocking):
 
-- [ ] A poison signal (one that raises in the engine) blocks its allocation's
+- [x] A poison signal (one that raises in the engine) blocks its allocation's
       pass, including liquidation; isolate per signal with a savepoint
-- [ ] Paper fills are stamped at observed_at; a SIGNALS backlog could mirror a
+      (83e0bcc: savepoint per signal, `engine_error` skip; lifecycle stages
+      isolated too; a lost connection still fails the pass)
+- [x] Paper fills are stamped at observed_at; a SIGNALS backlog could mirror a
       signal after a lifecycle event booked later in time. Clamp or order
-- [ ] Funding rows without a mark and no quote/close are skipped for good
+      (83e0bcc: clamped to the newest booked event; a late equity signal
+      that would cross a split's ex-date is skipped as `late_signal`)
+- [x] Funding rows without a mark and no quote/close are skipped for good
       behind the funding watermark (Hyperliquid fundingHistory has no mark)
-- [ ] paper_signals recomputes equity per instant over all legs; switch to
+      (83e0bcc: unbooked rows retried for 7 days; a flat perp stops the
+      scan at its last fill)
+- [x] paper_signals recomputes equity per instant over all legs; switch to
       one forward sweep before high-frequency creators arrive
-- [ ] Hyperliquid collateral variants (USDT0, USDH) are not valued at par
-- [ ] SnapTrade: retry deleteUser when it fails; the picker page is not
-      rate limited and its calls bypass the outbound limiter
-- [ ] Paper symbol changes are only logged (no flag for followers)
+      (dee0235: `valuation.LedgerSweep`, O((N + P) log(N + P) + K A log P)
+      instead of O(K (N + P)); seeded equivalence tests against the
+      per-instant functions)
+- [x] Hyperliquid collateral variants (USDT0, USDH) are not valued at par
+      (83e0bcc: `registry.CASH_AT_PAR`, which also fixes Kraken's held and
+      earning stablecoin codes, USDC.M etc., that valuation counted as
+      unpriced)
+- [x] SnapTrade: retry deleteUser when it fails; the picker page is not
+      rate limited and its calls bypass the outbound limiter (a08b33f:
+      `aggregator_jobs.py` AGGREGATOR_DELETE_USER job queued in the
+      disconnect's transaction, 12 attempts then dead letter + audit;
+      `snaptrade_picker_user` 30/10 min; `venue_limits.call_venue` fails
+      fast with "busy" for web calls)
+- [ ] SnapTrade finish POST (prove_read_only, balances) still calls the
+      aggregator outside the outbound limiter
+- [x] Paper symbol changes are only logged (no flag for followers)
+      (83e0bcc: notice on /portfolio for held stocks; converting the
+      position is still not modelled)
 
 New [VERIFY] items from wave 2: SEC Section 31 FY2026 rate and FINRA TAF
 rate/cap/rounding (`registry.US_EQUITY_REGULATORY_FEES`); Hyperliquid
 maintenance margin = 1/(2 x maxLeverage) per tier, liquidation fee (none
-modelled) and funding mark; CoinGecko endpoint, demo limits, history window,
+modelled), funding mark and the HIP-3 collateral tokens valued at par (USDT0,
+USDH); CoinGecko endpoint, demo limits, history window,
 attribution and every curated coin id; Alpaca corporate-actions range and
-symbol limits; SnapTrade customRedirect, deleteUser and per-user billing;
+symbol limits; SnapTrade customRedirect, deleteUser (404/410 = already deleted) and
+per-user billing;
 real-wallet personal_sign; legal review of the consent texts; whether the
 judgement-call defaults stand (50 bps fallback penalty, broker equity
 tolerance max($1, 0.5%), one SnapTrade user per connection, 4-day close
-carry for equity venues, unpriced assets excluded from creator equity).
+carry for equity venues, unpriced assets excluded from creator equity,
+7-day retry window for funding rows without a mark).
 
 Needs the founder / outside the repo:
 
