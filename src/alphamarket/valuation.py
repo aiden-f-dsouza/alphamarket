@@ -28,8 +28,9 @@ valuation" and "External flows (time-weighted return)"; every formula is
 pinned by tests/test_valuation.py with hand-computed values.
 """
 
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections.abc import Iterable, Sequence
+from copy import copy
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -220,6 +221,18 @@ def _max_decimals(pairs: Iterable[tuple[str, int]]) -> dict[str, int]:
     return scales
 
 
+def _widen(scales: dict[str, int], asset: str, decimals: int, *totals: dict[str, int]) -> None:
+    """_max_decimals one quantity at a time: raise `asset`'s scale to `decimals`
+    when finer (never lower it), rescaling its atoms in each of `totals` up so
+    they stay exact. For state fed legs or fills one by one (LedgerSweep)."""
+    old = scales.get(asset, 0)
+    scales[asset] = max(old, decimals)
+    if decimals > old:
+        for running in totals:
+            if asset in running:
+                running[asset] = _rescale(running[asset], old, decimals)
+
+
 def _check_anchor(anchor: Sequence[AnchorIn]) -> None:
     seen: set[str] = set()
     for row in anchor:
@@ -294,6 +307,14 @@ class _PerpBook:
         self.qty[row.asset] = atoms
         known = atoms != 0 and row.entry_price is not None
         self.entry[row.asset] = parse_price(row.entry_price) if known else None  # type: ignore[arg-type]
+
+    def widen(self, asset: str, decimals: int) -> None:
+        """Raise `asset`'s scale to at least `decimals`, for a book fed fills one at
+        a time (LedgerSweep) instead of sized from all of them up front. The open
+        quantity is rescaled exactly; the entry is per unit, so it is unchanged,
+        and every rule above compares or weights quantities at one scale, so the
+        book evolves exactly as one built at the finer scale from the start."""
+        _widen(self.scales, asset, decimals, self.qty)
 
     def apply(self, fill: PerpFillIn) -> None:
         d = _rescale(fill.qty_delta_atoms, fill.decimals, self.scales[fill.asset])
@@ -379,16 +400,32 @@ class _PriceIndex:
             by_day[price.day] = price.exact_micros
         self._days = {asset: sorted(by_day) for asset, by_day in rows.items()}
         self._rows = rows
+        self._cut: date | None = None  # set on a before() view only
+
+    def before(self, day: date) -> "_PriceIndex":
+        """A view of the same closes limited to days strictly BEFORE `day`, sharing
+        the index (nothing is copied or re-sorted). It answers has / close /
+        perp_close exactly as _PriceIndex([p for p in prices if p.day < day])
+        would, including a perp falling back to its coin when the perp's own
+        closes all fall on or after `day`."""
+        view = copy(self)
+        view._cut = day if self._cut is None else min(day, self._cut)
+        return view
+
+    def _visible(self, days: list[date]) -> int:
+        """How many of an asset's sorted close days this index may use."""
+        return len(days) if self._cut is None else bisect_left(days, self._cut)
 
     def has(self, asset: str) -> bool:
-        return asset in self._rows
+        days = self._days.get(asset)
+        return bool(days) and self._visible(days) > 0
 
     def close(self, asset: str, day: date) -> tuple[Fraction, date] | None:
         """Last known close on or before `day`: (exact usd micros per unit, day of that close)."""
         days = self._days.get(asset)
         if not days:
             return None
-        i = bisect_right(days, day)
+        i = min(bisect_right(days, day), self._visible(days))
         if i == 0:
             return None
         found = days[i - 1]
@@ -816,3 +853,105 @@ def basis_day(valuation: DayValuation) -> date | None:
     """Latest close day used by a valuation (None when only cash was valued)."""
     days = [p.price_day for p in valuation.positions if p.price_day is not None]
     return max(days) if days else None
+
+
+# ---- wave2: many instants in one forward sweep (signals v2) -----------------------
+
+
+class LedgerSweep:
+    """Holdings, the perp book and equity just BEFORE each instant of a
+    non-decreasing series, in ONE forward pass over the ledger. For each t
+    (never earlier than the previous t; repeats are fine):
+
+        holdings_before(t)        == holdings_at(anchor, [legs < t], t)
+        perp_positions_before(t)  == perp_positions_at(anchor, [perp fills < t], t)
+        equity_before(t)          == equity_before(anchor, legs, prices, perp_fills, t)
+
+    exactly, scales included: an asset's scale is the max decimals over the
+    anchor and the legs (or perp fills) before t, as those functions see it.
+    The state advances with the same primitives (_rescale and _widen, _PerpBook,
+    _PriceIndex cut to the closes before t's UTC day, _value_day), so every
+    formula still lives once; tests/test_valuation_sweep.py pins the equality.
+
+    Cost: legs and fills are sorted and the closes indexed once, and each leg
+    and fill is applied once, so N legs and fills, P closes and K instants
+    cost O((N + P) log(N + P) + K A log P) for A held assets, where calling
+    the per-instant functions K times costs O(K (N + P)).
+
+    One difference: the closes are indexed up front, so two closes for one
+    asset and day raise here even when both fall on or after every instant
+    asked (valuation_db.price_inputs returns one close per asset and day)."""
+
+    def __init__(
+        self,
+        anchor: Sequence[AnchorIn],
+        legs: Sequence[LegIn],
+        prices: Iterable[PriceIn],
+        perp_fills: Sequence[PerpFillIn],
+    ) -> None:
+        _check_anchor(anchor)
+        self._legs = sorted(legs, key=lambda leg: leg.occurred_at)
+        self._fills = sorted(perp_fills, key=lambda f: f.occurred_at)
+        self._prices = _PriceIndex(prices)
+        self._scales = _asset_scales(anchor, ())
+        self._held = {
+            row.asset: _rescale(row.atoms, row.decimals, self._scales[row.asset]) for row in anchor
+        }
+        self._book = _new_book(anchor, ())
+        self._flows: dict[str, int] = {}  # external flows on self._day before self._t
+        self._li = self._fi = 0
+        self._t: datetime | None = None
+        self._day: date | None = None
+
+    def _advance(self, t: datetime) -> None:
+        """Apply every leg and perp fill with occurred_at < t (in the order
+        holdings_at / perp_positions_at use), then stand at t."""
+        _require_aware(t, "t")
+        if self._t is not None and t < self._t:
+            raise ValueError(f"instants must be non-decreasing: {t} is before {self._t}")
+        day = _utc_day(t)
+        if day != self._day:
+            self._flows = {}  # every leg applied so far falls on an earlier UTC day
+        self._t, self._day = t, day
+        legs, fills = self._legs, self._fills
+        while self._li < len(legs) and legs[self._li].occurred_at < t:
+            leg = legs[self._li]
+            _widen(self._scales, leg.asset, leg.decimals, self._held, self._flows)
+            atoms = _rescale(leg.delta_atoms, leg.decimals, self._scales[leg.asset])
+            self._held[leg.asset] = self._held.get(leg.asset, 0) + atoms
+            # daily_equity_series attributes a flow leg to day D when its UTC day >= D.
+            if leg.kind in EXTERNAL_FLOW_KINDS and _utc_day(leg.occurred_at) >= day:
+                self._flows[leg.asset] = self._flows.get(leg.asset, 0) + atoms
+            self._li += 1
+        while self._fi < len(fills) and fills[self._fi].occurred_at < t:
+            fill = fills[self._fi]
+            self._book.widen(fill.asset, fill.decimals)
+            self._book.apply(fill)
+            self._fi += 1
+
+    def _qtys(self, atoms_by_asset: dict[str, int]) -> dict[str, Qty]:
+        return {a: Qty(atoms, self._scales[a]) for a, atoms in atoms_by_asset.items() if atoms}
+
+    def holdings_before(self, t: datetime) -> dict[str, Qty]:
+        """holdings_at over the anchor and every leg strictly before `t`."""
+        self._advance(t)
+        return self._qtys(self._held)
+
+    def perp_positions_before(self, t: datetime) -> dict[str, PerpPosition]:
+        """perp_positions_at over the anchor and every perp fill strictly before `t`."""
+        self._advance(t)
+        return self._book.positions()
+
+    def equity_before(self, t: datetime) -> DayValuation:
+        """equity_before(anchor, legs, prices, perp_fills, t): the valuation of
+        t's UTC day D from the holdings, perp book and day-D flows before `t`,
+        at the closes of days before D."""
+        self._advance(t)
+        day = _utc_day(t)
+        return _value_day(
+            day,
+            self._qtys(self._held),
+            self._book.positions(),
+            self._qtys(self._flows),
+            self._prices.before(day),
+        )

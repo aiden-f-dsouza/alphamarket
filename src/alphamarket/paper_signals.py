@@ -38,6 +38,11 @@ Implementation notes (methodology "Signals v2 and copy lag"):
   deposit or a split shows up in the next "before"). A holding kept at more decimals than
   the fill reports is truncated toward zero to the fill's decimals (dust
   below the venue's own quantity precision).
+- Those holdings, the perp book and equity_before are read from ONE
+  valuation.LedgerSweep over the account's legs and perp fills, advanced
+  instant by instant in filled_at order; at each instant it answers exactly
+  what holdings_at / perp_positions_at / equity_before would, so a pass over
+  K instants and N legs costs O(N + K), not O(N x K).
 - creator_equity_micros is 0 (unknown) when the valuation is not positive;
   unpriced assets are excluded, exactly as in the daily equity series.
 - notional_micros = qty x price, truncated to the micro, only when the
@@ -68,11 +73,9 @@ from alphamarket.models import AssetFill, AssetQuote, Instrument, Signal, Strate
 from alphamarket.valuation import (
     CASH_AT_PAR,
     PERP_SUFFIX,
+    LedgerSweep,
     basis_day,
-    equity_before,
-    holdings_at,
     parse_price,
-    perp_positions_at,
 )
 
 logger = logging.getLogger(__name__)
@@ -181,16 +184,16 @@ def emit_asset_signals(db: Session, strategy: Strategy, *, limiter=None) -> int:
         db, _price_assets(inputs), None, last_day, valuation_db.pricing_venues(account)
     )
 
+    # One forward pass over the ledger: the walk's instants never decrease.
+    sweep = LedgerSweep(inputs.anchor, inputs.legs, price_rows, inputs.perp_fills)
     added = 0
     for t, grouped in groupby(walk, key=lambda row: aware(row[0].filled_at)):
         group = list(grouped)
         if not any(f.id in pending_ids for f, _ in group):
             continue
-        equity_micros, basis = _equity_before(inputs, price_rows, t)
-        legs_before = [leg for leg in inputs.legs if leg.occurred_at < t]
-        fills_before = [f for f in inputs.perp_fills if f.occurred_at < t]
-        spot = holdings_at(inputs.anchor, legs_before, t)
-        perps = perp_positions_at(inputs.anchor, fills_before, t)
+        equity_micros, basis = _equity_before(sweep, t)
+        spot = sweep.holdings_before(t)
+        perps = sweep.perp_positions_before(t)
         running: dict[str, tuple[int, int]] = {}  # base asset -> (atoms, decimals)
         for fill, inst in group:
             base = inst.base_asset
@@ -271,12 +274,10 @@ def _fills_from(db: Session, account_id: int, start: datetime):
     ).all()
 
 
-def _equity_before(
-    inputs: valuation_db.ValuationInputs, price_rows, t: datetime
-) -> tuple[int, date | None]:
+def _equity_before(sweep: LedgerSweep, t: datetime) -> tuple[int, date | None]:
     """(creator_equity_micros, equity_basis_day) just before `t`; (0, None)
     when the valuation is not positive (unknown: followers skip it)."""
-    v = equity_before(inputs.anchor, inputs.legs, price_rows, inputs.perp_fills, t)
+    v = sweep.equity_before(t)
     if v.equity_micros <= 0:
         return 0, None
     return v.equity_micros, basis_day(v)
