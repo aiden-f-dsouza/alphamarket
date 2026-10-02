@@ -14,7 +14,7 @@ from sqlalchemy import select
 from alphamarket.analytics import compute_strategy_stats
 from alphamarket.models import Settlement, Strategy
 from alphamarket.public import recent_public_settlements
-from authutil import secure_account
+from authutil import consent, secure_account
 
 BASE = "https://demo-api.kalshi.co/trade-api/v2"
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -71,7 +71,12 @@ def connected(logged_in, session_factory):
         _mock_venue()
         resp = logged_in.post(
             "/dashboard/connect",
-            data={"key_id": "k", "secret": _pem(), "strategy_name": "BTC Hourly Fade"},
+            data={
+                "key_id": "k",
+                "secret": _pem(),
+                "strategy_name": "BTC Hourly Fade",
+                "consent_sha256": consent("kalshi"),
+            },
             follow_redirects=False,
         )
     assert resp.status_code == 303, resp.text
@@ -118,7 +123,12 @@ def test_connect_page_and_rejection(logged_in):
         )
         resp = logged_in.post(
             "/dashboard/connect",
-            data={"key_id": "k", "secret": _pem(), "strategy_name": "Bad Key"},
+            data={
+                "key_id": "k",
+                "secret": _pem(),
+                "strategy_name": "Bad Key",
+                "consent_sha256": consent("kalshi"),
+            },
         )
     assert resp.status_code == 200  # re-rendered connect page with the error
     assert "Paste a read-only key" in resp.text

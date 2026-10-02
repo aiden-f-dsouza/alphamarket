@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{# Finish a PENDING aggregator connect (wave2, w2-p8-connect, D20). The
+   portal opens from an ordinary link (CSP form-action 'self' would block a
+   redirect after a form POST); the portal returns here. Account numbers are
+   shown as their last four digits only. #}
+{% block title %}Finish connecting {{ profile.display_name }} · Koine{% endblock %}
+{% block nav_active %}dashboard{% endblock %}
+{% block style %}
+  .picker { display:grid; grid-template-columns:minmax(0, 620px) minmax(0, 1fr); gap:48px; }
+  .acct { display:flex; gap:12px; align-items:flex-start; padding:14px 0; border-bottom:1px solid var(--line); font-size:14px; }
+  .acct:last-child { border-bottom:0; }
+  .acct input { margin-top:3px; }
+  @media (max-width:1000px) { .picker { grid-template-columns:1fr; } }
+{% endblock %}
+{% block content %}
+<div class="picker">
+  <div class="stack" style="gap:24px">
+    <span class="label">Finish connecting {{ profile.display_name }}</span>
+    <div class="stack"><h1 style="font-size:40px">{% if accounts %}Pick the account to verify.{% else %}Link your broker.{% endif %}</h1>
+      <p class="text2" style="font-size:16px">{% if accounts %}These are the brokerage accounts you linked on {{ profile.display_name }}. Koine verifies one account per strategy; connect again for another.{% else %}Open {{ profile.display_name }}'s page, choose your broker and sign in there. The connection is requested read-only. When you are done, {{ profile.display_name }} brings you back here.{% endif %}</p></div>
+    {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+    {% if load_error %}<div class="notice">{{ load_error }}</div>{% endif %}
+    {% if closed_reason %}<div class="notice">{{ closed_reason }}</div>{% endif %}
+    {% if gate %}
+    <div class="notice stack" style="gap:12px">
+      {% if gate[0] == "step_up" %}
+      <span>Confirm a code from your authenticator app to finish connecting. It stays confirmed for 10 minutes.</span>
+      <form method="post" action="/dashboard/security/step-up" style="display:flex;gap:10px;flex-wrap:wrap">
+        <input type="hidden" name="next" value="{{ picker_url }}">
+        <input class="mono" name="code" required inputmode="numeric" autocomplete="one-time-code" placeholder="123456" style="max-width:180px" aria-label="Two-factor code">
+        <button class="btn sm" type="submit">Confirm code</button>
+      </form>
+      {% else %}
+      <span>{% if gate[0] == "totp" %}Turn on two-factor authentication before connecting a venue.{% else %}Confirm your email address before connecting a venue.{% endif %}</span>
+      <a class="btn secondary sm" href="/dashboard/security" style="align-self:flex-start">Security settings</a>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if accounts %}
+    <form method="post" action="{{ picker_url }}" class="card" autocomplete="off">
+      <div class="body" style="padding:28px;gap:22px">
+        <fieldset class="stack" style="gap:0;border:0;padding:0;margin:0">
+          <legend class="label" style="padding-bottom:6px">Brokerage account</legend>
+          {% for a in accounts %}
+          <label class="acct"><input type="radio" name="account_ref" value="{{ a.account_ref }}" required{{ " checked" if accounts|length == 1 }}>
+            <span class="stack" style="gap:2px"><span>{{ a.institution or "Brokerage" }}{% if a.name %} · {{ a.name }}{% endif %}{% if a.is_paper %} <span class="badge">paper</span>{% endif %}</span>
+            <span class="mono small muted">{% if a.number_last4 %}ending {{ a.number_last4 }}{% else %}account {{ loop.index }}{% endif %}</span></span></label>
+          {% endfor %}
+        </fieldset>
+        <label class="field"><span class="label">Strategy name</span><input name="strategy_name" required minlength="2" maxlength="120" placeholder="Shown on your public page"></label>
+        <div class="spread" style="align-items:center;padding-top:4px">
+          <span class="mono small muted" style="display:inline-flex;align-items:center;gap:8px">{{ m.icon("lock", 14, "var(--muted)") }}Read-only connection</span>
+          <button class="btn" type="submit"{{ " disabled" if gate or closed_reason }}>Check access and import</button>
+        </div>
+      </div>
+    </form>
+    {% endif %}
+    {% if portal_url %}
+    <a class="btn{{ ' secondary' if accounts }}" href="{{ portal_url }}" rel="noopener noreferrer" style="align-self:flex-start">{% if accounts %}Link another broker on {{ profile.display_name }}{% else %}Open {{ profile.display_name }}{% endif %}</a>
+    {% elif not accounts and not closed_reason and not load_error %}
+    <a class="btn secondary" href="{{ picker_url }}" style="align-self:flex-start">Try again</a>
+    {% endif %}
+    <a class="small muted" href="/dashboard">Back to the dashboard (finish within a day, or start again)</a>
+  </div>
+
+  <div class="stack" style="gap:0;padding-top:4px">
+    <span class="label" style="padding-bottom:8px;border-bottom:1px solid var(--line2)">What happens next</span>
+    <div class="hairline-list">
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Access is checked read-only</span><span class="small muted">A connection that could place trades is refused before the account is activated, and re-checked every night.</span></div></div>
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Daily verification</span><span class="small muted">{{ profile.display_name }} reports end-of-day data, so this strategy is verified daily.</span></div></div>
+    </div>
+  </div>
+</div>
+{% endblock %}

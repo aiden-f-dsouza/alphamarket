@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from alphamarket.models import Fill, Strategy, VenueAccount, VenueCredential
 from alphamarket.money import to_micros
-from authutil import secure_account
+from authutil import consent, secure_account
 
 BASE = "https://demo-api.kalshi.co/trade-api/v2"
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -73,6 +73,7 @@ def _connect(client, pem=None):
             "key_id": "demo-key-id",
             "private_key_pem": pem or _pem(),
             "strategy_name": "BTC hourly fade",
+            "consent_sha256": consent("kalshi"),
         },
     )
 
@@ -229,7 +230,12 @@ def _mock_polymarket(bio: str = "getting adversely selected"):
 def _connect_polymarket(client):
     return client.post(
         "/venues",
-        json={"venue": "polymarket", "key_id": POLY_ADDRESS, "strategy_name": "Weather fade"},
+        json={
+            "venue": "polymarket",
+            "key_id": POLY_ADDRESS,
+            "strategy_name": "Weather fade",
+            "consent_sha256": consent("polymarket"),
+        },
     )
 
 

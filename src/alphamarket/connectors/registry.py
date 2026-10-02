@@ -738,3 +738,97 @@ def _build_coingecko(venue_env: str) -> MarketDataSource:
 
 
 _MARKET_DATA_BUILDERS["coingecko"] = _build_coingecko
+
+# ---- wave2:p8-connect ----
+# Aggregator account lifecycle (CredentialKind.AGGREGATOR, D20): registering
+# one aggregator user per connection, the Connection Portal link, the account
+# picker and deleting the user on disconnect. Core code calls these wrappers,
+# never connectors/snaptrade.py. Secrets (the user secret) are passed in and
+# returned, never logged.
+
+from dataclasses import dataclass  # noqa: E402 (shared file: wave2 end block)
+
+
+@dataclass(frozen=True)
+class AggregatorAccount:
+    """One brokerage account behind an aggregator user, as the picker shows
+    it. `number_last4` only: the full account number is never rendered."""
+
+    account_ref: str
+    institution: str
+    name: str | None
+    number_last4: str | None
+    is_paper: bool
+
+
+def _snaptrade_keys() -> tuple[str, str]:
+    settings = get_settings()
+    if not settings.snaptrade_client_id or not settings.snaptrade_consumer_key:
+        raise ValueError("SnapTrade needs snaptrade_client_id/snaptrade_consumer_key configured")
+    return settings.snaptrade_client_id, settings.snaptrade_consumer_key
+
+
+def _require_aggregator(venue: str) -> None:
+    if get_profile(venue).credential is not CredentialKind.AGGREGATOR or venue != "snaptrade":
+        raise ValueError(f"{venue} is not an aggregator venue")
+
+
+def aggregator_register_user(venue: str) -> tuple[str, str]:
+    """Register a fresh aggregator user for one connection: (user_id, user_secret).
+    The id is random (no email or Koine user id leaks to the aggregator)."""
+    import secrets as _secrets
+
+    from alphamarket.connectors import snaptrade
+
+    _require_aggregator(venue)
+    client_id, consumer_key = _snaptrade_keys()
+    for _ in range(3):
+        user_id = f"koine-{_secrets.token_hex(16)}"
+        try:
+            return snaptrade.register_user(client_id, consumer_key, user_id)
+        except snaptrade.SnapTradeUserExists:
+            continue  # astronomically unlikely; draw another id
+    raise RuntimeError("could not register an aggregator user")
+
+
+def aggregator_portal_url(
+    venue: str, user_id: str, user_secret: str, *, redirect: str | None = None
+) -> str:
+    """The aggregator's Connection Portal link, read-only connection type."""
+    from alphamarket.connectors import snaptrade
+
+    _require_aggregator(venue)
+    client_id, consumer_key = _snaptrade_keys()
+    return snaptrade.generate_connection_portal_url(
+        client_id, consumer_key, user_id, user_secret, custom_redirect=redirect
+    )
+
+
+def aggregator_list_accounts(venue: str, user_id: str, user_secret: str) -> list[AggregatorAccount]:
+    """Every brokerage account the aggregator user has linked."""
+    _require_aggregator(venue)
+    connector = build_connector(venue, get_settings().venue_env(venue), user_id, user_secret)
+    rows = connector.list_accounts()  # type: ignore[attr-defined]
+    out = []
+    for r in rows:
+        number = str(r.get("number") or "")
+        out.append(
+            AggregatorAccount(
+                account_ref=str(r["account_ref"]),
+                institution=str(r.get("institution_name") or ""),
+                name=r.get("name"),
+                number_last4=number[-4:] if number else None,
+                is_paper=bool(r.get("is_paper")),
+            )
+        )
+    return out
+
+
+def aggregator_delete_user(venue: str, user_id: str) -> None:
+    """Delete the aggregator user (stops billing; the aggregator drops its
+    brokerage connections). Raises on failure; callers decide to tolerate."""
+    from alphamarket.connectors import snaptrade
+
+    _require_aggregator(venue)
+    client_id, consumer_key = _snaptrade_keys()
+    snaptrade.delete_user(client_id, consumer_key, user_id)

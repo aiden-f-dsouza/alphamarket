@@ -25,7 +25,7 @@ from alphamarket.models import (
     VenueAccountStatus,
     VenueCredential,
 )
-from authutil import secure_account
+from authutil import consent, secure_account
 
 BASE = "https://demo-api.kalshi.co/trade-api/v2"
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -83,6 +83,7 @@ def _connect(client, **extra):
             "key_id": "demo-key-id",
             "private_key_pem": PEM,
             "strategy_name": "Vault test",
+            "consent_sha256": consent("kalshi"),
             **extra,
         },
     )
