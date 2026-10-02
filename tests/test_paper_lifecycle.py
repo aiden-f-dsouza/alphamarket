@@ -195,8 +195,8 @@ def test_split_and_dividend_formulas():
 
 def _seed_hl(db, tag: str = ""):
     """A Hyperliquid follower: $1,000, bought 0.09998 BTC-PERP at 60,010 on D
-    at 12:00 with a 5 bps fee: 5,999.7998 x 0.0005 = 2.9999899 -> 2.9999
-    rounded per the profile (the engine's job; seeded here as given), so
+    at 12:00 with a 5 bps fee: 5,999.7998 x 0.0005 = 2.9998999 -> 2.999900
+    rounded up to the micro (the engine's job; seeded here as given), so
     cash 997.0001."""
     alloc = _allocation(db, "hyperliquid", 1_000 * M, tag)
     perp = _instrument(
@@ -454,6 +454,85 @@ def test_a_short_receives_positive_funding(db):
     assert _cash(db, alloc) == to_micros("5.01875")
 
 
+def test_cross_margin_needs_every_mark_and_closes_every_perp(db, hl):
+    """BTC (tiered) long plus an ETH short whose venue publishes no tiers:
+    ETH adds its P&L to AV and nothing to MM, a stale ETH mark blocks the
+    whole check, and a liquidation closes both."""
+    alloc, btc = hl
+    eth = _instrument(db, "hyperliquid", "ETH", "ETH-PERP", InstrumentType.PERP, 4, None)
+    db.add(
+        MirrorAssetFill(
+            allocation_id=alloc.id,
+            reason="signal",
+            mode="paper",
+            instrument_id=eth.id,
+            action="sell",
+            qty_atoms=5_000,
+            qty_decimals=4,
+            price="3000",
+            notional_micros=1_500 * M,
+            price_basis="bid",
+            filled_at=at(D, 12, 30),
+        )
+    )
+    paper_book.append_group(
+        db,
+        alloc,
+        ref="sig:2",
+        occurred_at=at(D, 12, 30),
+        legs=[LegSpec("ETH-PERP", -5_000, 4, LegKind.FILL_BASE, eth.id)],
+    )
+    db.commit()
+    # BTC alone at 50,500 would liquidate (AV 46.1903 < MM 63.112375 with cash
+    # 997.0001), but ETH has no fresh mark: no check at all.
+    _quote(db, btc, at(D, 15, 10), last="50500")
+    assert apply_lifecycle(db, alloc, at(D, 15, 12)) == 0
+    # ETH short at 2,900: AV = 997.0001 - 950.8098 + 0.5 x 100 = 96.1903
+    #   >= MM 63.112375 (ETH adds nothing to MM): no liquidation.
+    _quote(db, eth, at(D, 15, 11), last="2900")
+    assert apply_lifecycle(db, alloc, at(D, 15, 12)) == 0
+    # ETH at 3,100: AV = 997.0001 - 950.8098 - 50 = -3.8097 < 63.112375: close both.
+    _quote(db, eth, at(D, 15, 13), last="3100")
+    now = at(D, 15, 14)
+    assert apply_lifecycle(db, alloc, now) == 2
+    db.commit()
+    by_ref = {}
+    for leg in db.scalars(select(MirrorLedgerEntry).where(MirrorLedgerEntry.ref.like("liq:%"))):
+        by_ref.setdefault(leg.ref, {})[leg.kind] = leg.delta_atoms
+    epoch = int(now.timestamp())
+    assert by_ref == {
+        f"liq:{btc.id}:{epoch}": {LegKind.FILL_BASE: -9_998, LegKind.LIQUIDATION: -950_809_800},
+        f"liq:{eth.id}:{epoch}": {LegKind.FILL_BASE: 5_000, LegKind.LIQUIDATION: -50 * M},
+    }
+    book = paper_book.load_book(db, alloc)
+    assert book.perps == {} and book.cash_micros == -to_micros("3.8097")
+    fills = {
+        f.instrument_id: f
+        for f in db.scalars(select(MirrorAssetFill).where(MirrorAssetFill.reason == "liquidation"))
+    }
+    # Buying back the short: notional 0.5 x 3,100 = 1,550 (a cost, rounded up).
+    assert (fills[eth.id].action, fills[eth.id].notional_micros) == ("buy", 1_550 * M)
+    assert (fills[btc.id].action, fills[btc.id].notional_micros) == ("sell", to_micros("5048.99"))
+    assert alloc.stop_reason == "liquidated"
+    assert apply_lifecycle(db, alloc, at(D, 15, 20)) == 0
+
+
+def test_unparseable_rows_are_skipped_not_fatal(db, hl):
+    alloc, perp = hl
+    _funding(db, perp, at(D, 13), "not-a-rate", "60000")
+    _funding(db, perp, at(D, 14), "0.0000125", "60000")
+    # The bad row is skipped (logged); the good one applies: -0.074985.
+    assert apply_lifecycle(db, alloc, at(D, 15)) == 1
+    db.commit()
+    assert _cash(db, alloc) == to_micros("996.925115")
+    # Malformed margin tiers: no check (never a guessed leverage), no crash.
+    perp.margin_tiers = [{"lower_bound": "zero", "max_leverage": 40}]
+    db.commit()
+    _quote(db, perp, at(D, 15, 10), last="50500")
+    assert apply_lifecycle(db, alloc, at(D, 15, 12)) == 0
+    assert alloc.status == AllocationStatus.ACTIVE
+
+
 # ---- equities: splits and cash dividends ------------------------------------------------
 
 
@@ -629,3 +708,23 @@ def test_funding_and_liquidation_on_postgres(pg_session_factory):
         assert _cash(db, alloc) == to_micros("46.174303")
         assert db.get(Allocation, alloc.id).stop_reason == "liquidated"
         assert apply_lifecycle(db, alloc, at(D, 16)) == 0
+
+
+def test_duplicate_dividend_uses_the_complete_report(db, aapl):
+    alloc, _ = aapl
+    ex, pay = D + timedelta(days=3), D + timedelta(days=4)
+    # The first source has no pay date yet; the second has it. Same action.
+    first = _action(db, CorporateActionKind.CASH_DIVIDEND, ex, cash_per_share="0.25")
+    second = _action(
+        db, CorporateActionKind.CASH_DIVIDEND, ex, "ibkr", pay_date=pay, cash_per_share="0.25"
+    )
+    assert apply_lifecycle(db, alloc, at(pay, 1)) == 1
+    db.commit()
+    # 10 shares x $0.25 = $2.50, under the complete row's ref.
+    assert _cash(db, alloc) == 8_500 * M + 2_500_000
+    assert paper_book.has_group(db, alloc, f"ca:{second.id}")
+    # The first source later fills in its pay date: still applied only once.
+    first.pay_date = pay
+    db.commit()
+    assert apply_lifecycle(db, alloc, at(pay + timedelta(days=1))) == 0
+    assert _cash(db, alloc) == 8_500 * M + 2_500_000

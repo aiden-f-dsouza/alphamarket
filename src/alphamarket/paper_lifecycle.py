@@ -52,12 +52,16 @@ corporate actions"; tests/test_paper_lifecycle.py pins every number):
   kept). No liquidation fee is charged [VERIFY Hyperliquid].
 - Corporate actions match an EQUITY instrument's asset code (base_asset,
   the ticker) on corporate_actions.symbol. The same action reported by two
-  sources (same symbol, kind, ex_date) is applied once: the lowest id wins,
-  and a group with any applied id is never applied again. A split applies
+  sources (same symbol, kind, ex_date) is applied once: the lowest id
+  among the rows complete enough to apply (ratios; pay date and amount)
+  wins, and a group with any applied id is never applied again. A split applies
   at 00:00 UTC of the ex-date to the holding just before it; a dividend is
   computed on that same holding (end of ex-date minus one day) and
   credited at 00:00 UTC of the pay date, not before. A dividend without a
   pay date waits. Symbol changes are logged and skipped.
+- A source row that cannot be parsed (funding rate or mark, margin tiers,
+  cash per share) is skipped and logged, never guessed, and never allowed
+  to fail the pass (the caller commits signals and lifecycle together).
 
 Flushes, never commits: the caller (paper.process_asset_allocation)
 commits with the rest of the pass.
@@ -244,7 +248,19 @@ def apply_funding(db: Session, allocation: Allocation, now: datetime) -> int:
             position = perp_positions_at(book.anchor, book.perp_fills, at).get(inst.base_asset)
             if position is None:
                 continue
-            mark = _funding_mark(db, inst, row)
+            try:
+                rate = parse_price(row.rate)
+                mark = _funding_mark(db, inst, row)
+            except (ArithmeticError, TypeError, ValueError):
+                # A malformed source row must not wedge every pass (the
+                # caller commits signals and lifecycle together): skip it.
+                logger.warning(
+                    "allocation %s: unparseable funding row %s for %s; skipped",
+                    allocation.id,
+                    row.id,
+                    inst.base_asset,
+                )
+                continue
             if mark is None:
                 logger.warning(
                     "allocation %s: no mark for %s funding at %s; skipped",
@@ -253,7 +269,7 @@ def apply_funding(db: Session, allocation: Allocation, now: datetime) -> int:
                     at.isoformat(),
                 )
                 continue
-            payment = funding_payment_micros(position.qty.units, mark, parse_price(row.rate))
+            payment = funding_payment_micros(position.qty.units, mark, rate)
             rows = paper_book.append_group(
                 db,
                 allocation,
@@ -329,7 +345,7 @@ def margin_check(cash_micros: int, positions: Sequence[tuple]) -> MarginCheck | 
 
 
 def check_liquidation(db: Session, allocation: Allocation, now: datetime) -> int:
-    book = paper_book.load_book(db, allocation)
+    book = paper_book.load_book(db, allocation, at=now)
     if not book.perps:
         return 0
     by_asset: dict[str, Instrument] = {}
@@ -348,10 +364,16 @@ def check_liquidation(db: Session, allocation: Allocation, now: datetime) -> int
         if mark is None or now - aware(mark.as_of) > max_age:
             return 0  # no fresh mark: no check at all (AV would be a guess)
         opens.append(_Open(inst, position, parse_price(mark.price), mark.price, aware(mark.as_of)))
-    check = margin_check(
-        book.cash_micros,
-        [(o.position.qty.units, o.position.entry, o.mark, o.inst.margin_tiers) for o in opens],
-    )
+    try:
+        check = margin_check(
+            book.cash_micros,
+            [(o.position.qty.units, o.position.entry, o.mark, o.inst.margin_tiers) for o in opens],
+        )
+    except (ArithmeticError, KeyError, TypeError, ValueError):
+        # Malformed margin_tiers (or mark): never guess a leverage, and never
+        # let one bad instrument row wedge the pass. No check.
+        logger.warning("allocation %s: unusable margin tiers or mark; no check", allocation.id)
+        return 0
     if check is None or not check.liquidate:
         return 0
     applied = 0
@@ -381,9 +403,9 @@ def check_liquidation(db: Session, allocation: Allocation, now: datetime) -> int
                 qty_atoms=abs(qty.atoms),
                 qty_decimals=qty.decimals,
                 price=o.mark_str,
-                notional_micros=paper_book.proceeds_micros_down(
-                    abs(qty.atoms), qty.decimals, o.mark_str
-                ),
+                notional_micros=(
+                    paper_book.proceeds_micros_down if qty.atoms > 0 else paper_book.cost_micros_up
+                )(abs(qty.atoms), qty.decimals, o.mark_str),
                 fee_micros=0,
                 price_basis="mark",
                 quote_at=o.mark_as_of,
@@ -467,13 +489,23 @@ def apply_corporate_actions(db: Session, allocation: Allocation, now: datetime) 
             continue
         if any(r.id in applied_ids for r in group):
             continue
-        pending.append(group[0])  # lowest id
+        # The lowest id among the rows complete enough to apply, so one
+        # source missing a pay date or ratio does not hold back another's.
+        complete = [r for r in group if _is_complete(r)]
+        if complete:
+            pending.append(complete[0])
     pending.sort(key=lambda r: (r.ex_date, _KIND_ORDER[r.kind], r.id))
     applied = 0
     for row in pending:
         if _apply_action(db, allocation, equities[row.symbol], row, now):
             applied += 1
     return applied
+
+
+def _is_complete(row: CorporateActionRow) -> bool:
+    if row.kind == CorporateActionKind.SPLIT:
+        return bool(row.ratio_new and row.ratio_old and row.ratio_new > 0 and row.ratio_old > 0)
+    return row.pay_date is not None and bool(row.cash_per_share)
 
 
 def _apply_action(
@@ -497,7 +529,11 @@ def _apply_action(
         pay_at = _midnight(row.pay_date)
         if now < pay_at:
             return False
-        per_share = parse_price(row.cash_per_share)
+        try:
+            per_share = parse_price(row.cash_per_share)
+        except (ArithmeticError, TypeError, ValueError):
+            logger.warning("corporate action %s: bad cash_per_share; skipped", row.id)
+            return False
         held = paper_book.load_book(db, allocation, at=ex_at - _EPSILON).holdings.get(
             inst.base_asset
         )
