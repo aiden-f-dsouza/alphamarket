@@ -37,7 +37,12 @@ from alphamarket.connectors.coinbase import CoinbaseConnector, CoinbaseMarketDat
 from alphamarket.connectors.coinbase import load_private_key as load_coinbase_key
 from alphamarket.connectors.ibkr import IbkrConnector, IbkrMarketData
 from alphamarket.connectors.kalshi import KalshiConnector, KalshiMarketData, load_private_key_pem
-from alphamarket.connectors.kraken import KRAKEN_API_URL, KrakenConnector, KrakenMarketData
+from alphamarket.connectors.kraken import (
+    KRAKEN_API_URL,
+    KrakenConnector,
+    KrakenMarketData,
+    underlying_asset,
+)
 from alphamarket.connectors.polymarket import PolymarketConnector, PolymarketMarketData
 from alphamarket.connectors.snaptrade import SnapTradeConnector, SnapTradeMarketData
 
@@ -637,6 +642,18 @@ _MARKET_DATA_BUILDERS: dict[str, Callable[[str], MarketDataSource]] = {
     "ibkr": lambda venue_env: IbkrMarketData(),
     "snaptrade": lambda venue_env: SnapTradeMarketData(),  # ---- venue-snaptrade ----
 }
+
+
+# Assets a venue holds that are priced as another asset, one unit for one
+# (Kraken staked/bonded/opt-in variants: ETH2.S, DOT28.S, BTC.M -> ETH, DOT,
+# BTC). Valuation looks prices up under the result (valuation_db.price_inputs).
+_PRICE_ASSET: dict[str, Callable[[str], str]] = {"kraken": underlying_asset}
+
+
+def price_asset(venue: str, asset: str) -> str:
+    """The asset whose closes value one unit of `asset` held on `venue`."""
+    mapper = _PRICE_ASSET.get(venue)
+    return mapper(asset) if mapper is not None else asset
 
 
 def build_market_data(venue: str, venue_env: str) -> MarketDataSource:

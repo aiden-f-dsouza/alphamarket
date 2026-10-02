@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from alphamarket.connectors.base import InstrumentType, LegKind
-from alphamarket.connectors.registry import get_profile
+from alphamarket.connectors.registry import get_profile, price_asset
 from alphamarket.ingest import account_entries
 from alphamarket.jobs import aware
 from alphamarket.models import AssetFill, Instrument, PriceDaily, VenueAccount
@@ -99,11 +99,19 @@ def price_inputs(
     prices_daily rows that carry a USD value. For each asset and day the
     first venue in `prefer_venues` with a close wins, then the CoinGecko
     fallback. Instruments are matched on base_asset, so a perp ("BTC-PERP")
-    gets its own closes and a coin its spot closes."""
+    gets its own closes and a coin its spot closes. A venue variant priced as
+    another asset (registry.price_asset: Kraken "ETH2.S" -> "ETH") gets that
+    asset's closes, returned under the held asset's own code."""
     order = [*dict.fromkeys([*prefer_venues, FALLBACK_PRICE_SOURCE])]
-    wanted = set(assets)
-    if not wanted:
+    held = set(assets)
+    if not held:
         return []
+    home = prefer_venues[0] if prefer_venues else None
+    priced_as: dict[str, set[str]] = {}
+    for asset in held:
+        target = price_asset(home, asset) if home else asset
+        priced_as.setdefault(target, set()).add(asset)
+    wanted = set(priced_as)
     query = (
         select(
             Instrument.base_asset,
@@ -125,11 +133,12 @@ def price_inputs(
         query = query.where(PriceDaily.day <= end)
     rank = {venue: n for n, venue in enumerate(order)}
     best: dict[tuple[str, date], tuple[int, int, str | None]] = {}
-    for asset, venue, day, usd, close in db.execute(query).all():
-        key = (asset, day)
-        candidate = (rank[venue], usd, close)
-        if key not in best or candidate[0] < best[key][0]:
-            best[key] = candidate
+    for target, venue, day, usd, close in db.execute(query).all():
+        for asset in priced_as[target]:
+            key = (asset, day)
+            candidate = (rank[venue], usd, close)
+            if key not in best or candidate[0] < best[key][0]:
+                best[key] = candidate
     return [
         _price_in(asset, day, usd, close) for (asset, day), (_, usd, close) in sorted(best.items())
     ]
