@@ -26,7 +26,7 @@
       {% if page.verification_tier == "fills_only" %}<span class="badge">fills verified · balance not reconciled</span>{% elif page.reconciled is not none %}<span class="badge {{ 'good pulse' if page.reconciled else 'bad' }}">{% if page.reconciled %}<i></i>reconciled last night{% else %}{{ m.icon("x", 12, "currentColor", 2) }}reconciliation diverged{% endif %}</span>{% endif %}
       {% if page.verification_tier == "daily_verified" %}<span class="badge">daily verified · end-of-day data</span>{% endif %}
       {% if page.activity_flags and page.activity_flags.count %}<a class="badge warn" href="/verification">{{ m.icon("x", 12, "currentColor", 2) }}unsupported activity · {{ page.activity_flags.count }} skipped</a>{% endif %}
-      {% if page.venue_env != "prod" %}<span class="badge warn">{{ page.venue_env }} environment</span>{% endif %}
+      {% if page.venue_env not in ("prod", "live") %}<span class="badge warn">{{ page.venue_env }} environment</span>{% endif %}
     </div>
     <h1 style="font-size:48px">{{ page.name }}</h1>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">

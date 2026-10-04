@@ -221,6 +221,19 @@ def test_v2_page_shows_holdings_exposure_and_twr_not_settled_trades(client, db):
     assert "<polyline" in html and "chart.js" not in html.lower()
 
 
+@pytest.mark.parametrize(("env", "badged"), [("live", False), ("prod", False), ("paper", True)])
+def test_environment_badge_only_for_non_production_accounts(client, db, env, badged):
+    """Alpaca's production environment is called "live"; only paper/demo
+    accounts carry the environment warning."""
+    s = _strategy(db, "alpaca", "dividend-growth", "Dividend Growth")
+    db.get(VenueAccount, s.venue_account_id).venue_env = env
+    _stats(db, s, v2_extras())
+    db.commit()
+
+    html = client.get("/s/dividend-growth").text
+    assert (f"{env} environment" in html) is badged
+
+
 def test_v2_drawdown_and_months_come_from_the_twr_index_not_raw_equity(client, db):
     s = _strategy(db, "kraken", "eth-swing", "ETH Swing")
     _stats(db, s, v2_extras())

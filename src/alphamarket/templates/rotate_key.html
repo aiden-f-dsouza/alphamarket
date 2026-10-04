@@ -46,7 +46,7 @@
         <label class="field"><span class="label">{{ profile.key_label }}</span><input class="mono" name="key_id" required maxlength="120" autocomplete="off" placeholder="From {{ profile.display_name }} → API keys"></label>
         <label class="field"><span class="label">{{ profile.secret_label }}</span><textarea class="mono" name="secret" required></textarea><span class="note">Encrypted before it touches the database. Never shown again.</span></label>
         <div class="spread" style="align-items:center;padding-top:4px">
-          <span class="mono small muted" style="display:inline-flex;align-items:center;gap:8px">{{ m.icon("lock", 14, "var(--muted)") }}Environment: {{ "production" if account.venue_env == "prod" else account.venue_env }}</span>
+          <span class="mono small muted" style="display:inline-flex;align-items:center;gap:8px">{{ m.icon("lock", 14, "var(--muted)") }}Environment: {{ "production" if account.venue_env in ("prod", "live") else account.venue_env }}</span>
           <button class="btn" type="submit"{{ " disabled" if gate }}>Check scope and replace</button>
         </div>
       </div>

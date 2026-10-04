@@ -78,9 +78,10 @@
 </div>
 {% else %}
 
+{% set static_rows = rows and rows[0].paper_tails is defined %}
 <div class="card">
   <div class="lrow head">
-    <span></span><span class="label">Strategy</span><span class="label hide">60 days</span><span class="label r">Return</span><span class="label r hide">Worst DD</span><span class="label r hide">Sharpe</span><span class="label r hide">Risk</span><span class="label hide">{{ "Paper tails" if demo else "Reconciliation" }}</span><span class="label r hide">{{ "Score" if demo else "Verified" }}</span>
+    <span></span><span class="label">Strategy</span><span class="label hide">60 days</span><span class="label r">Return</span><span class="label r hide">Worst DD</span><span class="label r hide">Sharpe</span><span class="label r hide">Risk</span><span class="label hide">{{ "Paper tails" if static_rows else "Reconciliation" }}</span><span class="label r hide">{{ "Score" if static_rows else "Verified" }}</span>
   </div>
   {% for r in rows %}
   <div class="lrow">

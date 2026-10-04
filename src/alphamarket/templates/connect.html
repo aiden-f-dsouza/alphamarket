@@ -150,7 +150,7 @@
         {% endif %}
         {% include "_consent.html" %}
         <div class="spread" style="align-items:center;padding-top:4px">
-          <span class="mono small muted" style="display:inline-flex;align-items:center;gap:8px">{{ m.icon("lock", 14, "var(--muted)") }}Environment: {{ "production" if venue_env == "prod" else venue_env }}</span>
+          <span class="mono small muted" style="display:inline-flex;align-items:center;gap:8px">{{ m.icon("lock", 14, "var(--muted)") }}Environment: {{ "production" if venue_env in ("prod", "live") else venue_env }}</span>
           <button class="btn" type="submit"{{ " disabled" if gate or closed_reason }}>{{ "Check scope and import" if pasted else "Import public history" }}</button>
         </div>
       </div>
