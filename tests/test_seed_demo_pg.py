@@ -9,8 +9,10 @@ eight strategies would otherwise leak into every later pg test's global
 sweeps (stats, mirror, prices)."""
 
 import importlib.util
+import statistics
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -79,6 +81,9 @@ def test_small_seed_through_the_real_pipeline(demo_db, demo_on):
         strategies = db.scalars(select(Strategy)).all()
         assert len(strategies) == len(seed_demo.CREATORS)
         venues = {s.slug: s for s in strategies}
+        # Seeded slugs are the clean names, without the id suffix of a real connect.
+        assert {seed_demo.slugify(c.strategy) for c in seed_demo.CREATORS} == set(venues)
+        assert "perp-momentum-btc-eth-sol" in venues
         listed = {r["slug"]: r for r in list_visible(db, include_incubating=True)}
         assert set(listed) == set(venues)  # every seeded strategy is public in DEMO_MODE
         assert all(r["demo"] for r in listed.values())  # ... as sample data
@@ -162,3 +167,47 @@ def test_world_is_deterministic():
     first = fingerprint(7)
     assert first and first == fingerprint(7)
     assert first != fingerprint(8)
+
+
+def test_world_prices_stay_plausible():
+    """Every price path of the full-scale default world stays within about
+    0.5x-1.8x of its start, crypto names move together, and share orders
+    come in round lots."""
+    end = datetime(2026, 10, 4, 12, tzinfo=UTC)
+    world = seed_demo.World(end, seed_demo.FULL, seed_demo.DEFAULT_SEED)
+    world.generate()
+    for key, path in world.paths.items():
+        start = path.u.start
+        levels = [v / start for v in path.adj.values()]
+        assert min(levels) >= 0.5 and max(levels) <= 1.8, key
+
+    def daily(key):
+        adj = world.paths[key].adj
+        days = sorted(adj)
+        return [adj[b] / adj[a] - 1 for a, b in zip(days, days[1:], strict=False)]
+
+    assert statistics.correlation(daily("BTC"), daily("ETH")) > 0.6
+
+    for handle in ("meridian", "harbor"):
+        buys = [v.item for v in world.by_handle[handle].fills if v.item.action == "buy"]
+        assert buys
+        for fill in buys:
+            qty = Decimal(fill.qty_atoms).scaleb(-fill.instrument.qty_decimals)
+            assert qty == qty.to_integral_value() and (qty < 20 or qty % 5 == 0), (handle, qty)
+
+
+def test_kalshi_ladders_settle_coherently():
+    """One outcome per event: on any event's strike ladder every strike that
+    settled YES ("above K") sits below every strike that settled NO."""
+    end = datetime(2026, 10, 4, 12, tzinfo=UTC)
+    world = seed_demo.World(end, seed_demo.FULL, seed_demo.DEFAULT_SEED)
+    world.generate()
+    ladders: dict[str, dict[str, list[Decimal]]] = {}
+    for ticker, market in world.markets.items():
+        event, strike = ticker.rsplit("-T", 1)
+        ladder = ladders.setdefault(event, {"yes": [], "no": []})
+        ladder[market["result"]].append(Decimal(strike))
+    assert len(ladders) > 50
+    for event, ladder in ladders.items():
+        if ladder["yes"] and ladder["no"]:
+            assert max(ladder["yes"]) < min(ladder["no"]), event

@@ -19,6 +19,30 @@ sources serve that data from behind `registry.build_connector` /
 `registry.build_market_data`, inside the seed process only. Outbound HTTP is
 refused while seeding (invariant 6), so no venue is ever called.
 
+The price paths are meant to look plausible to someone who knows the
+markets, not to replay history: each name starts near where it traded in
+late 2025 (BTC ~94.5k, ETH ~3.3k, SOL ~178, NVDA ~182, MSFT ~485, ...) with a
+typical daily volatility (BTC 2.7%, ETH 3.7%, SOL 4.7%, large-cap equities
+1.4-2.2%, staples ~1%). Daily shocks share a common factor per market, so
+BTC, ETH and SOL move together (and so do the equities), and each log price
+is pulled back toward a modest trend line, with a much stronger pull outside
+~0.58x-1.6x of its start, so nine months never ends at an absurd level. The
+AVGO 4-for-1 split is fictional; it is placed so the post-split price is
+where AVGO actually trades (its dividend is split-adjusted too). Order sizes
+are what a person would type (coins to two significant figures, shares in
+round lots, Kalshi contracts in tens).
+
+Kalshi markets get the same care: each event (a city's high on a day, a CPI
+print, payrolls, a Fed decision) has one outcome drawn up front, so a strike
+ladder always settles coherently, and the market prices every strike off one
+forecast, so prices fall as strikes rise. Weather strikes follow the
+seasonal normal high; CPI, payrolls and Fed markets settle on their release
+days (second Wednesday, first Friday, the FOMC calendar). The creator has a
+noisy private signal of the market's error and trades the side its own
+(calibrated) probability favours, which is where its edge comes from.
+Seeded strategies get clean slugs (`/s/perp-momentum-btc-eth-sol`); a real
+connect appends the strategy id.
+
 Real: everything after the connector. Each creator account gets a
 vault-sealed (dummy) credential and is read through `ingest.connector_for`;
 the real `JobRunner` runs the real handlers (backfill and sync page streams,
@@ -31,14 +55,16 @@ portfolio snapshots happen at the times they would have in production.
 
 Same seed + same day = same data (`--seed N` draws another world; the
 default was picked from a sweep for a realistic spread: most records up,
-one deep loser, one flat). The end is the current hour, so a fresh seed
-always ends "now". With the default seed on 2026-10-04 the marketplace read:
-Hyperliquid perps +88% (max drawdown 15%), Kalshi weather +52% (19%), Kraken
-+24% (10%), Alpaca +16% (4%), Binance.US +3%, Kalshi macro +3%, IBKR -0.6%,
-Coinbase alt rotation -52%; every record reconciled, and the investor's
-paper portfolio +8.6% with the alt-rotation tail stopped by its 10% limit.
-Equity trades fall on weekdays, so other days give slightly different
-numbers.
+one deep loser, one or two roughly flat, nothing above about +60%, and only
+the tight-limit tail stopped). The end is the current hour, so a fresh seed
+always ends "now". With the default seed (127) on 2026-10-04 the marketplace
+read: Hyperliquid perps +41.7% (max drawdown 25.0%), Kalshi weather +41.5%
+(11.7%), Kraken +14.8% (12.1%), Alpaca +10.8% (7.7%), Binance.US +7.5%
+(incubating), IBKR +1.4% (9.9%), Kalshi macro -2.5% (incubating), Coinbase
+alt rotation -42.4% (50.3%); every record reconciled, and the investor's
+paper portfolio stood at $11,412 on $10,000 with the alt-rotation tail
+stopped by its 10% drawdown limit. Equity trades fall on weekdays, so other
+days give slightly different numbers.
 
 ## What the seed creates
 
@@ -50,7 +76,7 @@ All users are `is_demo = true` (invariant 7, see below).
 | tidewater | Hyperliquid (perps) | Perp momentum: BTC, ETH, SOL | 7 months | longs and shorts, hourly funding, margin tiers |
 | lantern | Coinbase (spot) | High-beta alt rotation | 5 months | the losing record: losers stay listed |
 | quarry | Binance.US (spot) | BTC accumulation bands | 45 days | incubating |
-| meridian | Alpaca (equities) | US mega-cap momentum | 8 months | an AVGO 4-for-1 split and MSFT/AVGO dividends |
+| meridian | Alpaca (equities) | US mega-cap momentum | 8 months | an AVGO 4-for-1 split; MSFT, AVGO, AAPL and META dividends |
 | harbor | IBKR Flex (equities) | Dividend growth core | 10 months | daily-resolution venue ("daily verified") |
 | isobar | Kalshi | NYC & Chicago daily highs | 8 months | prediction markets, settled daily |
 | fedwatch | Kalshi | CPI & Fed path | 75 days | incubating |
