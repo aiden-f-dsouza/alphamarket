@@ -761,6 +761,7 @@ stays flat across it.
 | Sharpe | `mean(r) / stdev(r) × √365` over the days with a return; sample stdev |
 | Sortino | `mean(r) / √(mean(min(r,0)²)) × √365` |
 | Win rate | not shown: a coin or a share has no single "trade" that wins or loses |
+| P&L, net of deposits | last day's equity - first day's equity - net deposits and withdrawals; the headline dollar figure on an asset strategy's page (spot exchanges and brokers report no realized-P&L entries) |
 | Realized P&L | the venue's own realized-P&L and liquidation entries, in dollars (a stablecoin at 1.00, anything else at its close that day, or the last close before it) |
 | Money-weighted return | Modified Dietz, shown only beside the TWR |
 

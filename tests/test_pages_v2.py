@@ -96,6 +96,7 @@ def v2_extras(**overrides) -> dict:
         "daily_flows": [[DAYS[2], 3_000 * M]],
         "twr_index": [[DAYS[0], 1.0], [DAYS[1], 1.05], [DAYS[2], 1.0605], [DAYS[3], 0.95445]],
         "twr": -0.04555,
+        "pnl_micros": -755_500_000,  # 12,244.5 - 10,000 - 3,000 deposited
         # Last-close book: $5,000 cash + 1.5 ETH x 3,000 (4,500) + a 0.05 BTC
         # perp, entry 60,000, mark 62,000 (unrealized 100, notional 3,100).
         # Equity 9,600. Share is over the non-perp values: 5,000 + 4,500 =
@@ -325,7 +326,7 @@ def test_v2_page_notes_unpriced_assets_and_broker_equity(client, db):
     db.commit()
     html = client.get("/s/etf-core").text
     assert "Not valued (no price available): XYZ" in html
-    assert "2 days valued at the last available close" in html
+    assert "2 days without a close (weekends and market holidays, mostly)" in html
     assert "Broker-reported equity $9,600.00 matches the ledger $9,590.00" in html
     assert "daily verified" in html and "end of day only" in html  # IBKR is a daily venue
     assert "Reporting-only token" in html
@@ -499,9 +500,11 @@ def test_marketplace_rows_show_the_venue_and_daily_tier(client, db):
     assert rows[0]["verification_tier"] == "daily_verified"
     assert rows[0]["venue_label"] == "Interactive Brokers (Flex)"
     assert rows[0]["asset_classes"] == ["equities"]
+    assert rows[0]["sharpe"] == 0.8  # the compare table's Sharpe column
     html = client.get("/marketplace?asset=equities").text
     assert "daily verified" in html
-    assert "matched · end of day" in client.get("/marketplace?asset=equities&view=table").text
+    table = client.get("/marketplace?asset=equities&view=table").text
+    assert "matched · end of day" in table and "0.80" in table
 
 
 def test_marketplace_sparkline_is_flow_adjusted(db):
@@ -1119,3 +1122,24 @@ def test_strategy_page_and_json_label_kraken_pairs_by_canonical_codes(client, db
     assert "ETH/USD" in recent and "XETHZUSD" not in recent
     (item,) = client.get("/api/strategies/eth-pairs/signals").json()["signals"]
     assert item["label"] == "ETH/USD" and item["ticker"] == "XETHZUSD"  # API keeps the venue code
+
+
+def test_asset_page_headline_dollars_are_pnl_net_of_deposits_not_realized(client, db):
+    s = _strategy(db, "alpaca", "net-pnl", "Net PnL")
+    _stats(db, s, v2_extras())
+    db.commit()
+
+    html = client.get("/s/net-pnl").text
+    assert "P&amp;L, net of deposits" in html and "Realized P&amp;L" not in html
+    assert "755.50" in html.split("P&amp;L, net of deposits", 1)[1][:200]
+
+
+def test_equity_carried_days_say_weekends_not_a_data_gap(client, db):
+    extras = v2_extras()
+    extras["valuation_flags"] = {"unpriced": [], "carried_forward_days": 9}
+    s = _strategy(db, "alpaca", "weekends", "Weekends")
+    _stats(db, s, extras)
+    db.commit()
+
+    html = client.get("/s/weekends").text
+    assert "9 days without a close (weekends and market holidays, mostly)" in html

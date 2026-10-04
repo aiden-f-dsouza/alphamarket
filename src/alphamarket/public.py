@@ -416,6 +416,14 @@ def page_data(db: Session, strategy: Strategy) -> dict:
         "risk_score": stats.risk_score,
         "equity": micros_to_float(stats.equity_micros),
         "realized_pnl": micros_to_float(stats.realized_pnl_micros),
+        # Asset strategies: last equity - first equity - net external flows
+        # (analytics_v2). Spot venues report no realized-P&L entries, so the
+        # realized figure would read $0 there.
+        "net_pnl": (
+            micros_to_float(stats.extras["pnl_micros"])
+            if "pnl_micros" in (stats.extras or {})
+            else None
+        ),
         "flags": list(stats.flags),
         "top_series_share": stats.extras.get("top_series_share"),
         "peak_invested": micros_to_float(stats.extras.get("peak_invested_micros") or 0),
@@ -551,6 +559,7 @@ def list_visible(
                 if stats.total_return is not None
                 else (stats.extras.get("return_on_peak_invested") or 0.0),
                 "max_drawdown": stats.max_drawdown,
+                "sharpe": stats.sharpe,
                 "risk_score": stats.risk_score,
                 "track_days": stats.track_days,
                 "reconciled": last_recon.reconciled if last_recon else None,

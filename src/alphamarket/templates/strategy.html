@@ -81,6 +81,7 @@
   <div class="stat"><span class="label">Sharpe</span><span class="v">{{ m.num(st.sharpe) }}</span></div>
   <div class="stat"><span class="label">Risk score</span><span class="v">{{ st.risk_score }}<small>/10</small></span></div>
   {% if page.vs_benchmark is defined %}<div class="stat"><span class="label">vs. {{ page.benchmark_label or "S&P 500" }}</span><span class="v {{ 'good' if page.vs_benchmark >= 0 else 'bad' }}">{{ m.pct(page.vs_benchmark) }}<small>pts</small></span></div>
+  {% elif st.net_pnl is defined and st.net_pnl is not none %}<div class="stat"><span class="label">P&amp;L, net of deposits</span><span class="v {{ 'good' if st.net_pnl >= 0 else 'bad' }}">{{ m.usd(st.net_pnl) }}</span></div>
   {% else %}<div class="stat"><span class="label">Realized P&amp;L</span><span class="v {{ 'good' if st.realized_pnl >= 0 else 'bad' }}">{{ m.usd(st.realized_pnl) }}</span></div>{% endif %}
   {% if v2 %}<div class="stat"><span class="label">Open positions</span><span class="v">{{ st.n_open_positions if st.n_open_positions is not none else "—" }}</span></div>
   {% else %}<div class="stat"><span class="label">Settled trades</span><span class="v">{{ st.n_settlements }}</span></div>{% endif %}
@@ -143,7 +144,7 @@
       </div>
       {% endif %}
       {% if st.unpriced or st.perp_entry_unknown or st.carried_forward_days %}
-      <span class="mono muted" style="font-size:11px;line-height:1.5">{% if st.unpriced %}Not valued (no price available): {{ st.unpriced|join(", ") }}. {% endif %}{% if st.perp_entry_unknown %}Entry price unknown, not valued: {{ st.perp_entry_unknown|join(", ") }}. {% endif %}{% if st.carried_forward_days %}{{ st.carried_forward_days }} day{{ "s" if st.carried_forward_days != 1 }} valued at the last available close.{% endif %}</span>
+      <span class="mono muted" style="font-size:11px;line-height:1.5">{% if st.unpriced %}Not valued (no price available): {{ st.unpriced|join(", ") }}. {% endif %}{% if st.perp_entry_unknown %}Entry price unknown, not valued: {{ st.perp_entry_unknown|join(", ") }}. {% endif %}{% if st.carried_forward_days %}{% if page.asset_class == "equities" %}{{ st.carried_forward_days }} day{{ "s" if st.carried_forward_days != 1 }} without a close (weekends and market holidays, mostly) valued at the previous close.{% else %}{{ st.carried_forward_days }} day{{ "s" if st.carried_forward_days != 1 }} valued at the last available close.{% endif %}{% endif %}</span>
       {% endif %}
     </div></div>
     {% endif %}
