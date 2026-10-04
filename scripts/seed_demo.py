@@ -50,6 +50,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_DOWN, ROUND_HALF_EVEN, ROUND_UP, Decimal
 from fractions import Fraction
 from pathlib import Path
+from statistics import NormalDist
 
 import httpx
 from sqlalchemy import create_engine, func, select, text
@@ -110,7 +111,7 @@ from alphamarket.venues import slugify
 logger = logging.getLogger("seed_demo")
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SEED = 1  # picked from a sweep: winners, losers, one stopped tail
+DEFAULT_SEED = 127  # picked from a sweep: winners, one deep loser, one flat, one stopped tail
 DEFAULT_PASSWORD = "koine-demo-2026"
 EMAIL_DOMAIN = "demo.koine"
 M = 1_000_000  # micros per dollar
@@ -184,41 +185,93 @@ EQUITY_CLOSE = timedelta(hours=20, minutes=55)
 
 @dataclass(frozen=True)
 class Underlying:
+    """One traded name. Levels are roughly where each traded in late 2025 (the
+    demo is illustrative, not a price history); vols are typical daily ones."""
+
     key: str
     start: float  # split-adjusted price at the first simulated day
     vol: float  # daily volatility
-    drift: float  # daily drift
+    beta: float  # loading on its market's common daily shock (crypto or US equities)
+    trend: float  # x its market's drift over the window (high beta moves further)
+    idio: float  # +- its own drift over the window, in log terms
     equity: bool = False
     dp: int = 2  # decimals of a quoted price
     split: tuple[int, int, int] | None = None  # (days before the end, new, old)
 
 
 UNDERLYINGS = (
-    Underlying("BTC", 61_000, 0.026, 0.0007, dp=1),
-    Underlying("ETH", 2_550, 0.033, 0.0006, dp=2),
-    Underlying("SOL", 148, 0.045, -0.0004, dp=2),
-    Underlying("NVDA", 126, 0.024, 0.0011, equity=True),
-    Underlying("MSFT", 428, 0.013, 0.0005, equity=True),
-    Underlying("AVGO", 172, 0.021, 0.0009, equity=True, split=(32, 4, 1)),
-    Underlying("META", 565, 0.019, 0.0006, equity=True),
-    Underlying("AMZN", 188, 0.018, 0.0004, equity=True),
-    Underlying("VTI", 281, 0.008, 0.0004, equity=True),
-    Underlying("SCHD", 28.4, 0.007, 0.0002, equity=True),
-    Underlying("JNJ", 157, 0.009, 0.0002, equity=True),
-    Underlying("PG", 167, 0.008, 0.0002, equity=True),
-    Underlying("KO", 68, 0.008, 0.0002, equity=True),
+    Underlying("BTC", 94_500, 0.027, 0.92, 1.0, 0.04, dp=1),
+    Underlying("ETH", 3_280, 0.037, 0.90, 1.25, 0.08),
+    Underlying("SOL", 178, 0.047, 0.82, 1.5, 0.12),
+    Underlying("NVDA", 182, 0.022, 0.68, 1.5, 0.12, equity=True),
+    Underlying("AAPL", 272, 0.015, 0.70, 1.0, 0.07, equity=True),
+    Underlying("MSFT", 485, 0.014, 0.70, 1.0, 0.07, equity=True),
+    # The split is fictional; the 4-for-1 puts the post-split price where
+    # AVGO actually trades, so current holdings and recent fills look right.
+    Underlying("AVGO", 345, 0.021, 0.65, 1.4, 0.12, equity=True, split=(32, 4, 1)),
+    Underlying("META", 640, 0.019, 0.62, 1.2, 0.10, equity=True),
+    Underlying("AMZN", 228, 0.018, 0.66, 1.1, 0.09, equity=True),
+    Underlying("VTI", 331, 0.009, 0.97, 1.0, 0.02, equity=True),
+    Underlying("SCHD", 27.4, 0.008, 0.80, 0.6, 0.04, equity=True),
+    Underlying("JNJ", 204, 0.010, 0.40, 0.3, 0.06, equity=True),
+    Underlying("PG", 148, 0.009, 0.40, 0.3, 0.06, equity=True),
+    Underlying("KO", 70, 0.009, 0.40, 0.3, 0.06, equity=True),
 )
+
+# Each market's drift over TREND_DAYS (log terms): crypto anywhere from a
+# bleed to a rally, equities a flat-to-good year.
+MARKET_DRIFT = {"crypto": (-0.2, 0.3), "equity": (-0.04, 0.16)}
+TREND_DAYS = 300
+REVERSION = 0.03  # daily pull of a log price toward its trend line
+# A path stays within about 0.55x-1.7x of its start: past either bound the
+# pull is much stronger, so nine months never ends at an absurd level.
+SOFT_BOUNDS = (math.log(0.58), math.log(1.6))
+BOUND_PULL = 0.25
+
+
+def draw_closes(first: date, last: date, rng: random.Random) -> dict[str, dict[date, float]]:
+    """Split-adjusted daily closes of every underlying from `first` - 1 day to
+    `last`: a log price that follows its trend line with mean reversion, and
+    daily shocks built from a common factor per market (so BTC, ETH and SOL
+    move together, and so do the equities) plus the name's own noise.
+    Equities do not move on weekends."""
+    days = [first - timedelta(days=1)]
+    while days[-1] < last:
+        days.append(days[-1] + timedelta(days=1))
+    drift = {m: rng.uniform(lo, hi) for m, (lo, hi) in MARKET_DRIFT.items()}
+    common = {m: [rng.gauss(0, 1) for _ in days] for m in MARKET_DRIFT}
+    out: dict[str, dict[date, float]] = {}
+    lo, hi = SOFT_BOUNDS
+    for u in UNDERLYINGS:
+        market = "equity" if u.equity else "crypto"
+        goal = u.trend * drift[market] + rng.uniform(-u.idio, u.idio)
+        goal = min(hi - 0.1, max(lo + 0.1, goal))
+        own = math.sqrt(1 - u.beta * u.beta)
+        x = 0.0
+        adj = {days[0]: u.start}
+        for i, d in enumerate(days[1:], start=1):
+            shock = u.beta * common[market][i] + own * rng.gauss(0, 1)
+            if not (u.equity and d.weekday() >= 5):
+                target = goal * min(1.0, i / TREND_DAYS)
+                pull = REVERSION * (target - x)
+                if x < lo:
+                    pull += BOUND_PULL * (lo - x)
+                elif x > hi:
+                    pull += BOUND_PULL * (hi - x)
+                x += pull + u.vol * shock
+            adj[d] = u.start * math.exp(x)
+        out[u.key] = adj
+    return out
 
 
 class PricePath:
-    """Split-adjusted daily closes from a seeded geometric random walk, plus a
-    deterministic intraday path between them. Raw (unadjusted) prices are the
-    adjusted ones x the split ratio before the ex-date, like Alpaca's raw bars:
-    the ledger applies splits as SPLIT legs, so prices must be unadjusted."""
+    """Split-adjusted daily closes (from draw_closes), plus a deterministic
+    intraday path between them. Raw (unadjusted) prices are the adjusted ones
+    x the split ratio before the ex-date, like Alpaca's raw bars: the ledger
+    applies splits as SPLIT legs, so prices must be unadjusted."""
 
-    def __init__(self, u: Underlying, first: date, last: date, end: date, rng: random.Random):
+    def __init__(self, u: Underlying, adj: dict[date, float], end: date):
         self.u = u
-        self.first = first
         self.ex_date: date | None = None
         self.ratio = Fraction(1)
         if u.split is not None:
@@ -227,15 +280,7 @@ class PricePath:
             while self.ex_date.weekday() >= 5:
                 self.ex_date -= timedelta(days=1)
             self.ratio = Fraction(new, old)
-        self.adj: dict[date, float] = {}
-        price = u.start
-        d = first - timedelta(days=1)
-        self.adj[d] = price
-        while d < last:
-            d += timedelta(days=1)
-            if not (u.equity and d.weekday() >= 5):
-                price *= math.exp(u.drift - u.vol * u.vol / 2 + u.vol * rng.gauss(0, 1))
-            self.adj[d] = price
+        self.adj = adj
         self.phase = (stable_hash(u.key) % 1000) / 1000 * 2 * math.pi
 
     def _factor(self, d: date) -> float:
@@ -319,9 +364,9 @@ class CreatorSpec:
     whole_shares: bool = False
     core: tuple[tuple[str, int, int | None, float], ...] = ()  # (sym, from day, to day, frac)
     deposits: tuple[tuple[int, int], ...] = ()  # (day, dollars)
-    edge: float = 0.0  # binary: true probability minus price
+    edge: float = 0.0  # binary: the gap between its own probability and the price to trade
+    insight: float = 0.1  # binary: how informative its own signal is (0 none, 1 perfect)
     markets_per_day: float = 1.0
-    settle_days: tuple[int, int] = (1, 1)
 
 
 CREATORS = (
@@ -419,7 +464,7 @@ CREATORS = (
         history_days=240,
         cash=60_000,
         kind="spot",
-        symbols=(("NVDA", 0.35), ("META", 0.25), ("AMZN", 0.2), ("MSFT", 0.2)),
+        symbols=(("NVDA", 0.3), ("META", 0.2), ("AAPL", 0.2), ("AMZN", 0.15), ("MSFT", 0.15)),
         skill=0.63,
         trades_per_week=2.5,
         hold_hours=(48, 480),
@@ -471,10 +516,10 @@ CREATORS = (
         history_days=240,
         cash=8_000,
         kind="binary",
-        edge=0.045,
+        edge=0.03,
+        insight=0.035,
         markets_per_day=1.3,
-        settle_days=(1, 1),
-        frac=(0.015, 0.03),
+        frac=(0.014, 0.02),
     ),
     CreatorSpec(
         handle="fedwatch",
@@ -489,10 +534,10 @@ CREATORS = (
         history_days=75,
         cash=5_000,
         kind="binary",
-        edge=0.05,
+        edge=0.02,
+        insight=0.2,
         markets_per_day=0.6,
-        settle_days=(3, 21),
-        frac=(0.02, 0.04),
+        frac=(0.025, 0.035),
     ),
 )
 
@@ -532,8 +577,10 @@ FUNDING_BASE = {"BTC": 0.0000110, "ETH": 0.0000125, "SOL": 0.0000150}  # per hou
 # before that. Inside the copy window on purpose: followers hold MSFT, AVGO
 # (after its split) and VTI through an ex-date and get paid.
 DIVIDENDS = {
-    "MSFT": ("0.83", 24),
-    "AVGO": ("0.59", 20),
+    "MSFT": ("0.91", 24),
+    "AVGO": ("0.65", 20),  # post-split; x the split ratio before the ex-date
+    "AAPL": ("0.26", 41),
+    "META": ("0.525", 12),
     "VTI": ("0.95", 37),
     "SCHD": ("0.26", 33),
     "JNJ": ("1.30", 52),
@@ -594,11 +641,8 @@ class World:
         }
         self.start = min(self.anchor_at.values())
         first = self.start.date() - timedelta(days=12)
-        rng = random.Random(seed)
-        self.paths = {
-            u.key: PricePath(u, first, end.date() + timedelta(days=1), end.date(), rng)
-            for u in UNDERLYINGS
-        }
+        closes = draw_closes(first, end.date() + timedelta(days=1), random.Random(seed))
+        self.paths = {u.key: PricePath(u, closes[u.key], end.date()) for u in UNDERLYINGS}
         self.books: dict[tuple[str, str], Book] = {}
         self.by_handle: dict[str, Book] = {}
         self.markets: dict[str, dict] = {}  # kalshi ticker -> {p, settles_at, result}
@@ -723,7 +767,12 @@ class World:
                 pay = d + timedelta(days=14)
                 while pay.weekday() >= 5:
                     pay += timedelta(days=1)
-                out.append((sym, d, pay, cps))
+                path = self.paths[sym]
+                if path.ex_date is not None and d < path.ex_date:  # pre-split shares
+                    cps_d = Decimal(cps) * path.ratio.numerator / path.ratio.denominator
+                    out.append((sym, d, pay, str(q(cps_d, -Decimal(cps).as_tuple().exponent))))
+                else:
+                    out.append((sym, d, pay, cps))
                 ex -= timedelta(days=DIVIDEND_EVERY_DAYS)
         return out
 
@@ -738,6 +787,7 @@ class Intent:
     side: int = 1  # +1 long, -1 short (perps)
     qty: int = 0  # atoms bought (shares/coins), adjusted by splits
     dead: bool = False
+    core: bool = False  # a planned core holding: bought even when cash is short
 
 
 class _Gen:
@@ -788,6 +838,8 @@ class _Gen:
             if t >= self.end:
                 break
             t = self.session(t)
+            if t >= self.end:  # a weekend snapped past the end
+                break
             sym = self.rng.choices(names, weights)[0]
             if self.perp and busy.get(sym, t) > t:
                 continue
@@ -821,6 +873,18 @@ class _Gen:
     def mark(self, sym: str, t: datetime) -> Decimal:
         return self.w.price(sym, t)
 
+    def size(self, raw: Decimal, lot: Decimal) -> Decimal:
+        """An order size as a person types it: whole shares in round lots
+        (5s, 10s, 25s as the count grows), coins to two significant figures."""
+        if raw <= 0:
+            return Decimal(0)
+        if self.c.whole_shares:
+            n = int(raw)
+            step = 1 if n < 20 else 5 if n < 100 else 10 if n < 400 else 25
+            return Decimal(n // step * step)
+        step = max(lot, Decimal(1).scaleb(raw.adjusted() - 1))
+        return (raw / step).to_integral_value(ROUND_DOWN) * step
+
 
 class SpotGen(_Gen):
     """Spot crypto and equities: FILL_BASE / FILL_QUOTE / FEE legs; deposits,
@@ -837,7 +901,7 @@ class SpotGen(_Gen):
             t = self.core_time(start_day)
             if t is None:
                 continue
-            intent = Intent(sym, frac)
+            intent = Intent(sym, frac, core=True)
             actions.append((t, "open", intent, 0.0))
             stop = self.core_time(stop_day) if stop_day is not None else None
             if stop is not None and stop > t:
@@ -919,8 +983,10 @@ class SpotGen(_Gen):
         target = Decimal(str(float(self.equity_value(t)) * intent.frac))
         cash = Decimal(self.cash).scaleb(-self.book.cash_dp)
         budget = min(target, cash * Decimal("0.97"))
-        lot = self.lot(intent.sym)
-        qty = (budget / price / lot).to_integral_value(ROUND_DOWN) * lot
+        if budget < target * Decimal("0.4") and not intent.core:
+            intent.dead = True  # mostly invested already: no token-sized top-ups
+            return
+        qty = self.size(budget / price, self.lot(intent.sym))
         if qty <= 0 or qty * price < 25:
             intent.dead = True
             return
@@ -1142,7 +1208,7 @@ class PerpGen(_Gen):
         price = sig5(price * (Decimal("1.0002") if intent.side > 0 else Decimal("0.9998")))
         notional = Decimal(str(float(self.equity_value(t)) * intent.frac))
         dp = PERP_DP[coin]
-        qty = (notional / price).quantize(Decimal(1).scaleb(-dp), rounding=ROUND_DOWN)
+        qty = self.size(notional / price, Decimal(1).scaleb(-dp))
         qty_atoms = atoms_of(qty, dp)
         if qty_atoms <= 0 or qty * price < 20:
             intent.dead = True
@@ -1247,44 +1313,73 @@ class PerpGen(_Gen):
             self.cash += amount
 
 
-KALSHI_SERIES = {
-    "isobar": (("KXHIGHNY", 74, 6), ("KXHIGHCHI", 70, 8)),  # (series, mean high F, spread)
-    "fedwatch": (("KXCPIYOY", 2.9, 0.3), ("KXFED", 4.0, 0.25), ("KXPAYROLLS", 150, 60)),
-}
+# Daily-high markets: (annual mean of the daily high, seasonal swing, daily
+# sd around the normal), in F; the normal high peaks in late July (NYC ~85F,
+# Chicago ~84F; ~39F/32F in January).
+KALSHI_WEATHER = {"KXHIGHNY": (62.0, 23.0, 6), "KXHIGHCHI": (58.5, 26.0, 8)}
+WEATHER_FORECAST_SD = 2.5  # F: the market's error on the day's high
+# Macro markets settle on the release: (series, mean outcome, outcome sd,
+# market forecast sd, strike step, strike decimals, settle time UTC).
+KALSHI_MACRO = (
+    ("KXCPIYOY", 2.9, 0.15, 0.15, 0.1, 1, timedelta(hours=14)),
+    ("KXPAYROLLS", 75, 40, 40, 25, 0, timedelta(hours=14)),
+    ("KXFED", 3.5, 0.25, 0.2, 0.25, 2, timedelta(hours=19)),
+)
+# FOMC decision days by month: which Wednesday (-1 = the last), as in 2026.
+FOMC_WEDNESDAY = {1: -1, 3: 3, 4: -1, 6: 3, 7: -1, 9: 3, 10: -1, 12: 2}
+
+
+def nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+    """The n-th `weekday` (Mon=0) of a month; n=-1 is the last one."""
+    if n > 0:
+        d = date(year, month, 1)
+        d += timedelta(days=(weekday - d.weekday()) % 7 + 7 * (n - 1))
+        return d
+    d = date(year + month // 12, month % 12 + 1, 1) - timedelta(days=1)
+    return d - timedelta(days=(d.weekday() - weekday) % 7)
+
+
+def macro_release(series: str, year: int, month: int) -> date | None:
+    """When a month's market resolves: payrolls on the first Friday, CPI
+    mid-month (the second Wednesday, near enough), the Fed on its meeting day."""
+    if series == "KXPAYROLLS":
+        return nth_weekday(year, month, 4, 1)
+    if series == "KXCPIYOY":
+        return nth_weekday(year, month, 2, 2)
+    n = FOMC_WEDNESDAY.get(month)
+    return nth_weekday(year, month, 2, n) if n is not None else None
 
 
 class BinaryGen(_Gen):
-    """Kalshi: buy YES or NO, hold to settlement. Wins with probability
-    price + edge, so a positive edge is a profitable record over time."""
+    """Kalshi: buy YES or NO, hold to settlement. Every event (a city's high
+    on a day, a CPI print, a Fed decision) has one outcome, drawn up front, so
+    a strike ladder always settles coherently. The market prices each strike
+    off its forecast of the outcome; the creator has a noisy private signal of
+    the market's error (`insight`: the share of that error's variance the
+    signal explains), updates on it like a Bayesian and buys the side its own
+    probability favours by at least `edge`: calibrated beliefs plus a real
+    signal make a profitable record over time, with losing streaks."""
 
     def run(self) -> None:
         c, book = self.c, self.book
         self.cash = book.anchor_cash_atoms
         events: list[tuple[datetime, int, str, dict]] = []
         day = book.anchor_at.date()
-        series = KALSHI_SERIES[c.handle]
         n = 0
-        tickers: set[str] = set()
+        self.tickers: set[str] = set()
         while midnight(day) < self.end:
             count = self._poisson(c.markets_per_day)
             for _ in range(count):
-                at = midnight(day) + timedelta(hours=self.rng.uniform(11, 21))
+                # Weather: traded on the morning model runs (06:00-13:00 New York).
+                hours = (10, 17) if c.handle == "isobar" else (11, 21)
+                at = midnight(day) + timedelta(hours=self.rng.uniform(*hours))
                 if at <= book.anchor_at + timedelta(minutes=30) or at >= self.end:
                     continue
-                name, mean, spread = self.rng.choice(series)
-                settle_in = self.rng.randint(*c.settle_days)
-                settles = midnight(day + timedelta(days=settle_in)) + timedelta(hours=14)
-                strike = mean + self.rng.uniform(-spread, spread)
-                code = (day + timedelta(days=settle_in)).strftime("%y%b%d").upper()
-                while True:  # one position per market: settlements are per ticker
-                    strike_txt = f"{strike:.1f}" if strike < 100 else f"{strike:.0f}"
-                    ticker = f"{name}-{code}-T{strike_txt}"
-                    if ticker not in tickers:
-                        break
-                    strike += spread / 7
-                tickers.add(ticker)
+                market = self.weather(day) if c.handle == "isobar" else self.macro(day)
+                if market is None:
+                    continue
                 n += 1
-                events.append((at, n, "buy", {"ticker": ticker, "settles": settles}))
+                events.append((at, n, "buy", market))
             day += timedelta(days=1)
         events.sort(key=lambda e: (e[0], e[1]))
         pending: list[tuple[datetime, dict]] = []
@@ -1301,6 +1396,82 @@ class BinaryGen(_Gen):
             else:
                 self.w.markets[pos["ticker"]] = pos["market"]
 
+    def weather(self, day: date) -> dict:
+        """Today's high in NYC or Chicago (whole degrees, near the seasonal
+        normal), settled the next morning on the NWS climate report."""
+        name = self.rng.choice(sorted(KALSHI_WEATHER))
+        mean, swing, sd = KALSHI_WEATHER[name]
+        normal = mean + swing * math.cos(2 * math.pi * (day.timetuple().tm_yday - 205) / 365)
+        high = normal + self.w.rng("high", name, day).gauss(0, sd)
+        settles = midnight(day + timedelta(days=1)) + timedelta(hours=14)
+        code = day.strftime("%y%b%d").upper()
+        return self.event(name, code, settles, high, WEATHER_FORECAST_SD, 1, 0)
+
+    def macro(self, day: date) -> dict | None:
+        """CPI, payrolls or the Fed: the next release 2-35 days out."""
+        name, mean, sd, forecast_sd, step, dp, at = self.rng.choice(KALSHI_MACRO)
+        release = None
+        for ahead in range(3):
+            y, m = divmod(day.month - 1 + ahead, 12)
+            d = macro_release(name, day.year + y, m + 1)
+            if d is not None and day + timedelta(days=2) <= d <= day + timedelta(days=35):
+                release = d
+                break
+        if release is None:
+            return None
+        # CPI and payrolls are named for the month the data covers; the Fed for its meeting.
+        label = release if name == "KXFED" else release.replace(day=1) - timedelta(days=1)
+        outcome = self.w.rng("outcome", name, release).gauss(mean, sd)
+        code = label.strftime("%y%b").upper()
+        return self.event(name, code, midnight(release) + at, outcome, forecast_sd, step, dp)
+
+    def event(
+        self, series: str, code: str, settles: datetime, outcome: float, sd: float, step, dp: int
+    ) -> dict:
+        """One event: its outcome as reported (on the strike grid), the
+        market's forecast and the creator's own. Seeded by the event, so
+        every trade in it sees the same numbers."""
+        market = outcome + self.w.rng("market", series, code).gauss(0, sd)
+        beta = self.c.insight  # signal = market error + noise; beta = its shrinkage weight
+        noise = sd * math.sqrt((1 - beta) / beta)
+        signal = outcome - market + self.w.rng("own", self.c.handle, series, code).gauss(0, noise)
+        own = market + beta * signal
+        return {
+            "series": series,
+            "code": code,
+            "settles": settles,
+            "reported": Decimal(f"{round(outcome / step) * step:.{dp}f}"),
+            "market": market,
+            "own": own,
+            "sd": sd,
+            "step": step,
+            "dp": dp,
+        }
+
+    def quote(self, ev: dict) -> tuple[str, int, str, str] | None:
+        """A strike near the market's forecast that this account holds no
+        position in (settlements are per ticker), priced by the market, and
+        the side the creator's forecast favours: (ticker, yes cents, side,
+        result). YES pays when the reported outcome is above the strike."""
+        step, dp, sd = ev["step"], ev["dp"], ev["sd"]
+        for _ in range(6):
+            strike = round((ev["market"] + self.rng.gauss(0, sd)) / step) * step
+            txt = f"{strike:.{dp}f}"
+            ticker = f"{ev['series']}-{ev['code']}-T{txt}"
+            if strike < 0 or ticker in self.tickers:
+                continue
+            line = strike + step / 2  # reported above the strike <=> outcome past this
+            yes_cents = round(100 * (1 - NormalDist(ev["market"], sd).cdf(line)))
+            if not 6 <= yes_cents <= 94:
+                continue
+            p_own = 1 - NormalDist(ev["own"], sd * math.sqrt(1 - self.c.insight)).cdf(line)
+            if abs(p_own - yes_cents / 100) < self.c.edge:
+                continue
+            side = "yes" if p_own > yes_cents / 100 else "no"
+            result = "yes" if ev["reported"] > Decimal(txt) else "no"
+            return ticker, yes_cents, side, result
+        return None
+
     def _poisson(self, lam: float) -> int:
         n, p, threshold = 0, 1.0, math.exp(-lam)
         while True:
@@ -1313,26 +1484,29 @@ class BinaryGen(_Gen):
         return self.cash  # cost basis: open positions are already paid for
 
     def buy(self, at: datetime, m: dict) -> dict | None:
-        yes_cents = self.rng.randint(22, 78)
-        side = "yes" if self.rng.random() < 0.5 else "no"
+        quoted = self.quote(m)
+        if quoted is None:
+            return None
+        ticker, yes_cents, side, result = quoted
         cents = yes_cents if side == "yes" else 100 - yes_cents
         price = cents * 10_000
-        # Stake scales with the price: a cheap contract is a long shot, so a
-        # disciplined trader puts less on it (the risk per bet stays similar).
-        frac = self.rng.uniform(*self.c.frac) * cents / 50
+        # Stake leans a little on the price (a cheap contract is a long shot, so
+        # less goes on it) but stays in a narrow band: wider swings between
+        # consecutive bets would read as martingale sizing to stats.martingale_flag.
+        frac = self.rng.uniform(*self.c.frac) * (0.75 + cents / 200)
         count = int(self.equity_value() * frac / price)
+        if count >= 100:
+            count -= count % (50 if count >= 1_000 else 10)  # round lots, as people size
         if count < 1:
             return None
         fee = math.ceil(0.07 * count * (cents / 100) * (1 - cents / 100) * 100) * 10_000
         cost = count * price
         if cost + fee > self.cash:
             return None
-        p_win = min(0.97, max(0.03, cents / 100 + self.c.edge))
-        won = self.rng.random() < p_win
-        result = side if won else ("no" if side == "yes" else "yes")
+        self.tickers.add(ticker)
         nf = NormalizedFill(
             venue_fill_id=str(uuid.UUID(int=self.rng.getrandbits(128))),
-            ticker=m["ticker"],
+            ticker=ticker,
             side=side,
             action="buy",
             count_micros=count * M,
@@ -1343,8 +1517,8 @@ class BinaryGen(_Gen):
         self.book.fills.append(Visible(at, at, nf))
         self.cash -= cost + fee
         market = {"yes_cents": yes_cents, "settles": m["settles"], "result": result}
-        self.w.markets[m["ticker"]] = market
-        return {"ticker": m["ticker"], "side": side, "count": count, "market": market}
+        self.w.markets[ticker] = market
+        return {"ticker": ticker, "side": side, "count": count, "market": market}
 
     def settle(self, at: datetime, pos: dict) -> None:
         market = pos["market"]
@@ -1871,15 +2045,16 @@ class Sim:
                 user_id=user.id,
                 venue_account_id=account.id,
                 name=c.strategy,
-                slug="pending",
+                # A real connect appends the strategy id (venues.connect_account)
+                # to keep slugs unique; the seeded names are unique already, so
+                # the demo gets the clean slug a creator would choose.
+                slug=slugify(c.strategy),
                 description=c.description,
                 style_tags=c.tags,
                 public=True,
                 listed_at=now,
             )
             db.add(strategy)
-            db.flush()
-            strategy.slug = f"{slugify(c.strategy)}-{strategy.id}"
             db.commit()
             self.accounts[c.handle] = account.id
             self.strategies[c.handle] = strategy.id
