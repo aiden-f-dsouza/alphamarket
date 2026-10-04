@@ -6,10 +6,13 @@
   .crumbs { display:flex; align-items:center; gap:8px; font:12px var(--mono); color:var(--muted); }
   .head { display:grid; grid-template-columns:1fr 360px; gap:48px; align-items:start; }
   .cols { display:grid; grid-template-columns:1fr 340px; gap:32px; align-items:start; }
-  .srow { display:grid; grid-template-columns:1fr 56px 64px 96px; align-items:center; gap:16px; padding:12px 0; border-bottom:1px solid var(--line); }
+  .srow { display:grid; grid-template-columns:minmax(0,1fr) 48px 84px; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--line); }
+  .srow .tk { overflow-wrap:anywhere; }
   .side { font:11px var(--mono); letter-spacing:.08em; text-align:center; padding:4px 0; border-radius:var(--r); border:1px solid; }
-  .wrow { display:grid; grid-template-columns:150px 80px 90px 1fr; gap:16px; align-items:baseline; padding:12px 0; border-bottom:1px solid var(--line); }
-  @media (max-width:1000px) { .head, .cols { grid-template-columns:1fr; } .wrow { grid-template-columns:1fr 80px; } .wrow > :nth-child(n+3) { display:none; } }
+  .wrow { display:grid; grid-template-columns:150px 80px 110px minmax(0,1fr); gap:16px; align-items:baseline; padding:12px 0; border-bottom:1px solid var(--line); }
+  .months th, .months td { padding-left:4px; padding-right:4px; }
+  .tailcard .kv > * > :first-child { white-space:nowrap; } .tailcard .kv > * > :last-child { text-align:right; font-size:13px; }
+  @media (max-width:1000px) { .head, .cols { grid-template-columns:minmax(0,1fr); gap:24px; } .head h1 { font-size:36px !important; } .wrow { grid-template-columns:minmax(0,1fr) 70px 90px; } .wrow > :nth-child(4) { grid-column:1 / -1; } }
 {% endblock %}
 {% block content %}
 {% set st = page.stats %}
@@ -28,22 +31,24 @@
     <h1 style="font-size:48px">{{ page.name }}</h1>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       {{ sigil(page.slug, 36) }}
-      {% if page.demo %}<a href="/u/{{ page.display_name }}" style="font-weight:500">by {{ page.display_name }}</a><span class="small muted">· Kalshi · {{ page.creator.strategies }} verified strateg{{ "y" if page.creator.strategies == 1 else "ies" }} · {{ page.creator.followers }} followers</span>
+      {% if page.demo %}<a href="/u/{{ page.display_name }}" style="font-weight:500">by {{ page.display_name }}</a><span class="small muted">· {{ page.venue_label or "Kalshi" }} · {{ page.creator.strategies }} verified strateg{{ "y" if page.creator.strategies == 1 else "ies" }} · {{ page.creator.followers }} followers</span>
       {% else %}<span style="font-weight:500">by {{ page.display_name }}</span><span class="small muted">· {{ page.venue_label if page.is_asset else page.venue }}</span>{% endif %}
       <span style="display:flex;gap:6px;margin-left:6px">{% for t in page.style_tags %}{{ m.cat(t) }}{% endfor %}</span>
     </div>
     <span class="mono small muted">platform-verified since {{ page.verified_since[:10] if page.verified_since else "first reconciliation pending" }}</span>
   </div>
-  {% if page.capacity %}
-  <div class="card"><div class="body" style="padding:20px 24px">
-    <div class="spread" style="align-items:baseline"><span class="label">Tail this strategy</span><span class="mono small muted">min ${{ page.capacity.min_usd }}</span></div>
+  {% if page.tailing %}
+  <div class="card tailcard"><div class="body" style="padding:20px 24px">
+    <div class="spread" style="align-items:baseline"><span class="label">Paper-tail this strategy</span><span class="mono small muted">paper money only</span></div>
+    <p class="small text2">See exactly what you would have made following {{ page.display_name }}, at prices you could actually have got, before you risk anything.</p>
     <div class="kv" style="font-size:14px">
-      <div><span>Performance fee</span><span>{{ page.capacity.fee }}</span></div>
-      <div><span>Capacity left</span><span>~${{ page.capacity.left_k }}k</span></div>
-      <div><span>Currently tailing</span><span>${{ "%.1f"|format(page.capacity.tailing_k) }}k · {{ page.capacity.investors }} investors</span></div>
+      <div><span>Paper tails</span><span>{{ page.tailing.paper_tails }} following</span></div>
+      <div><span>Fill price</span><span>{{ page.tailing.fill }}</span></div>
+      <div><span>Trading costs</span><span>{{ page.tailing.costs }}</span></div>
+      <div><span>Koine pricing</span><span>{{ page.tailing.pricing }}</span></div>
     </div>
-    <a class="btn lg" href="/s/{{ page.slug }}/tail">Tail from my account</a>
-    <span class="small muted" style="display:inline-flex;align-items:center;gap:6px">{{ m.icon("lock", 12, "var(--muted)") }}Koine cannot withdraw from your account.</span>
+    <a class="btn lg" href="/s/{{ page.slug }}/tail">Start a paper tail</a>
+    <span class="small muted" style="display:inline-flex;align-items:center;gap:6px">{{ m.icon("lock", 12, "var(--muted)") }}Paper only. Koine never places an order or touches your money.</span>
   </div></div>
   {% endif %}
 </div>
@@ -58,11 +63,10 @@
   <div class="stat"><span class="label">Worst drawdown</span><span class="v bad">{{ m.pct(-st.max_drawdown) }}</span></div>
   <div class="stat"><span class="label">Sharpe</span><span class="v">{{ m.num(st.sharpe) }}</span></div>
   <div class="stat"><span class="label">Risk score</span><span class="v">{{ st.risk_score }}<small>/10</small></span></div>
-  {% if page.vs_benchmark is defined %}<div class="stat"><span class="label">vs. S&amp;P 500</span><span class="v {{ 'good' if page.vs_benchmark >= 0 else 'bad' }}">{{ m.pct(page.vs_benchmark) }}<small>pts</small></span></div>
-  <div class="stat"><span class="label">Capacity</span><span class="v">${{ page.capacity.capacity_k }}k<small>est.</small></span></div>
-  {% else %}<div class="stat"><span class="label">Realized P&amp;L</span><span class="v {{ 'good' if st.realized_pnl >= 0 else 'bad' }}">{{ m.usd(st.realized_pnl) }}</span></div>
+  {% if page.vs_benchmark is defined %}<div class="stat"><span class="label">vs. {{ page.benchmark_label or "S&P 500" }}</span><span class="v {{ 'good' if page.vs_benchmark >= 0 else 'bad' }}">{{ m.pct(page.vs_benchmark) }}<small>pts</small></span></div>
+  {% else %}<div class="stat"><span class="label">Realized P&amp;L</span><span class="v {{ 'good' if st.realized_pnl >= 0 else 'bad' }}">{{ m.usd(st.realized_pnl) }}</span></div>{% endif %}
   {% if v2 %}<div class="stat"><span class="label">Open positions</span><span class="v">{{ st.n_open_positions if st.n_open_positions is not none else "—" }}</span></div>
-  {% else %}<div class="stat"><span class="label">Settled trades</span><span class="v">{{ st.n_settlements }}</span></div>{% endif %}{% endif %}
+  {% else %}<div class="stat"><span class="label">Settled trades</span><span class="v">{{ st.n_settlements }}</span></div>{% endif %}
 </div></div>
 
 <div class="cols">
@@ -127,12 +131,11 @@
     </div></div>
     {% endif %}
 
-    <div class="grid2">
-      <div class="card"><div class="body">
+    <div class="card"><div class="body">
         <span class="label">Monthly returns</span>
         {% set months = st.monthly_returns %}
         {% if months %}
-        <div style="overflow-x:auto"><table>
+        <div style="overflow-x:auto"><table class="months">
           <tr><th>Year</th>{% for mo in ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"] %}<th class="num">{{ mo }}</th>{% endfor %}</tr>
           {% for y in months|map(attribute=0)|unique|list %}
           <tr><td class="text2">{{ y }}</td>
@@ -151,7 +154,6 @@
         <span class="small text2" style="padding:8px 0">Worst drawdown so far: <span class="mono bad">{{ m.pct(-st.max_drawdown) }}</span>. Dated worst periods and recovery times are listed once a strategy has 90 verified days.</span>
         {% endfor %}
       </div></div>
-    </div>
 
     <div class="card plain"><div class="body" style="flex-direction:row;align-items:center;gap:12px;padding:16px 20px">
       {% if st.flags %}{{ m.icon("x", 16, "var(--warn)", 2) }}<span class="small text2"><span class="warn">Behavioural flags: {{ st.flags|join(", ") }}.</span> <a href="/verification" style="text-decoration:underline">What these mean.</a></span>
@@ -215,9 +217,8 @@
       <div class="spread" style="align-items:baseline;padding-bottom:8px;border-bottom:1px solid var(--line2)"><span class="label">Recent trades</span><span class="mono small muted">{{ page.recent_signals|length }} of {{ st.n_fills }}</span></div>
       {% for s in page.recent_signals %}
       <div class="srow">
-        <div class="stack" style="gap:3px"><span class="mono small">{{ s.ticker }}</span><span class="mono muted" style="font-size:11px">{{ s.at[:16]|replace("T", " ") }} UTC{% if s.price is not none %} · @ {{ s.price }}{% endif %}</span></div>
+        <div class="stack" style="gap:3px;min-width:0"><span class="mono small tk">{{ s.ticker }} <span class="text2">{{ s.qty if s.qty is not none else "" }}</span></span><span class="mono muted" style="font-size:11px">{{ s.at[:16]|replace("T", " ") }} UTC{% if s.price is not none %} · @ {{ s.price }}{% endif %}</span></div>
         <span class="side {{ 'good' if s.action == 'buy' else 'bad' }}">{{ s.action }}</span>
-        <span class="mono small text2" style="text-align:right">{{ s.qty if s.qty is not none else "—" }}</span>
         <span class="mono small muted" style="text-align:right">{% if s.stake_fraction is not none %}{{ "%.1f"|format(s.stake_fraction * 100) }}%{% endif %}</span>
       </div>
       {% else %}<span class="muted small" style="padding:14px 0">No trades since verification began.</span>{% endfor %}
@@ -228,9 +229,8 @@
       <div class="spread" style="align-items:baseline;padding-bottom:8px;border-bottom:1px solid var(--line2)"><span class="label">Recent settlements</span><span class="mono small muted">{{ page.recent_settlements|length }} of {{ st.n_settlements }}</span></div>
       {% for s in page.recent_settlements %}
       <div class="srow">
-        <div class="stack" style="gap:3px"><span class="mono small">{{ s.ticker }}</span><span class="mono muted" style="font-size:11px">settled {{ s.settled_at }} · result {{ s.result }}</span></div>
+        <div class="stack" style="gap:3px;min-width:0"><span class="mono small tk">{{ s.ticker }}</span><span class="mono muted" style="font-size:11px">×{{ "%g"|format(s.count) }} · settled {{ s.settled_at }} · result {{ s.result }}</span></div>
         <span class="side {{ 'good' if s.side == 'yes' else 'bad' }}">{{ s.side }}</span>
-        <span class="mono small text2" style="text-align:right">×{{ "%g"|format(s.count) }}</span>
         <span class="mono {{ 'good' if s.payout > 0 else 'muted' }}" style="text-align:right;font-size:14px">{{ m.usd(s.payout) }}</span>
       </div>
       {% else %}<span class="muted small" style="padding:14px 0">No settlements yet.</span>{% endfor %}

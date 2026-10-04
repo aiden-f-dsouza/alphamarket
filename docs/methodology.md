@@ -8,10 +8,14 @@ Every formula here is pinned by a unit test with hand-computed expected values
 
 - Every number on a strategy page is computed by Koine from data pulled
   directly from the venue using a **read-only** connection the trader made:
-  a read-only API key (Kalshi) or a public wallet address (Polymarket).
-  Traders cannot enter, edit, or upload performance figures.
-- A key's scope is checked at connect time against the venue's own key
-  registry; a key with trading permission is rejected. A wallet address
+  a read-only API key (Kalshi, Kraken, Coinbase, Binance.US), a read-only
+  OAuth grant (Alpaca), a reporting token (Interactive Brokers Flex), an
+  aggregator's read-only connection (SnapTrade) or a public wallet address
+  (Polymarket, Hyperliquid). Traders cannot enter, edit, or upload
+  performance figures.
+- A key's scope is checked at connect time (against the venue's own key
+  registry, or by a probe a read-only key must fail; see each venue's section
+  below); a key with trading permission is rejected. A wallet address
   involves no key at all: the history is public on-chain data.
 - Fills and settlements are stored **append-only**: rows are never updated or
   deleted, at the application layer and (on Postgres) by database triggers.

@@ -7,23 +7,23 @@
   .guide .t { font-family:var(--serif); font-size:24px; font-weight:500; line-height:1.2; color:var(--brand); }
   .qs > div { display:flex; align-items:flex-start; gap:12px; padding:12px 0; border-bottom:1px solid var(--line); line-height:1.45; }
   .box { display:inline-flex; width:18px; height:18px; border:1px solid var(--line2); border-radius:var(--r); background:var(--surface); flex-shrink:0; margin-top:2px; }
-  .gl > div { display:grid; grid-template-columns:150px 1fr; gap:16px; padding:10px 0; border-bottom:1px solid #2b3f5e; font-size:14px; }
+  .gl > div { display:grid; grid-template-columns:130px minmax(0, 1fr); gap:16px; padding:10px 0; border-bottom:1px solid #2b3f5e; font-size:14px; }
 {% endblock %}
 {% block content %}
 {{ m.learn_tabs("research") }}
 <div class="stack" style="gap:16px;max-width:700px">
   <span class="label">Research</span>
   <h1>Learn to read a record before you trust one.</h1>
-  <p class="lead" style="font-size:16px">Short, specific guides on evaluating track records and risk. Written for investors who are about to tail someone, and for creators who want to be judged on the right numbers. The first guides are being written; the questions and glossary below are live.</p>
+  <p class="lead" style="font-size:16px">Short, specific guides on evaluating track records and risk. Written for followers about to paper-tail someone, and for creators who want to be judged on the right numbers. The first guides are being written; the questions and glossary below are live.</p>
 </div>
 <div class="grid3">
   {% for cat, title, blurb, mins in [
     ("Start here", "How to read a track record", "Return is the last number to look at. Read the verified window, the worst drawdown and how it was recovered first.", 8),
     ("Risk", "Why a 90-day Sharpe lies", "Short records flatter volatile strategies. What a Sharpe ratio needs before it means anything, and why Koine caps incubating scores.", 6),
     ("Risk", "Drawdown is the price of the return", "Two strategies with the same return and different drawdowns are not the same bet. How to set a limit you will actually hold.", 7),
-    ("Capacity", "Returns shrink when money follows", "Prediction markets are thin. What capacity means on a Koine page and why it is an estimate.", 5),
+    ("Copying", "What a paper tail can and cannot tell you", "Quotes, spreads, copy lag and venue fees: why a paper tail's return differs from the creator's, and which of the two to trust.", 6),
     ("Bias", "Survivorship and the screenshot", "Why every P&L you see on social media is a selected sample, and what the Transparency page does about it.", 6),
-    ("Fees", "High-water marks, worked through", "Three months of numbers showing exactly when a performance fee is charged and when it is not.", 4)] %}
+    ("Markets", "A contract, a perp and a stock", "How Koine puts a Kalshi contract, a Bitcoin perp and a dividend stock on comparable pages, and where the comparison breaks down.", 7)] %}
   <div class="card guide"><span class="label">{{ cat }}</span><span class="t">{{ title }}</span><p class="small text2">{{ blurb }}</p><span class="mono muted" style="font-size:12px;margin-top:auto;padding-top:6px">{{ mins }} min read · coming soon</span></div>
   {% endfor %}
 </div>
@@ -33,7 +33,7 @@
     <div><span class="box"></span><span>Is the verified window longer than the strategy's worst drawdown took to recover?</span></div>
     <div><span class="box"></span><span>Would you hold through the worst drawdown shown, at your allocation?</span></div>
     <div><span class="box"></span><span>Is the return concentrated in one month or one market series?</span></div>
-    <div><span class="box"></span><span>How much of the estimated capacity is already taken?</span></div>
+    <div><span class="box"></span><span>Is the return carried by one asset, one series or leverage?</span></div>
     <div><span class="box"></span><span>Does the creator's description promise anything the numbers do not show?</span></div>
     <span class="small muted" style="padding-top:12px">Every answer is on the strategy page. If one is not, that is the answer.</span>
   </div></div>
@@ -41,8 +41,8 @@
     <span class="label" style="padding-bottom:8px">Glossary</span>
     <div><span class="mono small">Worst drawdown</span><span class="text2">Largest fall from a peak in the equity curve, at daily close.</span></div>
     <div><span class="mono small">Sharpe</span><span class="text2">Return per unit of volatility, annualised. Meaningless under ~90 days.</span></div>
-    <div><span class="mono small">High-water mark</span><span class="text2">The highest value your allocation has reached. Fees apply only above it.</span></div>
-    <div><span class="mono small">Capacity</span><span class="text2">Estimated capital a strategy can absorb before its own trades move the price.</span></div>
+    <div><span class="mono small">Paper tail</span><span class="text2">A simulated copy of a strategy's new trades, sized to a paper allocation and charged the venue's fees. No order is placed.</span></div>
+    <div><span class="mono small">Copy lag</span><span class="text2">Time from the creator's fill to Koine seeing it. On crypto and stock venues a paper fill is priced at that later moment.</span></div>
     <div style="border-bottom:0"><span class="mono small">Incubation</span><span class="text2">The first 90 verified days. Listed, but cannot rank above 5.0.</span></div>
   </div></div>
 </div>

@@ -124,9 +124,9 @@ def _marketplace_rows(
     )
     if _demo():
         for r in demo.marketplace_rows():
-            if venue and venue != "kalshi":
+            if venue and venue != r["venue"]:
                 continue
-            if asset and asset != "prediction":
+            if asset and asset not in r["asset_classes"]:
                 continue
             if tag and tag not in r["tags"]:
                 continue

@@ -9,14 +9,14 @@
   .tabs a.on { color:var(--text); border-bottom-color:var(--brand); }
   .tabs span[aria-disabled] { cursor:default; }
   .tabs i { font:10px var(--mono); letter-spacing:.06em; text-transform:uppercase; font-style:normal; color:var(--muted); border:1px solid var(--line2); padding:2px 6px; border-radius:var(--r); }
-  .search { display:flex; align-items:center; gap:8px; width:280px; height:38px; padding:0 12px; background:var(--surface); border:1px solid var(--line2); border-radius:var(--r); }
+  .search { display:flex; align-items:center; gap:8px; width:280px; max-width:100%; height:38px; padding:0 12px; background:var(--surface); border:1px solid var(--line2); border-radius:var(--r); }
   .search input { border:0; padding:0; height:100%; font-size:14px; background:none; } .search input:focus { outline:none; }
   .filters { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
   .lrow { display:grid; grid-template-columns:40px minmax(0,1fr) 112px 96px 96px 72px 64px 150px 88px; align-items:center; gap:18px; padding:16px 24px; border-bottom:1px solid var(--line); }
   .lrow.head { padding:12px 24px; border-bottom:1px solid var(--line2); background:var(--bg); }
   .lrow .r { text-align:right; }
   .lrow:last-child { border-bottom:0; }
-  @media (max-width:1000px) { .lrow { grid-template-columns:40px 1fr 96px; } .lrow .hide { display:none; } .tabs { flex-direction:column; align-items:flex-start; } }
+  @media (max-width:1000px) { .lrow { grid-template-columns:40px minmax(0, 1fr) 80px; padding:14px 16px; gap:12px; } .lrow .hide { display:none; } .tabs { flex-direction:column; align-items:stretch; } .tabs > div { overflow-x:auto; gap:20px; } .tabs a { white-space:nowrap; } .search { width:100%; margin-bottom:10px; } }
 {% endblock %}
 {% block content %}
 <div class="spread">
@@ -79,7 +79,7 @@
 
 <div class="card">
   <div class="lrow head">
-    <span></span><span class="label">Strategy</span><span class="label hide">60 days</span><span class="label r">Return</span><span class="label r hide">Worst DD</span><span class="label r hide">Sharpe</span><span class="label r hide">Risk</span><span class="label hide">{{ "Capacity" if demo else "Reconciliation" }}</span><span class="label r hide">{{ "Score" if demo else "Verified" }}</span>
+    <span></span><span class="label">Strategy</span><span class="label hide">60 days</span><span class="label r">Return</span><span class="label r hide">Worst DD</span><span class="label r hide">Sharpe</span><span class="label r hide">Risk</span><span class="label hide">{{ "Paper tails" if demo else "Reconciliation" }}</span><span class="label r hide">{{ "Score" if demo else "Verified" }}</span>
   </div>
   {% for r in rows %}
   <div class="lrow">
@@ -91,8 +91,8 @@
     <span class="mono r bad hide" style="font-size:14px">{{ m.pct(-r.max_drawdown) }}</span>
     <span class="mono r hide" style="font-size:14px">{{ m.num(r.sharpe) if r.sharpe is defined else "—" }}</span>
     <span class="mono r hide" style="font-size:14px">{{ r.risk_score }}<span class="muted">/10</span></span>
-    {% if r.capacity_k is defined %}
-    <div class="stack hide" style="gap:5px"><span class="mono small text2">${{ r.tailing_k }}k <span class="muted">of ~${{ r.capacity_k }}k</span></span>{{ m.bar(r.tailing_k * 100 / r.capacity_k) }}</div>
+    {% if r.paper_tails is defined %}
+    <span class="mono small text2 hide">{{ r.paper_tails }} <span class="muted">following</span></span>
     <span class="mono r hide" style="font-size:16px;font-weight:500">{{ "%.1f"|format(r.score) }}</span>
     {% else %}
     <span class="mono small hide" style="display:inline-flex;align-items:center;gap:6px">{% if r.verification_tier is defined and r.verification_tier == "fills_only" %}<span class="muted">fills only · {{ r.venue }}</span>{% elif r.verification_tier is defined and r.verification_tier == "daily_verified" and r.reconciled %}{{ m.icon("check", 14, "var(--good)", 2) }}<span class="text2">matched · end of day</span>{% elif r.reconciled %}{{ m.icon("check", 14, "var(--good)", 2) }}<span class="text2">matched last night</span>{% elif r.reconciled is none %}<span class="muted">first run pending</span>{% else %}{{ m.icon("x", 14, "var(--warn)", 2) }}<span class="warn">diverged</span>{% endif %}</span>

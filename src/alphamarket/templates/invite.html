@@ -2,20 +2,20 @@
 {% import "_macros.html" as m %}
 {% block title %}Invite · Koine{% endblock %}
 {% block style %}
-  .cols { display:grid; grid-template-columns:minmax(0, 560px) 1fr; gap:80px; align-items:start; padding-top:16px; }
+  .cols { display:grid; grid-template-columns:minmax(0, 560px) minmax(0, 1fr); gap:80px; align-items:start; padding-top:16px; }
   .who > div { display:flex; flex-direction:column; gap:6px; padding:18px 0; border-bottom:1px solid var(--line); }
-  @media (max-width:1000px) { .cols { grid-template-columns:1fr; gap:32px; } }
+  @media (max-width:1000px) { .cols { grid-template-columns:minmax(0, 1fr); gap:32px; } }
 {% endblock %}
 {% block content %}
 <div class="cols">
   <div class="stack" style="gap:24px">
     <span class="label">Invite</span>
     <h1>Know a trader who can prove it?</h1>
-    <p class="lead" style="font-size:16px">Koine is invitation-first while the marketplace is small. Invite creators you would tail and investors you would trust with a link, not a screenshot.</p>
+    <p class="lead" style="font-size:16px">Koine is invitation-first while the marketplace is small. Invite creators you would follow, and people who would rather see a verified record than a screenshot.</p>
     <div class="who">
       <div><h3 style="font-size:16px">Traders with a real record</h3><p class="small text2">Anyone posting P&amp;L screenshots on X, Reddit or Discord who could replace them with a link.</p></div>
-      <div><h3 style="font-size:16px">People who invest in traders</h3><p class="small text2">Friends who already follow someone's calls. Koine gives them the record and the drawdown before the money.</p></div>
-      <div><h3 style="font-size:16px">Known names in prediction markets</h3><p class="small text2">Writers, forecasters and public traders. A verified page is a stronger claim than a follower count.</p></div>
+      <div><h3 style="font-size:16px">People who follow traders</h3><p class="small text2">Friends who already copy someone's calls. Koine gives them the record, the drawdown and a paper tail before they risk anything.</p></div>
+      <div><h3 style="font-size:16px">Known names in markets</h3><p class="small text2">Forecasters, crypto traders and stock pickers who publish their calls. A verified page is a stronger claim than a follower count.</p></div>
     </div>
     <div class="stack" style="gap:8px"><span class="label">Your invite link</span>
       <div style="display:flex;align-items:center;gap:8px"><input class="mono small text2" id="invite-link" readonly value="{{ settings.public_base_url }}/creators{% if user %}?via={{ user.display_name|urlencode }}{% endif %}" style="flex-grow:1;height:44px;font-size:13px" aria-label="Your invite link"><button class="btn secondary" type="button" id="copy-link" data-copied="Copied">{{ m.icon("link", 14) }}Copy</button></div>
@@ -24,11 +24,11 @@
   <div class="stack" style="gap:24px">
     {% if notice %}<div class="notice">{{ notice }}</div>{% endif %}
     <form method="post" action="/invite" class="card"><div class="body" style="gap:20px;padding:28px">
-      <div class="seg" style="align-self:flex-start"><a class="{{ 'on' if kind != 'investor' }}" href="/invite">Invite a creator</a><a class="{{ 'on' if kind == 'investor' }}" href="/invite?kind=investor">Invite an investor</a></div>
+      <div class="seg" style="align-self:flex-start"><a class="{{ 'on' if kind != 'investor' }}" href="/invite">Invite a creator</a><a class="{{ 'on' if kind == 'investor' }}" href="/invite?kind=investor">Invite a follower</a></div>
       <input type="hidden" name="kind" value="{{ kind }}">
       <label class="field"><span class="label">Handle or email</span><input class="mono" name="handle" required placeholder="@handle or name@example.com"></label>
       {% if kind == "investor" %}<label class="field"><span class="label">Who they already follow</span><input name="venue" placeholder="Optional. A trader or account they take calls from."><span class="note">Helps us show them the right record first.</span></label>
-      {% else %}<label class="field"><span class="label">Venue they trade on</span><input name="venue" value="Kalshi"><span class="note">Prediction markets today. Stocks and crypto venues are on the roadmap.</span></label>{% endif %}
+      {% else %}<label class="field"><span class="label">Venue they trade on</span><input name="venue" value="Kalshi"><span class="note">Prediction markets, crypto or US stocks. Some venues open for connection as their partner approvals land.</span></label>{% endif %}
       <label class="field"><span class="label">A note from you</span><textarea name="note" placeholder="Optional. Shown in the invitation."></textarea></label>
       <div class="spread" style="align-items:center"><span class="small muted" style="display:inline-flex;align-items:center;gap:6px">{{ m.icon("mail", 14, "var(--muted)") }}We send one message and never follow up.</span><button class="btn" type="submit">Send invitation</button></div>
     </div></form>

@@ -500,14 +500,18 @@ def test_marketplace_sparkline_is_flow_adjusted(db):
     assert row["spark"] == polyline([1.0, 1.05, 1.0605, 0.95445], 120, 32)
 
 
-def test_marketplace_in_demo_mode_leaves_sample_rows_out_of_other_venues(client, market):
+def test_marketplace_in_demo_mode_filters_sample_rows_by_venue_and_asset(client, market):
+    """Sample rows carry their own venue and asset class: a tab or venue chip
+    keeps only the matching ones, next to the real rows."""
     settings = get_settings()
     settings.demo_mode = True
     try:
         html = client.get("/marketplace?asset=crypto").text
-        assert "Sample data" not in html  # no sample row is a crypto row
-        assert "Alpha Kraken" in html
+        assert "Alpha Kraken" in html and "BTC/ETH trend" in html  # real and sample crypto
+        assert "Fed path" not in html  # no prediction-market sample on the crypto tab
         assert "Sample data" in client.get("/marketplace?asset=prediction").text
+        html = client.get("/marketplace?venue=binanceus").text
+        assert "Sample data" not in html  # no sample row is a Binance.US row
     finally:
         settings.demo_mode = False
 
@@ -685,7 +689,7 @@ def test_portfolio_demo_branch_survives_for_visitors(client):
     settings.demo_mode = True
     try:
         html = client.get("/portfolio").text
-        assert "Sample data" in html and "Your tailed strategies" in html
+        assert "Sample data" in html and "Your paper tails" in html and "Paper only" in html
     finally:
         settings.demo_mode = False
 

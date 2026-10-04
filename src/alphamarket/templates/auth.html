@@ -10,7 +10,7 @@
 <div class="auth stack" style="gap:24px">
   <div class="stack" style="gap:8px">
     <h1 style="font-size:36px">{{ "Welcome back." if login else "Create your account." }}</h1>
-    <p class="text2">{% if login %}Log in to your dashboard.{% else %}Investors browse and follow. Creators connect a read-only key from the dashboard. Free either way.{% endif %}</p>
+    <p class="text2">{% if login %}Log in to your dashboard.{% else %}Followers browse and paper-tail. Creators connect a read-only account from the dashboard. Free either way.{% endif %}</p>
   </div>
   {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
   <form method="post" action="{{ '/login-form' if login else '/signup-form' }}" class="card">

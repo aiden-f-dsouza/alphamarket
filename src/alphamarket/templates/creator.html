@@ -2,14 +2,14 @@
 {% import "_macros.html" as m %}
 {% block title %}{{ c.handle }} · Koine{% endblock %}
 {% block style %}
-  .head { display:grid; grid-template-columns:1fr auto; gap:48px; align-items:start; }
-  .cols { display:grid; grid-template-columns:1fr 400px; gap:32px; align-items:start; }
-  .srow { display:grid; grid-template-columns:1fr 112px 96px 96px 72px 150px; align-items:center; gap:18px; padding:16px 0; border-bottom:1px solid var(--line); }
+  .head { display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:48px; align-items:start; }
+  .cols { display:grid; grid-template-columns:minmax(0, 1fr) 400px; gap:32px; align-items:start; }
+  .srow { display:grid; grid-template-columns:minmax(0, 1fr) 112px 80px 80px 56px 110px; align-items:center; gap:16px; padding:16px 0; border-bottom:1px solid var(--line); }
   .srow .r { text-align:right; }
   .post { display:flex; flex-direction:column; gap:10px; padding:18px 0; border-bottom:1px solid var(--line); }
   .ctx { display:inline-flex; align-items:center; gap:6px; font:11px var(--mono); color:var(--good); margin-left:auto; }
   .ptabs { display:flex; align-items:center; gap:24px; border-bottom:1px solid var(--line2); } .ptabs span { font-size:14px; font-weight:500; padding:12px 0; color:var(--muted); border-bottom:1.5px solid transparent; } .ptabs span.on { color:var(--text); border-bottom-color:var(--brand); }
-  @media (max-width:1000px) { .head, .cols { grid-template-columns:1fr; } .srow { grid-template-columns:1fr 96px; } .srow .hide { display:none; } }
+  @media (max-width:1000px) { .head, .cols { grid-template-columns:minmax(0, 1fr); gap:24px; } .head > div:first-child { gap:16px !important; } .head .avatar { width:56px !important; height:56px !important; } .head h1 { font-size:32px !important; } .srow { grid-template-columns:minmax(0, 1fr) 80px; } .srow .hide { display:none; } }
 {% endblock %}
 {% block content %}
 <div class="head">
@@ -18,22 +18,22 @@
     <div class="stack">
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><h1 style="font-size:40px">{{ c.handle }}</h1>{{ m.verified("Verified creator") }}</div>
       <p class="text2" style="max-width:560px">{{ c.bio }}</p>
-      <div class="mono small text2" style="display:flex;align-items:center;gap:20px;flex-wrap:wrap"><span><b style="color:var(--text);font-weight:500">{{ c.followers }}</b> followers</span><span><b style="color:var(--text);font-weight:500">{{ c.strategies|length }}</b> verified strateg{{ "y" if c.strategies|length == 1 else "ies" }}</span><span><b style="color:var(--text);font-weight:500">${{ "%.1f"|format(c.tailing_k) }}k</b> tailing</span><span>verified since <b style="color:var(--text);font-weight:400">{{ c.since }}</b></span></div>
+      <div class="mono small text2" style="display:flex;align-items:center;gap:20px;flex-wrap:wrap"><span><b style="color:var(--text);font-weight:500">{{ c.followers }}</b> followers</span><span><b style="color:var(--text);font-weight:500">{{ c.strategies|length }}</b> verified strateg{{ "y" if c.strategies|length == 1 else "ies" }}</span><span><b style="color:var(--text);font-weight:500">{{ c.paper_tails }}</b> paper tails</span><span>{{ c.venues|join(", ") }}</span><span>verified since <b style="color:var(--text);font-weight:400">{{ c.since }}</b></span></div>
     </div>
   </div>
-  <div style="display:flex;gap:12px"><button class="btn secondary" type="button" disabled title="Following launches with the feed">Follow</button><a class="btn" href="/s/{{ c.best.slug }}">Tail a strategy</a></div>
+  <div style="display:flex;gap:12px"><button class="btn secondary" type="button" disabled title="Following launches with the feed">Follow</button><a class="btn" href="/s/{{ c.best.slug }}/tail">Paper-tail a strategy</a></div>
 </div>
 <div class="card"><div class="stats five">
   <div class="stat"><span class="label">Best strategy, net</span><span class="v {{ 'good' if c.best.total_return >= 0 else 'bad' }}">{{ m.pct(c.best.total_return) }}<small>{{ c.best.track_days }}d</small></span></div>
   <div class="stat"><span class="label">Worst strategy, net</span><span class="v {{ 'good' if c.worst.total_return >= 0 else 'bad' }}">{{ m.pct(c.worst.total_return) }}<small>{{ c.worst.track_days }}d</small></span></div>
   <div class="stat"><span class="label">Worst drawdown</span><span class="v bad">{{ m.pct(-c.worst_dd) }}</span></div>
   <div class="stat"><span class="label">Reconciliation</span><span class="v">{{ c.nights }} of {{ c.nights }}<small>nights matched</small></span></div>
-  <div class="stat"><span class="label">Capital tailing</span><span class="v">${{ "%.1f"|format(c.tailing_k) }}k<small>{{ c.investors }} investors</small></span></div>
+  <div class="stat"><span class="label">Paper tails</span><span class="v">{{ c.paper_tails }}<small>following</small></span></div>
 </div></div>
 <div class="cols">
   <div class="stack" style="gap:24px">
     <div class="card"><div class="body" style="padding:20px 28px;gap:0">
-      <div class="srow" style="padding:0 0 10px;border-bottom:1px solid var(--line2)"><span class="label">Strategies</span><span class="label hide">60 days</span><span class="label r">Return</span><span class="label r hide">Worst DD</span><span class="label r hide">Sharpe</span><span class="label r hide">Tailing</span></div>
+      <div class="srow" style="padding:0 0 10px;border-bottom:1px solid var(--line2)"><span class="label">Strategies</span><span class="label hide">60 days</span><span class="label r">Return</span><span class="label r hide">Worst DD</span><span class="label r hide">Sharpe</span><span class="label r hide">Paper tails</span></div>
       {% for r in c.strategies %}
       <div class="srow">
         <div class="stack" style="gap:6px"><a href="/s/{{ r.slug }}" style="font-size:16px;font-weight:500">{{ r.name }}</a>{{ m.verified("Verified", r.track_days) }}</div>
@@ -41,13 +41,13 @@
         <span class="mono r {{ 'good' if r.total_return >= 0 else 'bad' }}" style="font-size:16px">{{ m.pct(r.total_return) }}</span>
         <span class="mono r bad hide" style="font-size:14px">{{ m.pct(-r.max_drawdown) }}</span>
         <span class="mono r hide" style="font-size:14px">{{ m.num(r.sharpe) }}</span>
-        <span class="mono r small text2 hide">{% if r.tailing_k %}${{ r.tailing_k }}k · {{ r.investors }} investors{% else %}not open to tailing{% endif %}</span>
+        <span class="mono r small text2 hide">{% if r.paper_tails %}{{ r.paper_tails }} following{% else %}none yet{% endif %}</span>
       </div>
       {% endfor %}
       <span class="mono small muted" style="padding-top:12px">{% if c.strategies|length > 1 %}All strategies are shown, including the ones that are losing. {% endif %}Creators cannot hide a verified record.</span>
     </div></div>
     <div class="card"><div class="body" style="padding:8px 28px 20px;gap:0">
-      <div class="ptabs"><span class="on">Posts</span><span>Replies</span><span>Investors</span></div>
+      <div class="ptabs"><span class="on">Posts</span><span>Replies</span><span>Followers</span></div>
       {% for p in c.posts %}
       <div class="post">
         <div style="display:flex;align-items:center;gap:10px"><span class="avatar" style="width:24px;height:24px"></span><span class="small" style="font-weight:500">{{ c.handle }}</span><span class="mono small muted">{{ p.when }}</span><span class="ctx">{{ m.icon("shield", 12, "var(--good)", 2) }}{{ m.pct(c.best.total_return) }} · {{ m.pct(-c.best.max_drawdown) }} DD verified</span></div>
@@ -60,12 +60,13 @@
   <div class="stack" style="gap:24px">
     <div class="card tint"><div class="body" style="gap:10px;padding:20px 24px">
       <div style="display:flex;align-items:center;gap:8px">{{ m.icon("shield", 16, "var(--good)") }}<span class="small" style="font-weight:600">What verified creator means</span></div>
-      <p class="small text2">Every strategy on this profile is computed from a read-only venue key and reconciled nightly. {{ c.handle }} cannot edit, delete or hide any of it. Followers, posts and likes are not verification.</p>
+      <p class="small text2">Every strategy on this profile is computed from a read-only venue connection and reconciled nightly. {{ c.handle }} cannot edit, delete or hide any of it. Followers, posts and likes are not verification.</p>
     </div></div>
     <div class="card"><div class="body" style="gap:10px;padding:20px 24px">
-      <span class="label">Investors tailing {{ c.handle }}</span>
-      <div style="display:flex;align-items:center;gap:12px"><span class="mono" style="font-size:28px;font-weight:500;line-height:1">{{ c.investors }}</span><span class="small muted">across {{ c.strategies|selectattr("tailing_k")|list|length }} strateg{{ "y" if c.strategies|selectattr("tailing_k")|list|length == 1 else "ies" }}</span></div>
-      <span class="small muted">Individual investors are never shown.</span>
+      <span class="label">Paper tails of {{ c.handle }}</span>
+      {% set open = c.strategies|selectattr("paper_tails")|list|length %}
+      <div style="display:flex;align-items:center;gap:12px"><span class="mono" style="font-size:28px;font-weight:500;line-height:1">{{ c.paper_tails }}</span><span class="small muted">across {{ open }} strateg{{ "y" if open == 1 else "ies" }}</span></div>
+      <span class="small muted">Paper money only. Individual followers are never shown.</span>
     </div></div>
   </div>
 </div>

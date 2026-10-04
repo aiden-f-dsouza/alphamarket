@@ -13,7 +13,7 @@
   .ctx.none { color:var(--muted); background:transparent; }
   .strat { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border:1px solid var(--line2); border-radius:var(--r); background:var(--bg); }
   .msg { display:flex; flex-direction:column; gap:3px; padding:8px 0; }
-  @media (max-width:1000px) { .cols { grid-template-columns:1fr; } }
+  @media (max-width:1000px) { .cols { grid-template-columns:minmax(0, 1fr); } .post { padding:16px; } .ctx { margin-left:0; } .post > div:first-child { flex-wrap:wrap; } }
 {% endblock %}
 {% block content %}
 <div class="cols">
@@ -21,7 +21,7 @@
     <div class="stack" style="gap:4px">
       <a class="on" href="/feed" aria-current="page">{{ m.icon("users", 16, "var(--text)") }}Following</a>
       <span aria-disabled="true" title="Filters arrive with the live feed">{{ m.icon("shield", 16, "var(--muted)") }}Verified only</span>
-      <span aria-disabled="true" title="Filters arrive with the live feed">{{ m.icon("filter", 16, "var(--muted)") }}Prediction markets</span>
+      <span aria-disabled="true" title="Filters arrive with the live feed">{{ m.icon("filter", 16, "var(--muted)") }}By market</span>
       <span aria-disabled="true" title="Filters arrive with the live feed">{{ m.icon("chat", 16, "var(--muted)") }}Rooms</span>
     </div>
     <div class="stack" style="gap:8px"><span class="label">Rooms</span>{% for name, n in f.rooms %}<span class="room">#{{ name }}<span class="mono muted" style="font-size:11px">{{ n }}</span></span>{% endfor %}</div>
@@ -34,7 +34,7 @@
         {% if p.context %}<span class="ctx">{{ m.icon("shield", 12, "var(--good)", 2) }}{{ p.context }}</span>{% else %}<span class="ctx none">no verified record</span>{% endif %}</div>
       <p>{{ p.body }}</p>
       {% if p.strategy_row %}{% set r = p.strategy_row %}
-      <a class="strat" href="/s/{{ r.slug }}"><div class="stack" style="gap:2px"><span class="small" style="font-weight:500">{{ r.name }}</span><span class="mono small muted">{{ r.display_name }} · Kalshi</span></div><div class="mono small" style="display:flex;align-items:center;gap:14px"><span class="good">{{ m.pct(r.total_return) }}</span><span class="bad">{{ m.pct(-r.max_drawdown) }} DD</span>{{ m.icon("arrow", 14, "var(--muted)") }}</div></a>
+      <a class="strat" href="/s/{{ r.slug }}"><div class="stack" style="gap:2px"><span class="small" style="font-weight:500">{{ r.name }}</span><span class="mono small muted">{{ r.display_name }} · {{ r.venue_label }}</span></div><div class="mono small" style="display:flex;align-items:center;gap:14px"><span class="good">{{ m.pct(r.total_return) }}</span><span class="bad">{{ m.pct(-r.max_drawdown) }} DD</span>{{ m.icon("arrow", 14, "var(--muted)") }}</div></a>
       {% endif %}
       <div class="mono small muted" style="display:flex;gap:18px"><span>{{ p.likes }} likes</span><span>{{ p.replies }} {{ "reply" if p.replies == 1 else "replies" }}</span><span>Share</span></div>
     </div>
