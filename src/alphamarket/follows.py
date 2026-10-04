@@ -19,7 +19,7 @@ from alphamarket.db import get_db
 from alphamarket.jobs import aware
 from alphamarket.models import Allocation, Follow, Settlement, Signal, Strategy, User
 from alphamarket.money import format_atoms
-from alphamarket.public import is_visible, visible_strategy_or_404
+from alphamarket.public import publicly_visible, visible_strategy_or_404
 from alphamarket.ratelimit import rate_limit
 from alphamarket.stats import micros_to_float
 from alphamarket.valuation import parse_price
@@ -159,7 +159,7 @@ def settlement_item(strategy: Strategy, s: Settlement) -> dict:
 
 
 def feed_items(db: Session, strategies: list[Strategy], limit: int = FEED_LIMIT) -> list[dict]:
-    ids = [s.id for s in strategies if is_visible(s)]
+    ids = [s.id for s in strategies if publicly_visible(db, s)]
     if not ids:
         return []
     by_id = {s.id: s for s in strategies}

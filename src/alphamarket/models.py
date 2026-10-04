@@ -29,6 +29,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     event,
+    false,
 )
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
@@ -52,6 +53,10 @@ class User(Base):
     email_verified_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None
     )
+    # w3-seed (invariant 7): a sample user made by scripts/seed_demo.py. What a
+    # demo user owns is public only while DEMO_MODE is on, always under the
+    # "Sample data" banner; preflight refuses a database that has one.
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 class VenueAccountStatus(StrEnum):

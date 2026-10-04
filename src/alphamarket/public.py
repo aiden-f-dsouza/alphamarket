@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from alphamarket import activity_flags
 from alphamarket.analytics import latest_stats
 from alphamarket.charts import polyline, window_x
+from alphamarket.config import get_settings
 from alphamarket.connectors.base import (
     CredentialKind,
     InstrumentKind,
@@ -69,6 +70,23 @@ def is_visible(strategy: Strategy, account: VenueAccount | None = None) -> bool:
     ):
         return False
     return account is None or account.claimed
+
+
+def is_demo_owned(db: Session, strategy: Strategy) -> bool:
+    """True when the strategy belongs to a demo user (scripts/seed_demo.py):
+    sample data, whatever engine computed its numbers (invariant 7)."""
+    owner = db.get(User, strategy.user_id)
+    return bool(owner is not None and owner.is_demo)
+
+
+def publicly_visible(db: Session, strategy: Strategy, account: VenueAccount | None = None) -> bool:
+    """is_visible, and invariant 7: a demo user's strategy is public only while
+    DEMO_MODE is on (and is then shown under the "Sample data" banner). Every
+    public query (marketplace, strategy page and JSON, feed, landing) goes
+    through this."""
+    if not is_visible(strategy, account):
+        return False
+    return get_settings().demo_mode or not is_demo_owned(db, strategy)
 
 
 def verification_tier(account: VenueAccount | None) -> str | None:
@@ -335,6 +353,8 @@ def page_data(db: Session, strategy: Strategy) -> dict:
         "slug": strategy.slug,
         "name": strategy.name,
         "display_name": owner.display_name if owner else "",
+        # invariant 7: a seeded demo record; the page shows the sample banner.
+        "sample_data": bool(owner is not None and owner.is_demo),
         "venue": venue,
         "venue_label": display_name_of(venue),
         "venue_env": account.venue_env if account else None,
@@ -424,7 +444,7 @@ def recent_public_settlements(db: Session, limit: int = TICKER_ITEMS) -> list:
         if s.strategy_id not in seen:
             strategy = db.get(Strategy, s.strategy_id)
             account = db.get(VenueAccount, strategy.venue_account_id) if strategy else None
-            seen[s.strategy_id] = bool(strategy) and is_visible(strategy, account)
+            seen[s.strategy_id] = bool(strategy) and publicly_visible(db, strategy, account)
             if strategy:
                 names[s.strategy_id] = strategy.name
         if not seen[s.strategy_id]:
@@ -460,7 +480,7 @@ def list_visible(
     rows = []
     for strategy in db.scalars(select(Strategy).order_by(Strategy.id)).all():
         account = db.get(VenueAccount, strategy.venue_account_id)
-        if not is_visible(strategy, account):
+        if not publicly_visible(db, strategy, account):
             continue
         if venue and (account is None or account.venue != venue):
             continue
@@ -493,6 +513,8 @@ def list_visible(
                 "slug": strategy.slug,
                 "name": strategy.name,
                 "display_name": owner.display_name if owner else "",
+                # invariant 7: the row's `demo` key drives the sample banner.
+                "demo": bool(owner is not None and owner.is_demo),
                 "tags": tags,
                 "incubating": incubating,
                 "venue": account.venue if account else None,
@@ -530,7 +552,7 @@ def visible_strategy_or_404(db: Session, slug: str) -> Strategy:
     if strategy is None:
         raise HTTPException(status_code=404, detail="Strategy not found")
     account = db.get(VenueAccount, strategy.venue_account_id)
-    if not is_visible(strategy, account):
+    if not publicly_visible(db, strategy, account):
         raise HTTPException(status_code=404, detail="Strategy not found")
     return strategy
 
