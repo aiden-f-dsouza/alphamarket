@@ -45,13 +45,13 @@ list. We poll these every few minutes and once nightly for reconciliation.
 
 ## How the key is stored
 
-- The private key is encrypted at rest with AES (Fernet) using a server-side
-  master key held only in the server's environment, never in the code
-  repository, never in logs, never in any API response.
-- This is not a hardware security module. A full server compromise that
-  also captured the master key could decrypt stored keys. What an attacker
-  could then do is read your trading history: the same read-only limit
-  applies to them.
+- The key is encrypted at rest with its own data key, and that data key is
+  wrapped by a master key held in a cloud key management service (see
+  "Envelope encryption" below). It is never in the code repository, never
+  in logs, never in any API response.
+- A full compromise that also gained use of the master key could decrypt
+  stored keys. What an attacker could then do is read your trading history:
+  the same read-only limit applies to them.
 - **Disconnecting erases the encrypted key immediately.** Your already-
   ingested fills and settlements remain, because the track record was built
   on them and the ledger is append-only, but nothing can be fetched again.
