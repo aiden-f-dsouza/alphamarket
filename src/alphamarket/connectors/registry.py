@@ -28,6 +28,7 @@ from alphamarket.connectors.base import (
     RateScope,
     ReadOnlyProof,
     RegulatoryFees,
+    StreamMode,
     VenueConnector,
     VenueProfile,
 )
@@ -156,6 +157,9 @@ PROFILES: dict[str, VenueProfile] = {
         ),
         paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
         asset_classes=("crypto",),  # wave2
+        # P7: WS v2 `executions` queues a sync (legs need Ledgers rows). Only
+        # keys that also carry the optional WebSocket permission stream.
+        stream_mode=StreamMode.NUDGE,
     ),
     # ---- venue-hyperliquid ----
     "hyperliquid": VenueProfile(
@@ -197,6 +201,9 @@ PROFILES: dict[str, VenueProfile] = {
         rate_budgets=(hyperliquid.RATE_BUDGET,),
         paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
         asset_classes=("crypto",),  # wave2
+        # P7: `userFills` frames are the REST fill objects, ingested directly.
+        stream_mode=StreamMode.FILLS,
+        stream_users_per_ip=hyperliquid.WS_USERS_PER_IP,
     ),
     # ---- venue-coinbase ----
     "coinbase": VenueProfile(
@@ -240,6 +247,8 @@ PROFILES: dict[str, VenueProfile] = {
         ),
         paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
         asset_classes=("crypto",),  # wave2
+        # P7: the `user` channel reports orders, not fills: it queues a sync.
+        stream_mode=StreamMode.NUDGE,
     ),
     # ---- venue-binanceus ----
     "binanceus": VenueProfile(
@@ -497,6 +506,12 @@ def get_profile(venue: str) -> VenueProfile:
         return PROFILES[venue]
     except KeyError:
         raise ValueError(f"Unsupported venue: {venue!r}") from None
+
+
+def streaming_venues() -> dict[str, VenueProfile]:
+    """P7: venues whose connectors offer a private stream (stream.py opens it
+    through build_connector(...).stream_source())."""
+    return {venue: p for venue, p in PROFILES.items() if p.stream_mode is not None}
 
 
 def _build_kalshi(venue_env: str, key_id: str, secret: str | None) -> VenueConnector:

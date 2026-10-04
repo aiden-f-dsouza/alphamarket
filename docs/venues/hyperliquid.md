@@ -179,6 +179,26 @@ Budget per sync of one account: fills 20 + up to 100, funding 20 + up to
   `entry_price`; unified-account and portfolio-margin users use spot totals
   only (the docs say perp dex states are not meaningful for them).
 
+## Streaming (P7)
+
+`HyperliquidFillStream`: public websocket `wss://api.hyperliquid.xyz/ws`,
+subscription `{"type":"userFills","user":<address>}`, no credential. Mode
+FILLS: each `data.fills` element is the same object REST `userFillsByTime`
+returns (docs `WsFill`), normalized by the same `to_fill` and stored once
+whichever side sees it first (`tid` is the id). The first frame is a
+snapshot of recent fills (`isSnapshot: true`), which closes any gap a
+reconnect left; duplicates are skipped. The core pings every 30 s (the
+server drops a client silent for 60 s). The envelope and the fill keys were
+checked with a one-off public probe on 2026-10-04 (snapshot of 30 fills,
+keys identical to the REST rows).
+
+**10 unique users per IP** across websocket user subscriptions (docs "Rate
+limits and user limits"): `VenueProfile.stream_users_per_ip = 10`, enforced
+by slot leases per `EGRESS_IP`, most-followed creators (active paper
+allocations) first; everyone else is polled (docs/worker.md "Streaming").
+[VERIFY] the exact error text when the cap is hit (the parser treats any
+error frame mentioning "users" as the cap and backs off for the cool-off).
+
 ## Known gaps
 
 - Only the latest 10,000 fills are verifiable individually.

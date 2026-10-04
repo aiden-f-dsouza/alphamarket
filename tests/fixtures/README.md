@@ -40,3 +40,6 @@ no per-fill id (several fills share a `transactionHash`), unknown markets and
 profiles return 404, and the unfiltered feed reports `outcomeIndex: 999`.
 
 All connector mappings are verified against real payloads.
+
+`streams/` -- websocket frames for the P7 stream process (Hyperliquid,
+Kraken, Coinbase); provenance per file in `streams/README.md`.

@@ -45,6 +45,7 @@ Postgres is the only queue (decision E3: no Redis). Enqueueing is idempotent
 | `key_rotate` | global | Re-encrypt credentials under a new data key | P3 |
 | `scope_recheck` | account | Re-prove a credential is read-only | P3 |
 | `aggregator_delete_user` | account (released) | Retry a failed SnapTrade `deleteUser` for an account that is already disconnected or suspended (below) | worker.py (wave 2) |
+| `lease` | none (key names the holding) | Not work: a coordination lease of the stream process ("Streaming", below). No handler, so no worker claims it; `venue_account_id` stays NULL so it never blocks the account's jobs | stream.py (P7) |
 
 Another module adds a handler with
 `jobs.register_handler(JobKind.X, fn)` (or as a decorator). `fn(ctx)` gets a
@@ -76,6 +77,14 @@ key, and enqueue is `INSERT ... ON CONFLICT DO NOTHING`, so two ticking
 processes cannot queue the same account's sync twice. Nightly jobs use dated
 keys (`reconcile:<id>:<date>`, `stats:<date>`) with `once=True`, so they run
 once per night however many processes tick.
+
+`jobs.enqueue_fresh` (P7) is for callers that just committed new input the
+job must see. Plain `enqueue` also coalesces into a RUNNING job, which may
+have read its input before the caller's commit; `enqueue_fresh` coalesces
+only into a PENDING one, and queues a follow-up under `<key>:next` when the
+default key is running (one running job per account means the follow-up
+starts after it). The stream process and `sync`'s own `signals` hand-off use
+it.
 
 ## Sync scheduling and jitter
 
@@ -376,3 +385,101 @@ each category on its own:
 
 It returns the count per category, which is logged. It never touches an
 append-only table.
+
+## Streaming (P7, optional third process)
+
+```
+uv run python -m alphamarket.stream
+```
+
+Polling every `INGEST_INTERVAL_SECONDS` means a paper copy lags its creator
+by minutes. The stream process (`src/alphamarket/stream.py`) holds a private
+websocket per creator **with at least one active paper allocation** on a
+venue that can stream, so the fill is imported within seconds and the copy
+lag (`signals.observed_at - filled_at`, where `observed_at` is the import
+time) drops with it. The poller stays the source of truth: a stream only
+shortens lag, and a dropped or late stream changes nothing else. Not running
+the process at all is a supported configuration.
+
+| Venue | Channel | Mode | Status |
+|---|---|---|---|
+| Hyperliquid | public WS `userFills` (address only, no credential) | `fills`: the frames are the REST fill objects, ingested directly | on |
+| Kraken | WS v2 private `executions` (token from `GetWebSocketsToken`) | `nudge`: a trade queues the account's `sync` | only for keys that also carry the optional "WebSocket interface" permission; others are polled (docs/venues/kraken.md) |
+| Coinbase | Advanced Trade `user` (+ `heartbeats`) | `nudge`: an order whose filled quantity rose queues a `sync` | built; [VERIFY] on a real View key |
+| Alpaca | `trade_updates` | — | stub: [VERIFY] whether it works on a no-trading-scope OAuth grant (`AlpacaConnector.stream_source`) |
+
+**Modes.** `VenueProfile.stream_mode` says how a venue's frames reach the
+ledger. `fills`: the frame carries the same payload the poller normalizes
+(same venue ids, same legs), so it goes through `ingest.ingest_asset_fills`
+and a fill seen by both is stored once. A fill already stored is skipped
+without the exact-duplicate comparison, so only the poller can ever
+quarantine an account over a differing copy. `nudge`: the frame only says
+"this account traded" (Kraken's legs need its Ledgers rows, Coinbase reports
+orders, not fills), so the account's `sync` is queued at once at copy-lag
+priority and REST ingests the fill. After every reconnect a `nudge` venue
+queues one catch-up sync for the gap; Hyperliquid's subscription snapshot
+covers its own gap.
+
+**What happens after a fill.** New streamed fills are committed, then the
+account's `signals` job is *enqueued* (`jobs.enqueue_fresh`, never run in
+the stream process): a burst coalesces into one pending job, and a fill that
+lands while a `signals` job is running gets a follow-up. The worker's claim
+loop picks it up within `WORKER_POLL_SECONDS` at priority 10, and `signals`
+queues `mirror` as usual. A streamed fill that arrives while the poller is
+syncing the same account becomes a follow-up `sync` instead of racing the
+poller's insert.
+
+**Watermarks.** The stream never writes `account_schedules.resume_cursors`.
+`fills` accounts are streamed only once the poller has stored an asset-fills
+resume cursor and the backfill is done, because without a cursor the poller
+would resume from the newest stored fill, which a streamed fill could move
+past fills the poller has not fetched yet.
+
+**Leases.** Each streamed account is a lease row in `jobs` (kind `lease`,
+key `stream:account:<id>`), taken with `INSERT ... ON CONFLICT DO NOTHING`
+on the active-dedupe index and renewed every `STREAM_REFRESH_SECONDS`. Any
+number of stream processes can run: an account is subscribed by at most one,
+and a dead process's accounts free up after `STREAM_LEASE_SECONDS` (the
+worker's reaper may turn the expired row back to `pending`; any stream
+process takes it over). A clean shutdown releases its leases at once. No
+migration: the lease reuses the job table's index and lease columns.
+
+**Hyperliquid's 10-user cap.** Hyperliquid allows at most **10 unique users
+per IP** across websocket user subscriptions (docs "Rate limits and user
+limits"). `VenueProfile.stream_users_per_ip = 10`, enforced with one slot
+lease per IP (`stream:slot:hyperliquid:<EGRESS_IP>:<0..9>`) on top of the
+account lease, so every stream process behind one `EGRESS_IP` shares the 10.
+Creators are taken most-followed first (active allocations, then follows);
+when a better-ranked creator is left without a slot, the process holding the
+worst-ranked one gives its slot up at the next refresh and the better one
+takes it. Every other Hyperliquid creator is polled as before. More than 10
+needs another egress IP (a second region with its own `EGRESS_IP`) or a data
+provider; see implementation_plan.md 2.3.
+
+**Reconnects and limits.** A dropped connection reconnects with full-jitter
+exponential backoff (`STREAM_BACKOFF_BASE_SECONDS` x 2^n, at most
+`STREAM_BACKOFF_CAP_SECONDS`), reset after a session that received frames.
+While a venue's circuit is open (venue_limits) the stream waits it out. REST
+calls a stream makes (a Kraken websocket token, Hyperliquid metadata) spend
+the same outbound buckets as the worker; a frame that cannot be normalized
+right now (out of budget, an unknown coin) becomes a nudge, never a dropped
+fill. A connection with no frame for the source's idle timeout is closed and
+reopened; application pings go out every 30 s (Hyperliquid drops a silent
+client after 60 s). A venue that refuses the account (Kraken key without the
+WebSocket permission, an auth error) is left to the poller for
+`STREAM_UNAVAILABLE_COOLOFF_SECONDS`.
+
+**Secrets.** The credential is decrypted through `credentials.py` on every
+(re)connect (audited, purpose `stream`), never stored by the stream. Frames
+sent or received are never logged (a subscribe frame may hold a token), the
+`websockets` logger is held at INFO, and every error string goes through
+`redaction.redact`.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `STREAM_REFRESH_SECONDS` | 30 | re-read who to stream, renew leases |
+| `STREAM_LEASE_SECONDS` | 120 | a dead stream process's accounts free up after this |
+| `STREAM_MAX_ACCOUNTS` | 200 | websockets one stream process holds at most |
+| `STREAM_BACKOFF_BASE_SECONDS` / `_CAP_SECONDS` | 1 / 120 | reconnect backoff (full jitter) |
+| `STREAM_UNAVAILABLE_COOLOFF_SECONDS` | 21600 | retry delay for an account the venue will not stream |
+| `EGRESS_IP` | `default` | also names the Hyperliquid slot pool: set it per public IP |

@@ -1,0 +1,86 @@
+{
+ "_provenance": "Docs examples, reconstructed from docs.kraken.com/api/docs/websocket-v2/executions and the v2 heartbeat/status/ping pages (checked 2026-10-04). Not recorded from a real key (none exists yet); numeric fields are printed as the docs print them (JSON numbers). The ids are the docs' example ids.",
+ "subscribe_ack": {
+  "method": "subscribe",
+  "result": {"channel": "executions", "maxratecount": 180, "snapshot": false, "warnings": []},
+  "success": true,
+  "time_in": "2023-09-22T10:33:05.664437Z",
+  "time_out": "2023-09-22T10:33:05.664582Z",
+  "req_id": 1
+ },
+ "subscribe_denied": {
+  "method": "subscribe",
+  "error": "EGeneral:Permission denied",
+  "success": false,
+  "time_in": "2023-09-22T10:33:05.664437Z",
+  "time_out": "2023-09-22T10:33:05.664582Z",
+  "req_id": 1
+ },
+ "subscribe_bad_token": {
+  "method": "subscribe",
+  "error": "EAPI:Invalid token",
+  "success": false,
+  "time_in": "2023-09-22T10:33:05.664437Z",
+  "time_out": "2023-09-22T10:33:05.664582Z",
+  "req_id": 1
+ },
+ "status": {
+  "channel": "status",
+  "type": "update",
+  "data": [
+   {"version": "2.0.0", "system": "online", "api_version": "v2", "connection_id": 18148516537165470599}
+  ]
+ },
+ "heartbeat": {"channel": "heartbeat"},
+ "pong": {"method": "pong", "req_id": 2, "time_in": "2023-09-22T10:33:06.0Z", "time_out": "2023-09-22T10:33:06.0Z"},
+ "pending_new": {
+  "channel": "executions",
+  "type": "update",
+  "data": [
+   {
+    "order_id": "OK4GJX-KSTLS-7DZZO5",
+    "order_userref": 3,
+    "symbol": "BTC/USD",
+    "order_qty": 0.005,
+    "cum_cost": 0.0,
+    "time_in_force": "GTC",
+    "exec_type": "pending_new",
+    "side": "sell",
+    "order_type": "limit",
+    "limit_price_type": "static",
+    "limit_price": 26500.0,
+    "stop_price": 0.0,
+    "order_status": "pending_new",
+    "fee_usd_equiv": 0.0,
+    "fee_ccy_pref": "fciq",
+    "timestamp": "2023-09-22T10:33:05.709950Z"
+   }
+  ],
+  "sequence": 8
+ },
+ "trade": {
+  "channel": "executions",
+  "type": "update",
+  "data": [
+   {
+    "order_id": "OK4GJX-KSTLS-7DZZO5",
+    "exec_id": "TJE5WD-R2SAT-6X3ACL",
+    "exec_type": "trade",
+    "trade_id": 35498931,
+    "symbol": "BTC/USD",
+    "side": "sell",
+    "last_qty": 0.005,
+    "last_price": 26599.9,
+    "liquidity_ind": "t",
+    "cost": 132.9995,
+    "order_userref": 3,
+    "order_status": "filled",
+    "order_type": "limit",
+    "fee_usd_equiv": 0.35,
+    "fees": [{"asset": "USD", "qty": 0.35}],
+    "timestamp": "2023-09-22T10:33:05.709993Z"
+   }
+  ],
+  "sequence": 10
+ }
+}

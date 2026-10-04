@@ -25,6 +25,7 @@ dependencies = [
     "eth-account>=0.14.0",
     "pyjwt>=2.15.0",
     "defusedxml>=0.7.1",
+    "websockets>=15.0",
 ]
 
 [dependency-groups]

@@ -57,6 +57,7 @@ from alphamarket.jobs import (
     aware,
     enqueue,
     enqueue_due_syncs,
+    enqueue_fresh,
     get_schedule,
     register_handler,
     register_page_runner,
@@ -115,7 +116,11 @@ def handle_sync(ctx: JobContext) -> None:
         db.commit()
     else:
         _sync_binary(ctx)
-    enqueue(db, JobKind.SIGNALS, account_id=account.id, priority=sync_priority(db, account.id))
+    # enqueue_fresh, not enqueue: a signals job already RUNNING (queued by a
+    # streamed fill, P7) may have read the fills before this sync committed;
+    # it gets a follow-up instead of swallowing this sync's new fills.
+    priority = sync_priority(db, account.id)
+    enqueue_fresh(db, JobKind.SIGNALS, account_id=account.id, priority=priority)
     db.commit()
 
 

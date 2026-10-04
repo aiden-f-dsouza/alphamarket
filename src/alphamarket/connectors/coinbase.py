@@ -79,6 +79,10 @@ from alphamarket.connectors.base import (
     RateLimited,
     ReadOnlyEvidence,
     ReadOnlyProof,
+    StreamEvent,
+    StreamingSource,
+    StreamProtocolError,
+    StreamUnavailable,
 )
 from alphamarket.money import to_atoms
 
@@ -130,6 +134,16 @@ def build_jwt(key_name: str, private_key: Any, alg: str, method: str, path: str)
         "exp": now + 120,
         "uri": f"{method} {HOST}{path}",
     }
+    headers = {"kid": key_name, "nonce": secrets.token_hex(16)}
+    return pyjwt.encode(payload, private_key, algorithm=alg, headers=headers)
+
+
+def build_ws_jwt(key_name: str, private_key: Any, alg: str) -> str:
+    """The websocket JWT: the REST one without the `uri` claim (the SDK's
+    `jwt_generator.build_ws_jwt`). Valid 2 minutes, so one is made for every
+    subscribe frame; a subscription outlives it."""
+    now = int(time.time())
+    payload = {"sub": key_name, "iss": "cdp", "nbf": now, "exp": now + 120}
     headers = {"kid": key_name, "nonce": secrets.token_hex(16)}
     return pyjwt.encode(payload, private_key, algorithm=alg, headers=headers)
 
@@ -203,6 +217,10 @@ class CoinbaseConnector(AssetVenueConnector):
         self, path: str, endpoint: str, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         return self._request("GET", path, endpoint, params)
+
+    def stream_source(self) -> "CoinbaseUserStream":
+        """P7: the Advanced Trade `user` websocket channel (NUDGE mode)."""
+        return CoinbaseUserStream(self)
 
     # ---- read-only proof ----------------------------------------------------
 
@@ -585,3 +603,97 @@ class CoinbaseMarketData(AssetMarketData):
         if not price:
             return None
         return Quote(symbol=symbol, bid=None, ask=None, last=price, as_of=datetime.now(UTC))
+
+
+# ---- P7: private websocket (StreamMode.NUDGE) ------------------------------------
+
+USER_WS_URL = "wss://advanced-trade-ws-user.coinbase.com"
+# Orders the stream remembers (cumulative quantity per order id); finished
+# orders are forgotten at once, so this only bounds a flood of open ones.
+_MAX_TRACKED_ORDERS = 1000
+_DONE_STATUSES = frozenset({"FILLED", "CANCELLED", "EXPIRED", "FAILED"})
+
+
+class CoinbaseUserStream(StreamingSource):
+    """Advanced Trade websocket `user` channel, plus `heartbeats` to keep it
+    open (docs: channels close after 60-90 s without updates).
+
+    NUDGE mode: the channel reports ORDERS (cumulative_quantity, avg_price,
+    total_fees, status), not individual fills, so it cannot produce the
+    poller's fills (keyed by `trade_id`). A rise in an order's
+    cumulative_quantity queues the account's sync instead.
+
+    Auth: every subscribe frame carries a fresh CDP JWT (build_ws_jwt). A
+    View-only key is expected to be enough for `user` [VERIFY with a real
+    key], and which portfolio's orders it reports for a portfolio-scoped
+    key is undocumented [VERIFY]; extra orders only cost an extra sync.
+
+    Frames (docs examples, docs.cdp.coinbase.com advanced-trade websocket
+    channels; never seen on a real key):
+      {"channel":"user","client_id":"","timestamp":"..","sequence_num":0,
+       "events":[{"type":"snapshot"|"update","orders":[{"order_id":"..",
+       "cumulative_quantity":"0.001","status":"OPEN"|"FILLED"|..,...}]}]}
+      {"channel":"heartbeats",...}  {"channel":"subscriptions",...}
+      {"type":"error","message":".."}"""
+
+    venue = "coinbase"
+    ping_interval_seconds = 30.0  # protocol pings only (ping_frame is None)
+    idle_timeout_seconds = 30.0  # heartbeats arrive every second
+
+    def __init__(self, connector: "CoinbaseConnector", ws_url: str = USER_WS_URL) -> None:
+        self.connector = connector
+        self.ws_url = ws_url
+        self._filled: dict[str, Decimal] = {}
+
+    def __repr__(self) -> str:  # never show the key
+        return f"CoinbaseUserStream(url={self.ws_url!r})"
+
+    def url(self) -> str:
+        return self.ws_url
+
+    def subscribe_frames(self) -> list[str]:
+        c = self.connector
+        return [
+            json.dumps(
+                {
+                    "type": "subscribe",
+                    "channel": channel,
+                    "jwt": build_ws_jwt(c.key_name, c.private_key, c.alg),
+                }
+            )
+            for channel in ("heartbeats", "user")
+        ]
+
+    def parse(self, frame: str | bytes) -> list[StreamEvent]:
+        try:
+            msg = json.loads(frame)
+        except ValueError:
+            raise StreamProtocolError("coinbase: frame is not JSON") from None
+        if not isinstance(msg, dict):
+            return []
+        if msg.get("type") == "error":
+            text = str(msg.get("message") or msg.get("reason") or "error")[:200]
+            if "auth" in text.lower() or "permission" in text.lower():
+                raise StreamUnavailable(f"coinbase: user channel refused: {text}")
+            raise StreamProtocolError(f"coinbase: {text}")
+        if msg.get("channel") != "user":
+            return []  # heartbeats, subscriptions
+        nudge_ref: str | None = None
+        nudged = False
+        for event in msg.get("events") or []:
+            snapshot = event.get("type") == "snapshot"
+            for order in event.get("orders") or []:
+                order_id = str(order.get("order_id") or "")
+                try:
+                    qty = Decimal(str(order.get("cumulative_quantity") or "0"))
+                except ArithmeticError:
+                    continue
+                before = self._filled.get(order_id, Decimal(0))
+                if not snapshot and qty > before:
+                    nudged = True
+                    nudge_ref = nudge_ref or order_id or None
+                if str(order.get("status") or "").upper() in _DONE_STATUSES:
+                    self._filled.pop(order_id, None)
+                elif len(self._filled) < _MAX_TRACKED_ORDERS or order_id in self._filled:
+                    self._filled[order_id] = qty
+        return [StreamEvent(nudge=True, ref=nudge_ref)] if nudged else []

@@ -160,6 +160,21 @@ last activity id, `direction=asc`). No documented cutoff: `history_depth="all"`
 Non-trade rows are date-only (`date`), so they land at 23:59:59 UTC of that
 date. Fills use `transaction_time` (nanoseconds truncated to microseconds).
 
+## Streaming (P7): not enabled
+
+`trade_updates` on `wss://{paper-,}api.alpaca.markets/stream` would be a
+NUDGE source (its `fill`/`partial_fill` events carry an `execution_id`; the
+poller's FILL activities carry their own ids). It is a documented stub
+(`AlpacaConnector.stream_source` returns None) because of one open question:
+
+[VERIFY] with a registered OAuth app: does `trade_updates` accept a token
+granted with NO `trading` scope (Koine's read-only grant: authenticate with
+`{"action":"auth"}`/OAuth token, then `listen` to `trade_updates`), and does
+it then deliver the account's fills? "What a read-only grant exposes" above
+lists the stream, but that has not been confirmed on a real app. Until it
+is, Koine opens no trading-stream connection with a user's grant; Alpaca
+accounts are polled.
+
 ## Known gaps
 
 - **Unsupported activity** (above) is skipped, never guessed, and returned by

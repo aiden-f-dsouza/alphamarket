@@ -1,0 +1,120 @@
+{
+ "_provenance": "Envelopes: Hyperliquid docs examples (Websocket > Subscriptions; checked 2026-10-04). The fill objects inside are REAL rows of tests/fixtures/hyperliquid/userFillsByTime_2026-09-26.json (the docs define WsFill as the same object), so stream and poller normalize the same payload.",
+ "subscription_response": {
+  "channel": "subscriptionResponse",
+  "data": {
+   "method": "subscribe",
+   "subscription": {
+    "type": "userFills",
+    "user": "0x1a13afd75418fd72dfa80da33cbca489e231caec"
+   }
+  }
+ },
+ "snapshot": {
+  "channel": "userFills",
+  "data": {
+   "isSnapshot": true,
+   "user": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "fills": [
+    {
+     "coin": "LDO",
+     "px": "0.4618",
+     "sz": "67082.0",
+     "side": "B",
+     "time": 1790354884000,
+     "startPosition": "0.0",
+     "dir": "Open Long",
+     "closedPnl": "0.0",
+     "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+     "oid": 556628358234,
+     "crossed": false,
+     "fee": "4.64677",
+     "tid": 33406773875521,
+     "cloid": "0xd3bb60839cdc412a9e9261fa853b96f1",
+     "feeToken": "USDC",
+     "twapId": null
+    },
+    {
+     "coin": "XPL",
+     "px": "0.11013",
+     "sz": "73874.0",
+     "side": "A",
+     "time": 1790348521663,
+     "startPosition": "73874.0",
+     "dir": "Close Long",
+     "closedPnl": "-286.852742",
+     "hash": "0xff1dd9973eaa3981009704452ef9b80208ba007cd9ad5854a2e684e9fdae136c",
+     "oid": 556513484966,
+     "crossed": false,
+     "fee": "1.220361",
+     "tid": 229662172402780,
+     "feeToken": "USDC",
+     "twapId": null
+    }
+   ]
+  }
+ },
+ "update": {
+  "channel": "userFills",
+  "data": {
+   "user": "0x1a13afd75418fd72dfa80da33cbca489e231caec",
+   "fills": [
+    {
+     "coin": "LDO",
+     "px": "0.4618",
+     "sz": "3632.7",
+     "side": "B",
+     "time": 1790354884068,
+     "startPosition": "67082.0",
+     "dir": "Open Long",
+     "closedPnl": "0.0",
+     "hash": "0x3910389f362a17d23a8904453052970204570084d12d36a4dcd8e3f1f52df1bc",
+     "oid": 556628358234,
+     "crossed": false,
+     "fee": "0.251637",
+     "tid": 537099385287280,
+     "cloid": "0xd3bb60839cdc412a9e9261fa853b96f1",
+     "feeToken": "USDC",
+     "twapId": null
+    }
+   ]
+  }
+ },
+ "other_user": {
+  "channel": "userFills",
+  "data": {
+   "user": "0x178d245216beb3d7e3e64dce8494b1efe04a9266",
+   "fills": [
+    {
+     "coin": "LDO",
+     "px": "0.4618",
+     "sz": "59.2",
+     "side": "B",
+     "time": 1790354884068,
+     "startPosition": "70714.7",
+     "dir": "Open Long",
+     "closedPnl": "0.0",
+     "hash": "0xebe3af3a4fbb5a4ded5d0445305297020458001feabe791f8fac5a8d0ebf3438",
+     "oid": 556628358234,
+     "crossed": false,
+     "fee": "0.0041",
+     "tid": 918225841337663,
+     "cloid": "0xd3bb60839cdc412a9e9261fa853b96f1",
+     "feeToken": "USDC",
+     "twapId": null
+    }
+   ]
+  }
+ },
+ "pong": {
+  "channel": "pong"
+ },
+ "error": {
+  "channel": "error",
+  "data": "Invalid subscription {\"type\":\"userFills\"}"
+ },
+ "user_cap_error": {
+  "channel": "error",
+  "data": "Cannot track more than 10 total users."
+ }
+}
