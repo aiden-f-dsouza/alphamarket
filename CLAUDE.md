@@ -17,6 +17,7 @@ deliberately out of scope).
 - Kalshi smoke test: `uv run python scripts/kalshi_smoke.py` (needs .env + demo key)
 - Ingestion worker: `uv run python -m alphamarket.worker` (ticks enqueue jobs,
   a claim loop runs them; run several processes safely, see docs/worker.md)
+- Stream process (optional): `uv run python -m alphamarket.stream`
 - Prod preflight: `uv run python scripts/preflight.py` (must pass before real users)
 - Code graph: `graphify update .` (see "Code graph" below)
 
@@ -46,7 +47,12 @@ deliberately out of scope).
   `worker.py` (APScheduler ticks enqueue; JobRunner runs sync, backfill,
   reconcile, stats, prices, signals, mirror, scope_recheck, key_rotate,
   aggregator_delete_user: `aggregator_jobs.py` retries a failed SnapTrade
-  deleteUser),
+  deleteUser), `stream.py` (P7, optional `python -m alphamarket.stream`:
+  websockets for creators with active paper allocations; `StreamMode` fills
+  (Hyperliquid userFills via `ingest_asset_fills`) or nudge (Kraken
+  executions, Coinbase user: queue a sync); per-account leases are `jobs`
+  rows of kind `lease`, Hyperliquid 10-users/IP slots per `EGRESS_IP`;
+  signals queued via `jobs.enqueue_fresh`; the poller stays the truth),
   `auth.py` + `sessions.py` + `mfa.py` + `account.py` (DB sessions, TOTP +
   step-up, email verify/reset, sessions page), `ratelimit.py` (inbound limits,
   memory or Postgres), `email.py` (console or SMTP; `security_event` audits

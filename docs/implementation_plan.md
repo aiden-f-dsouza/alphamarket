@@ -552,7 +552,11 @@ Hyperliquid perp copy, funding and liquidation).
       / flags / finish / replace-key states, unsupported-activity flags
 - [x] Key rotation (`rotate.py`), OAuth refresh tick + job, email change,
       security-page audit trail, housekeeping
-- [ ] P7 streaming (after P6)
+- [x] P7 streaming (wave 3, 2026-10-04): `stream.py` process, leases in
+      `jobs` (no migration), Hyperliquid userFills in fills mode, Kraken WS v2
+      executions and Coinbase `user` in nudge mode (queue a sync), Hyperliquid
+      10-users/IP slot leases, `jobs.enqueue_fresh` coalescing, optional
+      `stream` group in fly.toml. Alpaca `trade_updates` is a stub
 
 Wave 2 follow-ups (known, not blocking):
 
@@ -583,8 +587,10 @@ Wave 2 follow-ups (known, not blocking):
       disconnect's transaction, 12 attempts then dead letter + audit;
       `snaptrade_picker_user` 30/10 min; `venue_limits.call_venue` fails
       fast with "busy" for web calls)
-- [ ] SnapTrade finish POST (prove_read_only, balances) still calls the
-      aggregator outside the outbound limiter
+- [x] SnapTrade finish POST (prove_read_only, balances) still calls the
+      aggregator outside the outbound limiter (wave 3: connect, rotate and
+      claim run their venue calls as one unit through `venues.web_venue_call`;
+      busy is a 503 + Retry-After before any write)
 - [x] Paper symbol changes are only logged (no flag for followers)
       (83e0bcc: notice on /portfolio for held stocks; converting the
       position is still not modelled)
@@ -602,6 +608,41 @@ judgement-call defaults stand (50 bps fallback penalty, broker equity
 tolerance max($1, 0.5%), one SnapTrade user per connection, 4-day close
 carry for equity venues, unpriced assets excluded from creator equity,
 7-day retry window for funding rows without a mark).
+
+Wave 3 (2026-10-04): demoable product. Four parallel workstreams on
+`wip/w3-<label>`, merged into `platform-v2`.
+
+- [x] Copy realigned with settled decisions: tails are paper only (invariant
+      8), pricing is flat subscriptions and flat creator royalties (no
+      performance or high-water-mark fees), scope is prediction markets,
+      crypto and US stocks. `tests/test_demo_pages.py` pins the old phrases
+      out. Layout fixes at 1280 px and 390 px
+- [x] Static demo (`demo.py`) gains Kraken, Coinbase, Hyperliquid perps,
+      Alpaca and IBKR sample strategies rendered through the asset page path
+- [x] P7 streaming and the SnapTrade limiter follow-up (above)
+
+Wave 3 follow-ups and open decisions:
+
+- [ ] Venue calls still outside the outbound limiter from web requests:
+      binary `POST /venues/{id}/sync` and reconcile (inline paged calls;
+      needs a busy-vs-ERROR decision), `oauth.callback` provider calls,
+      Hyperliquid `verify_claim` swallowing RateLimited (a 429 claims
+      "could not reach" instead of busy)
+- [ ] Kraken's profile charges its 1 token/s IP bucket on private calls, so a
+      Kraken connect or rotate sleeps ~5 s in the request and two quick
+      rotations 503. Revisit before the Kraken approval lands
+- [ ] Kraken streaming needs the key's optional "WebSocket interface"
+      permission: decide whether the connect/consent text asks for it
+      (product call); keys without it stay polled
+- [ ] P7 [VERIFY]: Kraken and Coinbase frame shapes (docs examples),
+      Kraken `exec_id` vs REST trade id and WS-to-Ledgers delay, Coinbase
+      View-only key on `user`, Alpaca `trade_updates` on a no-trading-scope
+      grant, Hyperliquid cap error text; measure p50 copy lag (< 30 s target)
+- [ ] Static binary sample pages: headline worst drawdown does not match the
+      drawn curve (sample numbers predate the chart generator)
+- [ ] `docs/security.md` "What is public" now matches the pages (recent
+      trades, holdings and reconciled balance in dollars are shown); confirm
+      that is the intended disclosure
 
 Needs the founder / outside the repo:
 
