@@ -32,10 +32,12 @@ from alphamarket.connectors.registry import PROFILES, get_profile
 from alphamarket.consent import STALE_DETAIL as STALE_CONSENT
 from alphamarket.consent import consent_text
 from alphamarket.db import get_db
+from alphamarket.follows import feed_items
 from alphamarket.marks import sigil, tag_color
 from alphamarket.models import (
     Allocation,
     EquitySnapshot,
+    Follow,
     Instrument,
     MirrorAssetFill,
     MirrorFill,
@@ -53,6 +55,7 @@ from alphamarket.public import (
     is_visible,
     list_visible,
     page_data,
+    publicly_visible,
     venues_in,
     verification_tier,
     visible_strategy_or_404,
@@ -89,6 +92,24 @@ def _demo_or_404() -> None:
         raise HTTPException(status_code=404)
 
 
+# ---- w3-seed: seeded demo database vs static sample rows ---------------------------
+# scripts/seed_demo.py runs synthetic venue data through the real pipeline and
+# marks its users is_demo (invariant 7). When such rows exist (and DEMO_MODE is
+# on), they replace the static `demo.py` padding on the marketplace, landing and
+# transparency pages, so nothing is listed twice. An empty database in
+# DEMO_MODE (the no-DB Vercel demo) keeps the static padding exactly as before.
+
+
+def _seeded(db: Session) -> bool:
+    """DEMO_MODE is on and the database holds seeded demo strategies."""
+    if not _demo():
+        return False
+    found = db.scalar(
+        select(Strategy.id).join(User, User.id == Strategy.user_id).where(User.is_demo).limit(1)
+    )
+    return found is not None
+
+
 def _render(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx.setdefault("settings", get_settings())
     ctx.setdefault("demo", False)
@@ -122,7 +143,7 @@ def _marketplace_rows(
     rows = list_visible(
         db, include_incubating=include_incubating, tag=tag, venue=venue, asset=asset
     )
-    if _demo():
+    if _demo() and not _seeded(db):  # w3-seed: seeded rows replace the static padding
         for r in demo.marketplace_rows():
             if venue and venue != r["venue"]:
                 continue
@@ -326,7 +347,13 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     user = _user(request, db)
     if user is None:
         return RedirectResponse("/login", status_code=303)
-    return _render(request, "dashboard.html", error=None, **_dashboard_ctx(db, user))
+    return _render(
+        request,
+        "dashboard.html",
+        error=None,
+        demo=user.is_demo,  # w3-seed: a seeded user's accounts are sample data
+        **_dashboard_ctx(db, user),
+    )
 
 
 def _connect_ctx(venue: str) -> dict:
@@ -465,7 +492,9 @@ def account_action_form(
     except Exception as exc:  # recorded on the account row by sync/reconcile
         error = f"{action} failed: {type(exc).__name__}"
     if error:
-        return _render(request, "dashboard.html", error=error, **_dashboard_ctx(db, user))
+        return _render(
+            request, "dashboard.html", error=error, demo=user.is_demo, **_dashboard_ctx(db, user)
+        )
     return RedirectResponse("/dashboard", status_code=303)
 
 
@@ -533,7 +562,12 @@ def strategy_page(request: Request, slug: str, db: Session = Depends(get_db)):
         )
     page = page_data(db, strategy)
     return _render(
-        request, "strategy.html", user=_user(request, db), page=page, charts=_charts(page["stats"])
+        request,
+        "strategy.html",
+        user=_user(request, db),
+        page=page,
+        charts=_charts(page["stats"]),
+        demo=page["sample_data"],  # w3-seed: a seeded record carries the sample banner
     )
 
 
@@ -766,7 +800,8 @@ def portfolio(request: Request, db: Session = Depends(get_db)):
             handles[v["strategy_slug"]] = owner.display_name if owner else ""
         p = portfolio_view(summary, handles)
         p["activity"] = _portfolio_activity(db, ids)
-        return _render(request, "portfolio.html", user=user, p=p, demo=False)
+        # w3-seed: a seeded demo investor's paper book is sample data (invariant 7).
+        return _render(request, "portfolio.html", user=user, p=p, demo=user.is_demo)
     _demo_or_404()
     return _render(request, "portfolio.html", user=None, p=demo.portfolio(), demo=True)
 
@@ -776,14 +811,106 @@ def creator_profile(request: Request, handle: str, db: Session = Depends(get_db)
     _demo_or_404()
     c = demo.creator(handle)
     if c is None:
-        raise HTTPException(status_code=404)
+        # w3-seed: a seeded creator has no sample profile; send the visitor to
+        # their public strategy page instead of a 404.
+        slug = _seeded_creator_slug(db, handle)
+        if slug is None:
+            raise HTTPException(status_code=404)
+        return RedirectResponse(f"/s/{slug}", status_code=303)
     return _render(request, "creator.html", user=_user(request, db), c=c, demo=True)
 
 
 @router.get("/feed", response_class=HTMLResponse)
 def feed(request: Request, db: Session = Depends(get_db)):
     _demo_or_404()
-    return _render(request, "feed.html", user=_user(request, db), f=demo.feed(), demo=True)
+    f = demo.feed()
+    user = _user(request, db)
+    if user is not None and _seeded(db):
+        # w3-seed: a logged-in visitor of a seeded demo sees the real signals
+        # of the strategies they follow or tail (follows.feed_items) as posts;
+        # rooms and chat stay the static community mock-up.
+        f = {**f, "posts": _feed_posts(db, user)}
+    return _render(request, "feed.html", user=user, f=f, demo=True)
+
+
+# ---- w3-seed: the seeded feed --------------------------------------------------------
+
+
+def _seeded_creator_slug(db: Session, handle: str) -> str | None:
+    """The first publicly visible strategy of the demo user named `handle`."""
+    for strategy in db.scalars(
+        select(Strategy)
+        .join(User, User.id == Strategy.user_id)
+        .where(User.is_demo, User.display_name == handle)
+        .order_by(Strategy.id)
+    ).all():
+        if publicly_visible(db, strategy, db.get(VenueAccount, strategy.venue_account_id)):
+            return strategy.slug
+    return None
+
+
+def _ago(at: str, now: datetime) -> str:
+    seconds = max(0, int((now - _utc(at)).total_seconds()))
+    if seconds < 3600:
+        return f"{max(1, seconds // 60)}m"
+    if seconds < 86_400:
+        return f"{seconds // 3600}h"
+    return "yesterday" if seconds < 2 * 86_400 else f"{seconds // 86_400}d"
+
+
+def _post_body(item: dict, strategy_name: str) -> str:
+    """One feed item in words, from the platform's own numbers only."""
+    if item["kind"] == "settlement":
+        paid = f"paid ${item['payout']:,.2f}" if item["payout"] else "settled at 0"
+        return (
+            f"{strategy_name}: {item['ticker']} resolved {item['result'].upper()}; "
+            f"held {item['count']:g} {item['side'].upper()}, {paid}."
+        )
+    share = item.get("stake_fraction")
+    size = f" ({share:.1%} of equity)" if share is not None else ""
+    if item.get("asset"):
+        price = item.get("price_str") or "—"
+        lag = item.get("copy_lag_seconds")
+        seen = f" Seen {_age(lag)} after the fill." if lag is not None else ""
+        return (
+            f"{strategy_name}: {item['action']} {item['qty']} {item['ticker']} at {price}"
+            f"{size}, {item['side']} position.{seen}"
+        )
+    cents = round(item["price"] * 100)
+    return (
+        f"{strategy_name}: {item['action']} {item['count']:g} {item['side'].upper()} "
+        f"on {item['ticker']} at {cents}¢{size}."
+    )
+
+
+def _feed_posts(db: Session, user: User, limit: int = 12) -> list[dict]:
+    ids = set(db.scalars(select(Follow.strategy_id).where(Follow.user_id == user.id)).all())
+    ids |= set(
+        db.scalars(select(Allocation.strategy_id).where(Allocation.user_id == user.id)).all()
+    )
+    strategies = db.scalars(select(Strategy).where(Strategy.id.in_(ids))).all() if ids else []
+    rows = {r["slug"]: r for r in list_visible(db, include_incubating=True)}
+    now = datetime.now(UTC)
+    posts = []
+    for item in feed_items(db, list(strategies), limit=limit):
+        row = rows.get(item["strategy_slug"])
+        context = (
+            f"{row['total_return'] * 100:+.1f}% · −{row['max_drawdown'] * 100:.1f}% DD verified"
+            if row is not None
+            else None
+        )
+        posts.append(
+            {
+                "handle": row["display_name"] if row else item["strategy_name"],
+                "when": _ago(item["at"], now),
+                "likes": 0,
+                "replies": 0,
+                "strategy": None,
+                "context": context,
+                "body": _post_body(item, item["strategy_name"]),
+            }
+        )
+    return posts
 
 
 # ---- invite ---------------------------------------------------------------------
@@ -842,8 +969,9 @@ def security(request: Request, db: Session = Depends(get_db)):
 
 def _transparency(db: Session) -> dict:
     """Platform-wide figures from every visible strategy with stats, plus the
-    count of quarantined/delisted records. Sample figures only in demo mode."""
-    if _demo():
+    count of quarantined/delisted records. Sample figures only in demo mode:
+    static ones on an empty database, else the seeded records' (w3-seed)."""
+    if _demo() and not _seeded(db):
         return demo.transparency()
     rows = list_visible(db, include_incubating=True)
     removed = db.scalar(
@@ -863,7 +991,7 @@ def _transparency(db: Session) -> dict:
         else 0
     )
     return {
-        "demo": False,
+        "demo": any(r.get("demo") for r in rows),
         "ever": len(rows) + n_removed,
         "losing": sum(1 for r in rows if r["total_return"] < 0),
         "median_return": median(r["total_return"] for r in rows) if rows else None,

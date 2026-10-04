@@ -55,6 +55,18 @@ def vault_problems(s) -> list[str]:
     return problems
 
 
+def demo_problems(conn) -> list[str]:
+    """Invariant 7 (w3-seed): a database holding demo users (scripts/
+    seed_demo.py) is a demo database; real users must never be pointed at it."""
+    try:
+        n = conn.execute(text("SELECT count(*) FROM users WHERE is_demo")).scalar()
+    except Exception as exc:  # noqa: BLE001
+        return [f"could not check for demo users ({type(exc).__name__}; is 0015 applied?)"]
+    if n:
+        return [f"{n} demo user(s) in the database (seeded sample data; use a clean database)"]
+    return []
+
+
 def security_problems(s) -> list[str]:
     """P3 account-security settings (p3-auth)."""
     problems: list[str] = []
@@ -105,6 +117,7 @@ def main() -> int:
                 missing = sorted(EXPECTED_APPEND_ONLY_TRIGGERS - installed)
                 if missing:
                     problems.append(f"append-only triggers missing: {', '.join(missing)}")
+                problems.extend(demo_problems(conn))
     except Exception as exc:  # noqa: BLE001
         problems.append(f"database unreachable: {type(exc).__name__}")
         head = None
