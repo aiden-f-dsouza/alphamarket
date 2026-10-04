@@ -38,7 +38,7 @@ Postgres is the only queue (decision E3: no Redis). Enqueueing is idempotent
 | `prices` | global | Binary: public quotes for every possibly-open ticker, per venue. Asset: `prices.refresh_asset_marks` (quotes and funding rates for instruments in open paper books) | worker.py |
 | `prices_daily` | venue | `prices.run_daily`: missing daily closes, perp margin tiers, corporate actions for held equities; CoinGecko fallback | worker.py (wave 2) |
 | `stats` | global | Strategy stats (asset venues: `analytics_v2`), incubation promotion, allocation valuations. Waits (up to 1 h) while any `reconcile` or `prices_daily` is still active | worker.py |
-| `housekeeping` | global | Prunes rate-limit counters, dead sessions and tokens, old asset quotes, finished jobs; abandons stale pending connects | worker.py (wave 2) |
+| `housekeeping` | global | Prunes rate-limit counters, dead sessions and tokens, old asset quotes, finished jobs; abandons stale pending connects; verifies a random sample of 50 paper book checkpoints against a full replay and drops any that disagree (the next `mirror` pass rebuilds them) | worker.py (wave 2) |
 | `signals` | account or global | Creator fills to signals; then queues `mirror` for that strategy | worker.py |
 | `mirror` | strategy or global | Paper copying: signals and settlements to allocations | worker.py |
 | `oauth_refresh` | account | Refresh an OAuth access token (`oauth_jobs.run`) | worker.py (wave 2) |

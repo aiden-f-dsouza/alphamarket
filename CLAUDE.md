@@ -19,6 +19,8 @@ deliberately out of scope).
   a claim loop runs them; run several processes safely, see docs/worker.md)
 - Stream process (optional): `uv run python -m alphamarket.stream`
 - Prod preflight: `uv run python scripts/preflight.py` (must pass before real users)
+- Seeded demo: `scripts/seed_demo.py` into a dedicated `*_demo` database (docs/demo.md)
+- Paper engine bench: `uv run python scripts/bench_mirror.py [-n N -m MONTHS -k SIGNALS]`
 - Code graph: `graphify update .` (see "Code graph" below)
 
 ## Layout
@@ -73,7 +75,10 @@ deliberately out of scope).
   `follows.py` (follow/unfollow + `/api/feed`; the one signal renderer),
   `mirror.py` (binary paper mirroring: sizing, fee model, settlement; asset
   allocations dispatch to `paper.py`: sizing, fill price, fees over the
-  `paper_book.py` follower ledger, and `paper_lifecycle.py`: funding,
+  `paper_book.py` follower ledger (`book_state` = `load_book` from a
+  `paper_book_checkpoints` cache plus newer rows via `valuation.LedgerFold`;
+  written only at the end of `process_asset_allocation`, count-verified on
+  use, sampled nightly by housekeeping; the cache is never the truth), and `paper_lifecycle.py`: funding,
   liquidation, splits, dividends), `execution.py` (Executor; paper only,
   live raises), `portfolio.py` (allocation valuation, drawdown stop,
   snapshots), `tails.py` (allocations API + `/api/portfolio`),
@@ -121,7 +126,8 @@ deliberately out of scope).
 - `alembic/` — migrations, hand-written for ledger tables (0009 ledger v2,
   0010 jobs, 0011 auth, 0012 vault/audit, 0013 wave 2: signals v2, paper
   asset book, market data, consent, activity flags; 0014 market data
-  coverage)
+  coverage, 0015 `users.is_demo`, 0016 paper book checkpoints (a cache,
+  not append-only) and mirror ledger indexes)
 - `docs/methodology.md` — public methodology page source; every ledger/stats
   formula lands here alongside its unit test. `docs/security.md` (served at
   /security), `docs/launch.md` (M5 outreach), `docs/deploy.md` + `Dockerfile`

@@ -375,7 +375,9 @@ def _resume(
         )
         return None
     if (entries, fills) != (cp.entry_count, cp.fill_count):
-        logger.warning(
+        # INFO: the "run now" path has no row lock, so a row committing below
+        # the checkpoint's ids is a known, self-healing race (rebuilt next pass).
+        logger.info(
             "allocation %s: book checkpoint does not match the ledger (entries %d vs %d, "
             "perp fills %d vs %d at or below its ids); full replay",
             allocation.id,
@@ -513,6 +515,10 @@ def save_checkpoint(db: Session, allocation: Allocation) -> bool:
         return False
     if folded.entry_count == 0 and folded.fill_count == 0:
         return False
+    # Flush the pass's own pending rows first, outside the savepoint: an error
+    # in them must fail the pass, never be taken for a lost checkpoint race
+    # (the savepoint rollback would silently drop them).
+    db.flush()
     values = {
         "through_entry_id": folded.through_entry_id,
         "entry_count": folded.entry_count,

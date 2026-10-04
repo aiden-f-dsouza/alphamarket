@@ -21,7 +21,7 @@
 
 import logging
 import random
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from fractions import Fraction
 
 import pytest
@@ -340,7 +340,7 @@ def test_every_broken_checkpoint_falls_back_to_a_full_replay(db, caplog):
     cp.through_entry_id = newest
     db.commit()
     caplog.clear()
-    with caplog.at_level(logging.WARNING, logger="alphamarket.paper_book"):
+    with caplog.at_level(logging.INFO, logger="alphamarket.paper_book"):
         _assert_equal_to_replay(db, alloc, rng, t)
     assert "does not match the ledger" in caplog.text
     assert paper_book.verify_checkpoint(db, alloc) is False
@@ -927,6 +927,24 @@ def test_account_inputs_valued_from_answers_the_sweep_exactly(db, seed):
     acct, _, _ = _creator(db, rng)
     fills = db.scalars(select(AssetFill).order_by(AssetFill.filled_at, AssetFill.id)).all()
     first = aware(fills[len(fills) // 2].filled_at)
+    # Pin the cut: a deposit at exactly 00:00 UTC of the first pending day is
+    # kept as its own leg (a flow on that day), one a microsecond earlier is
+    # folded; counting either twice or dropping either changes equity_before.
+    midnight = datetime.combine(first.date(), time(0), UTC)
+    for ref, at in (("cut-at", midnight), ("cut-before", midnight - timedelta(microseconds=1))):
+        db.add(
+            LedgerEntry(
+                venue_account_id=acct.id,
+                asset="USDC",
+                delta_atoms=(7 if ref == "cut-at" else 11) * M,
+                decimals=6,
+                kind=LegKind.DEPOSIT,
+                venue_ref=ref,
+                group_ref=ref,
+                occurred_at=at,
+            )
+        )
+    db.commit()
     full = valuation_db.account_inputs(db, acct)
     folded = valuation_db.account_inputs(db, acct, valued_from=first)
     assert len(folded.legs) < len(full.legs) - 100
@@ -936,7 +954,7 @@ def test_account_inputs_valued_from_answers_the_sweep_exactly(db, seed):
     a = LedgerSweep(full.anchor, full.legs, prices_in, full.perp_fills)
     b = LedgerSweep(folded.anchor, folded.legs, prices_in, folded.perp_fills)
     instants = {aware(f.filled_at) for f in fills if aware(f.filled_at) >= first}
-    instants |= {first, first + timedelta(days=2, hours=5)}
+    instants |= {first, first + timedelta(days=2, hours=5), midnight, midnight + timedelta(hours=1)}
     for t in sorted(instants):
         assert a.holdings_before(t) == b.holdings_before(t), t
         assert a.perp_positions_before(t) == b.perp_positions_before(t), t

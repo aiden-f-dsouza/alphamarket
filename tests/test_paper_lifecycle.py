@@ -393,6 +393,17 @@ def test_funding_mark_falls_back_to_the_quote_then_the_close(db, hl):
     assert _cash(db, alloc) == to_micros("997.0001") - 589_882 - 579_884
 
 
+def test_funding_at_the_exact_fill_instant_is_owed(db, hl):
+    """Positions at a funding row include a fill at the same instant
+    (perp_positions_at is inclusive): the 12:00:00 buy pays the 12:00:00
+    funding. -0.09998 x 60,000 x 0.0001 = -0.59988."""
+    alloc, perp = hl
+    _funding(db, perp, at(D), "0.0001", "60000")
+    assert apply_lifecycle(db, alloc, at(D, 12, 30)) == 1
+    db.commit()
+    assert _cash(db, alloc) == to_micros("997.0001") - 599_880
+
+
 def test_funding_without_any_mark_is_skipped_not_guessed(db, hl):
     alloc, perp = hl
     _funding(db, perp, at(D, 13), "0.0001")

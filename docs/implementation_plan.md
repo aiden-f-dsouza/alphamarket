@@ -632,6 +632,13 @@ Wave 3 (2026-10-04): demoable product. Four parallel workstreams on
       tail is not a gain); instruments are labelled by canonical codes
       (`public.instrument_label`: BTC/USD, BTC-PERP)
 
+- [x] Paper engine performance (w3-perf, reviewed by Fable: no must-fix):
+      follower book checkpoints (0016, a verified cache), bounded lifecycle
+      and signals passes. 20 allocations x 6 months of hourly funding: warm
+      MIRROR pass 3.7 s -> 0.46 s, flat in history. Review follow-ups landed:
+      boundary tests (funding at a fill's instant, a leg at the midnight cut),
+      checkpoint savepoint flushes the pass's rows first
+
 Wave 3 follow-ups and open decisions:
 
 - [ ] Venue calls still outside the outbound limiter from web requests:
@@ -651,6 +658,15 @@ Wave 3 follow-ups and open decisions:
       grant, Hyperliquid cap error text; measure p50 copy lag (< 30 s target)
 - [ ] Static binary sample pages: headline worst drawdown does not match the
       drawn curve (sample numbers predate the chart generator)
+- [ ] Drawdown stop on crypto/stock paper tails stops copying but keeps the
+      positions open, so a stopped tail keeps moving with the market (the
+      seeded investor's stopped alt-rotation tail shows +41.7%). Proposed:
+      close every position at the bid at the stop, after fees (Aiden to
+      confirm; prediction markets keep running to settlement)
+- [ ] Still linear per pass: `prices._open_instruments` (global sum each
+      prices tick) and `analytics_v2`'s full `account_inputs` (daily series)
+- [ ] `single_asset_concentration` flags a book that is mostly a broad-market
+      ETF (VTI); consider treating index funds as diversified
 - [ ] `docs/security.md` "What is public" now matches the pages (recent
       trades, holdings and reconciled balance in dollars are shown); confirm
       that is the intended disclosure
