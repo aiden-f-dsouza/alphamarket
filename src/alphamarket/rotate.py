@@ -55,6 +55,7 @@ from alphamarket.models import (
 )
 from alphamarket.ratelimit import rate_limit
 from alphamarket.scopecheck import apply_evidence, evidence_json
+from alphamarket.venue_limits import VenueLimiter, get_web_limiter
 from alphamarket.venues import ensure_venue_open, verify_new_credential
 
 logger = logging.getLogger(__name__)
@@ -148,10 +149,18 @@ def _previous_account_ref(db: Session, account: VenueAccount) -> str | None:
 
 
 def rotate_credential(
-    db: Session, user: User, account_id: int, payload: RotateIn, *, now: datetime | None = None
+    db: Session,
+    user: User,
+    account_id: int,
+    payload: RotateIn,
+    *,
+    now: datetime | None = None,
+    limiter: VenueLimiter | None = None,
 ) -> dict:
     """Verify, store and activate a replacement key. Raises HTTPException with
-    user-safe detail; nothing about the account changes on any refusal."""
+    user-safe detail; nothing about the account changes on any refusal. Web
+    callers pass the outbound `limiter`: the venue check spends its buckets and
+    a busy venue is a 503 (Retry-After), with the old key still in place."""
     account = owned_account(db, account_id, user)
     block = rotate_block(account)
     if block is not None:
@@ -175,6 +184,7 @@ def rotate_credential(
         reject_target=("venue_account", account.id),
         reject_details={"trigger": "rotate", "venue": account.venue},
         writable_detail=WRITABLE_KEY,
+        limiter=limiter,
     )
 
     previous_status = str(account.status)
@@ -277,10 +287,11 @@ def _backfill_done(db: Session, account: VenueAccount) -> bool:
 def rotate(
     account_id: int,
     payload: RotateIn,
+    request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
-    return rotate_credential(db, user, account_id, payload)
+    return rotate_credential(db, user, account_id, payload, limiter=get_web_limiter(request.app))
 
 
 # ---- HTML ---------------------------------------------------------------------------
@@ -345,10 +356,13 @@ def rotate_form(
         if not 1 <= len(key_id) <= 120:
             raise HTTPException(status_code=422, detail=f"Enter the {profile_label(account)}.")
         payload = RotateIn(key_id=key_id, secret=secret or None)
-        rotate_credential(db, user, account_id, payload)
+        rotate_credential(db, user, account_id, payload, limiter=get_web_limiter(request.app))
     except HTTPException as exc:
         db.rollback()
         account = owned_account(db, account_id, user)
-        code = exc.status_code if exc.status_code in (403, 409, 422, 429) else 400
-        return _page(request, db, user, account, error=str(exc.detail), status_code=code)
+        code = exc.status_code if exc.status_code in (403, 409, 422, 429, 503) else 400
+        resp = _page(request, db, user, account, error=str(exc.detail), status_code=code)
+        if code == 503 and exc.headers:  # "busy": say when to come back
+            resp.headers["Retry-After"] = exc.headers.get("Retry-After", "60")
+        return resp
     return RedirectResponse("/dashboard", status_code=303)

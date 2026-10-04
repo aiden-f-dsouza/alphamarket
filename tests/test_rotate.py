@@ -208,6 +208,35 @@ def test_rotating_an_active_account_erases_the_old_key(client, member, session_f
 
 
 @respx.mock
+def test_rotate_through_a_busy_limiter_is_503_and_changes_nothing(client, member, session_factory):
+    from alphamarket.connectors.base import RateBudget, RateScope
+    from alphamarket.venue_limits import MemoryBuckets, VenueLimiter
+
+    account_id = _seed_kraken(session_factory, member["id"], status=VenueAccountStatus.ACTIVE)
+    fake = FakeKraken()
+    _mock(fake)
+    drained = VenueLimiter(
+        MemoryBuckets(),
+        budgets_for=lambda venue: (RateBudget(RateScope.IP, 1, 1),),  # 1 token a minute
+    )
+    drained.acquire("kraken", None, "Balance")
+    client.app.state.venue_limiter = drained
+
+    resp = _rotate(client, account_id)
+    assert resp.status_code == 503 and "Kraken is busy" in resp.json()["detail"]
+    assert int(resp.headers["Retry-After"]) >= 1
+    assert fake.methods == []  # nothing was sent to Kraken
+    with session_factory() as db:
+        (old,) = db.scalars(select(VenueCredential)).all()  # no new credential
+        assert old.revoked_at is None and old.ciphertext is not None
+        assert _audit(db, "credential.rotate", account_id) == []
+
+    # The same request goes through once the limiter has room.
+    client.app.state.venue_limiter = VenueLimiter(MemoryBuckets(), budgets_for=lambda venue: ())
+    assert _rotate(client, account_id).status_code == 200
+
+
+@respx.mock
 def test_writable_key_is_refused_and_the_account_stays_suspended(
     client, member, session_factory, outbox
 ):

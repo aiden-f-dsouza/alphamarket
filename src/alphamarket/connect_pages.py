@@ -120,11 +120,16 @@ def claim_submit(
     account = _owned_account(db, account_id, user)
     try:
         ratelimit.check(request, "venues_user", user.id)
-        claim_account(db, user, account.id, signature=signature)
+        claim_account(
+            db, user, account.id, signature=signature, limiter=get_web_limiter(request.app)
+        )
     except HTTPException as exc:
         if exc.status_code == 429:
             raise
-        return _claim_page(request, user, account, str(exc.detail), status=exc.status_code)
+        resp = _claim_page(request, user, account, str(exc.detail), status=exc.status_code)
+        if exc.status_code == 503 and exc.headers:  # busy: the account is still unclaimed
+            resp.headers["Retry-After"] = exc.headers.get("Retry-After", "60")
+        return resp
     return RedirectResponse("/dashboard", status_code=303)
 
 
@@ -336,5 +341,11 @@ def aggregator_finish(
         db.rollback()
         if account.status != VenueAccountStatus.PENDING:  # finished by a concurrent submit
             return RedirectResponse("/dashboard", status_code=303)
-        return _picker_page(request, db, user, account, str(exc.detail), status=exc.status_code)
+        resp = _picker_page(request, db, user, account, str(exc.detail), status=exc.status_code)
+        if exc.status_code == 503 and exc.headers:
+            # SnapTrade is busy (the outbound limiter refused the finish's calls, or
+            # it answered 429): nothing was written, the account is still PENDING
+            # and this page, re-rendered with the picker, is the retry.
+            resp.headers["Retry-After"] = exc.headers.get("Retry-After", "60")
+        return resp
     return RedirectResponse("/dashboard", status_code=303)
