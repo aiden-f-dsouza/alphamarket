@@ -620,6 +620,17 @@ Wave 3 (2026-10-04): demoable product. Four parallel workstreams on
 - [x] Static demo (`demo.py`) gains Kraken, Coinbase, Hyperliquid perps,
       Alpaca and IBKR sample strategies rendered through the asset page path
 - [x] P7 streaming and the SnapTrade limiter follow-up (above)
+- [x] Seeded demo (`scripts/seed_demo.py`, docs/demo.md): synthetic venues
+      behind the registry seam, everything after the connector is the real
+      pipeline; `users.is_demo` (0015) hides seeded rows outside DEMO_MODE and
+      preflight refuses them
+- [x] Paper tails from the web pages: tail card and `/s/{slug}/tail` form for
+      real strategies (`tail_terms.py` shared with the samples), stop from
+      /portfolio, follow/unfollow forms, login `next` (`pages.safe_next`),
+      number formatting (`numfmt.py`)
+- [x] Portfolio chart is paper P&L and its drawdown is flow-adjusted (a new
+      tail is not a gain); instruments are labelled by canonical codes
+      (`public.instrument_label`: BTC/USD, BTC-PERP)
 
 Wave 3 follow-ups and open decisions:
 
