@@ -139,7 +139,7 @@
       <div class="kv" style="font-size:14px">
         <div><span>Gross exposure</span><span>{{ st.exposure.gross_label }}</span></div>
         <div><span>Largest exposure</span><span>{{ st.exposure.top_asset }} · {{ "%.0f"|format((st.exposure.top_share or 0) * 100) }}%</span></div>
-        {% if st.exposure.perp_leverage is not none %}<div><span>Perp leverage (gross)</span><span>{{ "%.2f"|format(st.exposure.perp_leverage) }}×</span></div>{% endif %}
+        {% if st.exposure.perp_leverage %}<div><span>Perp leverage (gross)</span><span>{{ "%.2f"|format(st.exposure.perp_leverage) }}×</span></div>{% endif %}
         {% for e in st.exposure.by_underlying %}<div><span class="muted">{{ e.asset }}</span><span class="muted">{{ "%.0f"|format(e.share * 100) }}% · {{ e.label }}</span></div>{% endfor %}
       </div>
       {% endif %}
@@ -194,7 +194,7 @@
         <div><span>Sharpe (annualised)</span><span>{{ m.num(st.sharpe) }}</span></div>
         <div><span>Sortino</span><span>{{ m.num(st.sortino) }}</span></div>
         <div><span>Largest exposure</span><span>{% if st.exposure and st.exposure.top_asset %}{{ st.exposure.top_asset }} · {{ "%.0f"|format((st.exposure.top_share or 0) * 100) }}%{% else %}—{% endif %}</span></div>
-        <div><span>Perp leverage (gross)</span><span>{% if st.exposure and st.exposure.perp_leverage is not none %}{{ "%.2f"|format(st.exposure.perp_leverage) }}×{% else %}—{% endif %}</span></div>
+        {% if st.exposure and st.exposure.perp_leverage %}<div><span>Perp leverage (gross)</span><span>{{ "%.2f"|format(st.exposure.perp_leverage) }}×</span></div>{% endif %}
         <div><span>Open positions</span><span>{{ st.n_open_positions if st.n_open_positions is not none else "—" }}</span></div>
         <div><span>Fills</span><span>{{ st.n_fills }}</span></div>
         {% else %}

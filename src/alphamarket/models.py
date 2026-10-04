@@ -516,6 +516,18 @@ class Instrument(Base):
     margin_tiers: Mapped[list | None] = mapped_column(JSON, default=None)
     margin_tiers_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
+    @property
+    def label(self) -> str:
+        """How the instrument reads on a page: spot pairs as BASE/QUOTE in
+        canonical codes (Kraken's XXBTZUSD is BTC/USD), perps by their position
+        code (BTC-PERP), stocks and contracts by their symbol."""
+        if self.type == "spot":
+            return f"{self.base_asset}/{self.quote_asset}"
+        if self.type == "perp":
+            base = self.base_asset
+            return base if base.endswith("-PERP") else f"{base}-PERP"
+        return self.symbol
+
 
 class SymbolHistory(Base):
     """Which symbol an instrument traded under, and when (renames, mergers)."""

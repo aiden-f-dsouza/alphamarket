@@ -850,6 +850,7 @@ def test_perp_valued_at_the_mark_and_shown_in_the_portfolio(db, hyperliquid, mon
     assert p == {
         "kind": "perp",
         "symbol": "BTC",
+        "label": "BTC-PERP",
         "side": "short",
         "qty": "0.19943",
         "cost": 12163.2357,  # 0.19943 x 60,990 at entry

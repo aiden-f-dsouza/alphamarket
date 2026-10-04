@@ -884,6 +884,7 @@ def value_asset_allocation(
             {
                 "kind": _kind(instrument),
                 "symbol": instrument.symbol if instrument is not None else asset,
+                "label": instrument.label if instrument is not None else asset,
                 "side": "long" if qty.atoms > 0 else "short",
                 "qty": decimal_str(abs(qty.units)),
                 "cost": micros_to_float(cost),
@@ -911,6 +912,7 @@ def value_asset_allocation(
             {
                 "kind": "perp",
                 "symbol": instrument.symbol if instrument is not None else asset,
+                "label": instrument.label if instrument is not None else asset,
                 "side": "long" if position.qty.atoms > 0 else "short",
                 "qty": decimal_str(abs(position.qty.units)),
                 "cost": micros_to_float(entry_notional),

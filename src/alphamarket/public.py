@@ -324,16 +324,8 @@ def v2_stats_view(extras: dict) -> dict:
 
 
 def instrument_label(inst: Instrument | None, fallback: str = "?") -> str:
-    """How an instrument reads on a page: spot pairs as BASE/QUOTE in canonical
-    codes (Kraken's XXBTZUSD is BTC/USD), perps by their position code
-    (BTC-PERP), stocks and contracts by their symbol."""
-    if inst is None:
-        return fallback
-    if inst.type == "spot":
-        return f"{inst.base_asset}/{inst.quote_asset}"
-    if inst.type == "perp":
-        return inst.base_asset if inst.base_asset.endswith("-PERP") else f"{inst.base_asset}-PERP"
-    return inst.symbol
+    """Instrument.label, or `fallback` when the instrument is unknown."""
+    return inst.label if inst is not None else fallback
 
 
 def instrument_labels(db: Session, signals) -> dict[int, str]:

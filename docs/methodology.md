@@ -764,6 +764,7 @@ stays flat across it.
 | P&L, net of deposits | last day's equity - first day's equity - net deposits and withdrawals; the headline dollar figure on an asset strategy's page (spot exchanges and brokers report no realized-P&L entries) |
 | Realized P&L | the venue's own realized-P&L and liquidation entries, in dollars (a stablecoin at 1.00, anything else at its close that day, or the last close before it) |
 | Money-weighted return | Modified Dietz, shown only beside the TWR |
+| Worst periods | the two deepest runs of days below the running peak of the drawdown series: from the last day at the peak to the deepest day, with the days until the first day back at a peak ("not yet recovered" while below); listed after 90 verified days, for every strategy |
 
 Drawdown and the ratios read the index, so a deposit can never look like a
 gain and a withdrawal can never look like a loss. Worked example: equity

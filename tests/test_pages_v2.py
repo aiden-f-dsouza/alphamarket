@@ -1143,3 +1143,18 @@ def test_equity_carried_days_say_weekends_not_a_data_gap(client, db):
 
     html = client.get("/s/weekends").text
     assert "9 days without a close (weekends and market holidays, mostly)" in html
+
+
+def test_real_pages_list_dated_worst_periods_after_incubation(client, db):
+    # v2_extras' index peaks on 09-03 (1.0605) and ends at 0.95445: one open
+    # episode, 1 - 0.95445/1.0605 = 10%.
+    s = _strategy(db, "kraken", "worst-real", "Worst Real")
+    _stats(db, s, v2_extras(), track_days=100)
+    young = _strategy(db, "kraken", "worst-young", "Worst Young")
+    _stats(db, young, v2_extras(), track_days=40)
+    db.commit()
+
+    html = client.get("/s/worst-real").text.split("Worst periods", 1)[1][:800]
+    assert "Sep 3 to Sep 4" in html and "not yet recovered" in html and "10.0%" in html
+    young_html = client.get("/s/worst-young").text.split("Worst periods", 1)[1][:800]
+    assert "listed once a strategy has 90 verified days" in young_html

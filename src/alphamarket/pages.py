@@ -12,7 +12,7 @@ banner; those routes 404 when demo mode is off, and preflight refuses to
 launch with it on.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from statistics import median
 from urllib.parse import quote
@@ -61,6 +61,7 @@ from alphamarket.portfolio import portfolio_summary
 from alphamarket.public import (
     ASSET_CLASS_LABELS,
     ASSET_CLASS_ORDER,
+    INCUBATION_DAYS,
     all_tags,
     instrument_label,
     is_visible,
@@ -72,7 +73,7 @@ from alphamarket.public import (
     visible_strategy_or_404,
 )
 from alphamarket.reconcile import reconcilable, reconcile_account
-from alphamarket.stats import drawdown_series
+from alphamarket.stats import drawdown_series, worst_periods
 from alphamarket.strategies import ListingIn, update_listing
 from alphamarket.tail_terms import (
     DEFAULT_DRAWDOWN_BPS,
@@ -605,6 +606,24 @@ def _charts(stats: dict | None, benchmarks: list | None = None) -> dict | None:
     }
 
 
+def _worst_periods(st: dict) -> list[tuple[str, float, str, str]]:
+    """The page's dated worst periods (stats.worst_periods over the drawdown
+    curve the chart draws), once the record is past incubation."""
+    if (st.get("track_days") or 0) < INCUBATION_DAYS:
+        return []
+    curve = [(date.fromisoformat(d), dd) for d, dd in st.get("drawdown_curve") or []]
+    rows = []
+    for peak, trough, depth, back in worst_periods(curve):
+        span = f"{peak:%b} {peak.day} to {trough:%b} {trough.day}"
+        if back is None:
+            rec = "not yet recovered"
+        else:
+            days = (back - peak).days
+            rec = f"recovered in {days} day{'s' if days != 1 else ''}"
+        rows.append((span, -depth, rec, ""))
+    return rows
+
+
 @router.get("/s/{slug}", response_class=HTMLResponse)
 def strategy_page(request: Request, slug: str, db: Session = Depends(get_db)):
     try:
@@ -623,6 +642,7 @@ def strategy_page(request: Request, slug: str, db: Session = Depends(get_db)):
         )
     user = _user(request, db)
     page = page_data(db, strategy)
+    page["worst_periods"] = _worst_periods(page["stats"])
     page["tailing"] = _tailing(db, strategy, page, user)
     page["follow"] = {
         "count": follower_count(db, strategy.id),
@@ -880,7 +900,7 @@ def _position_rows(view: dict) -> list[dict]:
         if "symbol" in p:
             rows.append(
                 {
-                    "symbol": p["symbol"],
+                    "symbol": p.get("label") or p["symbol"],
                     "kind": p.get("kind"),
                     "side": p.get("side"),
                     "qty": p.get("qty"),
