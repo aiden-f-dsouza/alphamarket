@@ -97,7 +97,7 @@
       {{ sigil(f.slug, 44) }}
       <div class="stack" style="gap:5px;min-width:0">
         <a href="/s/{{ f.slug }}" style="font-size:18px;font-weight:600;letter-spacing:-0.01em">{{ f.name }}</a>
-        <span class="small text2" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">{{ f.display_name }} · {{ (f.venue or "kalshi")|capitalize }}{% for t in f.tags[:2] %}{{ cat(t) }}{% endfor %}</span>
+        <span class="small text2" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">{{ f.display_name }} · {{ f.venue_label or (f.venue or "kalshi")|capitalize }}{% for t in f.tags[:2] %}{{ cat(t) }}{% endfor %}</span>
       </div>
     </div>
     {% if f.incubating %}<span class="badge warn" style="white-space:nowrap">incubating · {{ f.track_days }}d</span>{% else %}<span style="white-space:nowrap">{{ verified("Verified", f.track_days) }}</span>{% endif %}
@@ -113,9 +113,9 @@
     <span>last 60 verified days · shaded: worst drawdown</span>
     <span class="{{ 'pulse' if f.reconciled else '' }}" style="white-space:nowrap">{% if f.reconciled %}<i></i>reconciled last night{% elif f.reconciled is none %}first reconciliation pending{% else %}{{ icon("x", 12, "var(--warn)", 2) }}under review{% endif %}</span>
   </div>
-  {% if f.capacity_k is defined %}
+  {% if f.paper_tails is defined %}
   <div class="stats two" style="border-top:1px solid var(--line)">
-    <div class="stat" style="gap:8px"><span class="label">Capacity</span><span class="mono small">${{ f.tailing_k }}k tailing <span class="muted">of ~${{ f.capacity_k }}k</span></span>{{ bar(f.tailing_k * 100 / f.capacity_k) }}</div>
+    <div class="stat" style="flex-direction:row;align-items:center;justify-content:space-between"><span class="label">Paper tails</span><span class="mono" style="font-size:16px">{{ f.paper_tails }}<span class="muted small"> following</span></span></div>
     <div class="stat" style="flex-direction:row;align-items:center;justify-content:space-between"><span class="label">Risk score</span><span class="mono" style="font-size:16px">{{ f.risk_score }}<span class="muted">/10</span></span></div>
   </div>
   {% else %}

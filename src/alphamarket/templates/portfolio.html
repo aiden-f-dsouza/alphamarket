@@ -3,18 +3,19 @@
 {% block title %}Portfolio · Koine{% endblock %}
 {% block nav_active %}portfolio{% endblock %}
 {% block style %}
-  .top { display:grid; grid-template-columns:1fr 340px; gap:24px; align-items:start; }
-  .arow { display:grid; grid-template-columns:1fr 110px 110px 90px 90px 70px; align-items:center; gap:16px; padding:14px 0; border-bottom:1px solid var(--line); }
+  .top { display:grid; grid-template-columns:minmax(0, 1fr) 340px; gap:24px; align-items:start; }
+  .top .stat .v small { display:block; margin:8px 0 0; }
+  .arow { display:grid; grid-template-columns:minmax(0, 1fr) 96px 110px 80px 90px 64px; align-items:center; gap:16px; padding:14px 0; border-bottom:1px solid var(--line); }
   .arow .r { text-align:right; }
-  .act { display:grid; grid-template-columns:100px 90px 1fr 80px; gap:14px; align-items:baseline; padding:11px 0; border-bottom:1px solid var(--line); }
-  @media (max-width:1000px) { .top { grid-template-columns:1fr; } .arow { grid-template-columns:1fr 110px; } .arow .hide { display:none; } }
+  .act { display:grid; grid-template-columns:96px 120px minmax(0, 1fr) 90px; gap:14px; align-items:baseline; padding:11px 0; border-bottom:1px solid var(--line); }
+  @media (max-width:1000px) { .top { grid-template-columns:minmax(0, 1fr); } .arow { grid-template-columns:minmax(0, 1fr) 90px; } .arow .hide { display:none; } .act { grid-template-columns:minmax(0, 1fr) 80px; gap:4px 12px; } .act > :nth-child(1), .act > :nth-child(2) { grid-column:1 / -1; } }
 {% endblock %}
 {% block content %}
 <div class="spread">
-  <div class="stack" style="gap:8px"><span class="label">Portfolio</span><h1 style="font-size:40px">Your tailed strategies</h1></div>
-  <div style="display:flex;gap:12px"><button class="btn secondary" type="button" disabled title="Available when tailing launches">Connect an account</button><a class="btn" href="/marketplace">Browse strategies</a></div>
+  <div class="stack" style="gap:8px"><span class="label">Portfolio</span><h1 style="font-size:40px">Your paper tails</h1></div>
+  <div style="display:flex;gap:12px"><a class="btn" href="/marketplace">Browse strategies</a></div>
 </div>
-{% if p.real %}<div class="notice" style="display:flex;align-items:center;gap:10px">{{ m.icon("lock", 14, "var(--text2)") }}<span>Paper only. These allocations are simulated at public quotes; Koine places no order in any account.</span></div>{% endif %}
+<div class="notice" style="display:flex;align-items:center;gap:10px">{{ m.icon("lock", 14, "var(--text2)") }}<span>Paper only. Each tail replays the creator's trades with simulated money at the venue's quotes, after venue fees. Koine places no order in any account and holds no money.</span></div>
 {% if p.real and not p.allocations %}
 <div class="card"><div class="body" style="padding:40px;align-items:flex-start;gap:16px">
   <h3>You are not tailing a strategy yet.</h3>
@@ -25,15 +26,15 @@
 <div class="top">
   <div class="card">
     <div class="stats four" style="border-bottom:1px solid var(--line)">
-      <div class="stat"><span class="label">Portfolio value</span><span class="v" style="font-size:28px">{{ m.usd(p.value) }}<small>{{ p.accounts }} accounts</small></span></div>
+      <div class="stat"><span class="label">Paper value</span><span class="v" style="font-size:28px">{{ m.usd(p.value) }}<small>{{ p.accounts }} paper tail{{ "s" if p.accounts != 1 }}</small></span></div>
       <div class="stat"><span class="label">P&amp;L, all time</span><span class="v {{ 'good' if p.pnl >= 0 else 'bad' }}" style="font-size:28px">{{ "+" if p.pnl >= 0 }}{{ m.usd(p.pnl) }}<small>{{ m.pct(p.pnl_pct) }}</small></span></div>
       <div class="stat"><span class="label">Current drawdown</span><span class="v bad" style="font-size:28px">{{ m.pct(-p.current_dd) }}<small>worst {{ m.pct(-p.worst_dd) }}</small></span></div>
       {% if p.real %}<div class="stat"><span class="label">Open positions</span><span class="v" style="font-size:28px">{{ p.n_positions }}<small>{{ m.usd(p.unrealized) }} unrealized</small></span></div>
-      {% else %}<div class="stat"><span class="label">Fees paid</span><span class="v" style="font-size:28px">{{ m.usd(p.fees_paid) }}<small>20% above HWM</small></span></div>{% endif %}
+      {% else %}<div class="stat"><span class="label">Venue fees</span><span class="v" style="font-size:28px">{{ m.usd(p.trading_costs) }}<small>simulated, paid by paper fills</small></span></div>{% endif %}
     </div>
     {% if p.curve %}
     <div class="body" style="gap:10px;padding:20px 28px">
-      <div class="spread"><span class="label">Portfolio value{% if not p.real %} · 90 days{% endif %}</span><span class="mono small muted">net of fees</span></div>
+      <div class="spread"><span class="label">Paper value{% if not p.real %} · 90 days{% endif %}</span><span class="mono small muted">net of simulated venue fees</span></div>
       <div class="chart" style="grid-template-columns:52px 1fr">
         <div class="y" style="padding-bottom:22px">{% for i in range(5) %}<span>{{ m.usd(p.curve_hi - (p.curve_hi - p.curve_lo) * i / 4, 0) }}</span>{% endfor %}</div>
         <div class="stack" style="gap:8px">
@@ -46,12 +47,11 @@
   </div>
   <div class="card"><div class="body" style="gap:4px;padding:20px 24px"><span class="label" style="padding-bottom:6px">Portfolio risk</span><div class="kv">{% for a, b in p.risk %}<div><span>{{ a }}</span><span class="{{ 'bad' if b.startswith('−') }}">{{ b }}</span></div>{% endfor %}</div></div></div>
 </div>
-<div class="grid2">
-  <div class="card"><div class="body" style="gap:4px;padding:20px 28px">
+<div class="card"><div class="body" style="gap:4px;padding:20px 28px">
     <div class="arow" style="padding:0 0 8px;border-bottom:1px solid var(--line2)"><span class="label">Strategy</span><span class="label r">Allocated</span><span class="label r hide">Value</span><span class="label r hide">Return</span><span class="label r hide">Drawdown</span><span class="label r hide">Limit</span></div>
     {% for a in p.allocations %}
     <div class="arow">
-      <div class="stack" style="gap:3px"><a href="/s/{{ a.slug }}" style="font-weight:500">{{ a.name }}</a><span class="mono small muted">{{ a.handle }} · {{ a.days }}d tailing{% if p.real %} · {{ a.status }}{% if a.stop_reason %} ({{ a.stop_reason|replace("_", " ") }}){% endif %} · copy lag {{ a.copy_lag }}{% endif %}</span>
+      <div class="stack" style="gap:3px"><a href="/s/{{ a.slug }}" style="font-weight:500">{{ a.name }}</a><span class="mono small muted">{{ a.handle }}{% if a.venue %} · {{ a.venue }}{% endif %} · {{ a.days }}d paper tail{% if a.status is defined %} · {{ a.status }}{% if a.stop_reason %} ({{ a.stop_reason|replace("_", " ") }}){% endif %}{% endif %}{% if a.copy_lag is defined %} · copy lag {{ a.copy_lag }}{% endif %}</span>
         {% if a.skipped %}<span class="mono small warn">skipped: {% for reason, n in a.skipped %}{{ n }} {{ reason|replace("_", " ") }}{{ ", " if not loop.last }}{% endfor %}</span>{% endif %}
         {% for c in a.symbol_changes %}<span class="small warn">{{ c.symbol }} changed symbol{% if c.new_symbol %} to {{ c.new_symbol }}{% endif %} on {{ c.ex_date }}. Paper copies do not convert symbol changes yet: this position stays under {{ c.symbol }}, at its last price, and the creator's trades{% if c.new_symbol %} in {{ c.new_symbol }}{% endif %} will not reduce it.</span>{% endfor %}</div>
       <span class="mono r text2" style="font-size:14px">{{ m.usd(a.allocated, 0) }}</span>
@@ -63,14 +63,13 @@
     {% endfor %}
   </div></div>
   <div class="card"><div class="body" style="gap:4px;padding:20px 28px">
-    <div class="spread" style="padding-bottom:8px;border-bottom:1px solid var(--line2)"><span class="label">Activity</span><span class="mono small muted">all accounts</span></div>
+    <div class="spread" style="padding-bottom:8px;border-bottom:1px solid var(--line2)"><span class="label">Activity</span><span class="mono small muted">all paper tails</span></div>
     {% for when, kind, what, amt in p.activity %}
     <div class="act"><span class="mono small muted">{{ when }}</span><span class="label" style="color:var(--text2)">{{ kind }}</span><span class="small" style="font-size:14px">{{ what }}</span><span class="mono small r {{ 'good' if amt and amt > 0 else ('bad' if amt else '') }}" style="text-align:right">{% if amt %}{{ "+" if amt > 0 }}{{ m.usd(amt) }}{% endif %}</span></div>
     {% else %}
     <span class="muted small" style="padding:14px 0">No paper trades yet.</span>
     {% endfor %}
   </div></div>
-</div>
 {% if p.real and p.positions %}
 <div class="card" id="positions"><div class="body" style="gap:10px;padding:20px 28px">
   <div class="spread" style="align-items:baseline"><span class="label">Open paper positions</span><span class="mono small muted">marked at public quotes, else the last close, else cost</span></div>

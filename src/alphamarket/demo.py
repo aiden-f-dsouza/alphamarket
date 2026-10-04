@@ -2,7 +2,7 @@
 """Sample data for the demo build (DEMO_MODE=true).
 
 Everything here is invented: names, handles, markets, curves and every number.
-It exists so the accelerator can see the whole product (marketplace, tailing,
+It exists so the accelerator can see the whole product (marketplace, paper tailing,
 portfolio, feed) before those parts can be computed from venue data. Every
 page that draws on this module renders a "Sample data" banner, `pages.py`
 returns 404 for these routes when demo mode is off, and `scripts/preflight.py`
@@ -12,13 +12,25 @@ never reaches a deployment that passes preflight.
 
 Shapes mirror `public.page_data` / `public.list_visible` so the same templates
 render real and sample pages; sample pages carry extra keys (benchmarks,
-capacity, worst periods, tailing) that real pages simply omit.
+worst periods, paper-tail terms) that real pages simply omit. Asset samples
+(crypto spot, perps, US equities) carry the v2 page shape: holdings and
+exposure built through `public.holdings_view` / `exposure_view`, recent
+trades as signals. Tailing is paper only (invariant 8) and pricing is flat:
+nothing here describes a live account, a performance fee or a high-water mark.
 """
 
 import random
 from datetime import date, timedelta
 
-from alphamarket.charts import polyline, window_x
+from alphamarket.charts import drawdown_window, polyline, window_x
+from alphamarket.connectors.base import PaperFeeModel
+from alphamarket.connectors.registry import PROFILES
+from alphamarket.public import (
+    ASSET_CLASS_LABELS,
+    exposure_view,
+    holdings_view,
+    verification_view,
+)
 
 VERIFIED_SINCE = date(2026, 5, 6)
 AS_OF = date(2026, 9, 1)
@@ -68,9 +80,7 @@ _STRATEGIES = [
         win_rate=0.61,
         n_settlements=188,
         n_fills=902,
-        tailing_k=62,
-        capacity_k=240,
-        investors=31,
+        paper_tails=31,
         score=8.7,
         profitable_months="4 of 5",
         worst_month=-0.021,
@@ -104,9 +114,7 @@ _STRATEGIES = [
         win_rate=0.64,
         n_settlements=241,
         n_fills=1310,
-        tailing_k=118,
-        capacity_k=320,
-        investors=54,
+        paper_tails=54,
         score=8.4,
         profitable_months="6 of 7",
         worst_month=-0.012,
@@ -140,15 +148,13 @@ _STRATEGIES = [
         win_rate=0.58,
         n_settlements=214,
         n_fills=1204,
-        tailing_k=41,
-        capacity_k=180,
-        investors=23,
+        paper_tails=23,
         score=7.1,
         profitable_months="4 of 5",
         worst_month=-0.031,
         largest_loss=-212.40,
         concentration=0.22,
-        description="Fade extreme prints on weather and CPI contracts in the last 48 hours before settlement, when retail flow pushes YES past what the underlying forecast supports. Flat sizing, never adding to losers. Capacity is limited by liquidity in the daily temperature series.",
+        description="Fade extreme prints on weather and CPI contracts in the last 48 hours before settlement, when retail flow pushes YES past what the underlying forecast supports. Flat sizing, never adding to losers. Sizing is limited by liquidity in the daily temperature series.",
         worst_periods=[
             (
                 "Jul 3 to Jul 29",
@@ -177,9 +183,7 @@ _STRATEGIES = [
         win_rate=0.31,
         n_settlements=402,
         n_fills=1880,
-        tailing_k=12,
-        capacity_k=90,
-        investors=9,
+        paper_tails=9,
         score=5.9,
         profitable_months="2 of 4",
         worst_month=-0.088,
@@ -208,9 +212,7 @@ _STRATEGIES = [
         win_rate=0.49,
         n_settlements=77,
         n_fills=350,
-        tailing_k=4,
-        capacity_k=60,
-        investors=3,
+        paper_tails=3,
         score=3.2,
         profitable_months="2 of 4",
         worst_month=-0.121,
@@ -239,9 +241,7 @@ _STRATEGIES = [
         win_rate=0.47,
         n_settlements=160,
         n_fills=690,
-        tailing_k=0,
-        capacity_k=45,
-        investors=0,
+        paper_tails=0,
         score=1.8,
         profitable_months="1 of 4",
         worst_month=-0.064,
@@ -257,6 +257,218 @@ _STRATEGIES = [
             ),
             ("Jul 7 to Jul 9", -0.052, "2 days", ""),
         ],
+    ),
+    # ---- asset venues (crypto spot, perps, US equities): the v2 page shape,
+    # holdings and exposure instead of settlements, recent trades as signals.
+    dict(
+        slug="btc-eth-weekly-trend",
+        name="BTC/ETH trend, weekly rebalance",
+        handle="slowcandle",
+        venue="kraken",
+        tags=["crypto", "trend"],
+        seed=31,
+        drift=0.0021,
+        vol=0.024,
+        days=162,
+        start=12000.0,
+        total_return=0.284,
+        max_drawdown=0.162,
+        sharpe=1.38,
+        sortino=1.91,
+        risk_score=6,
+        n_fills=214,
+        paper_tails=41,
+        score=7.4,
+        description="Long BTC and ETH while the 20-week trend is up, scaled out to stablecoins when it breaks. Rebalanced on Sunday evenings, so expect to give back the first leg of every reversal.",
+        worst_periods=[
+            (
+                "Jun 17 to Jul 8",
+                -0.162,
+                "29 days",
+                "Two trend breaks in a row; the weekly rule gave back gains both times.",
+            ),
+            ("Aug 2 to Aug 6", -0.058, "5 days", ""),
+        ],
+        holdings=[
+            ("BTC", "spot", 0.48, 63412.50, None),
+            ("ETH", "spot", 0.31, 2648.10, None),
+            ("USDC", "cash", 0.21, None, None),
+        ],
+        signals=[
+            ("BTC/USD", "2026-08-31T19:02:11", "buy", "0.0315", "63,388.20", 0.13),
+            ("ETH/USD", "2026-08-31T19:02:40", "buy", "0.412", "2,646.90", 0.07),
+            ("ETH/USD", "2026-08-24T19:01:52", "sell", "0.290", "2,701.35", 0.05),
+            ("BTC/USD", "2026-08-17T19:03:05", "sell", "0.0120", "61,950.00", 0.05),
+            ("BTC/USD", "2026-08-10T19:02:27", "buy", "0.0240", "60,410.80", 0.09),
+        ],
+    ),
+    dict(
+        slug="large-cap-alt-rotation",
+        name="Large-cap alt rotation",
+        handle="rotationlab",
+        venue="coinbase",
+        tags=["crypto", "momentum"],
+        seed=17,
+        drift=0.0034,
+        vol=0.038,
+        days=121,
+        start=8000.0,
+        total_return=0.412,
+        max_drawdown=0.247,
+        sharpe=1.12,
+        sortino=1.44,
+        risk_score=8,
+        n_fills=388,
+        paper_tails=18,
+        score=6.2,
+        description="Hold the three strongest of the top twenty coins by 30-day return, re-ranked every Monday. No leverage. Drawdowns are deep and fast; the edge is in the months that run.",
+        worst_periods=[
+            (
+                "Jul 1 to Jul 26",
+                -0.247,
+                "34 days",
+                "Rotation bought the leaders just before they reversed.",
+            ),
+            ("Aug 12 to Aug 15", -0.083, "6 days", ""),
+        ],
+        holdings=[
+            ("SOL", "spot", 0.37, 148.62, None),
+            ("LINK", "spot", 0.29, 13.874, None),
+            ("AVAX", "spot", 0.26, 27.41, None),
+            ("USD", "cash", 0.08, None, None),
+        ],
+        signals=[
+            ("LINK-USD", "2026-08-31T13:00:41", "buy", "176.40", "13.862", 0.27),
+            ("ARB-USD", "2026-08-31T13:00:18", "sell", "2,410.0", "0.8121", 0.17),
+            ("SOL-USD", "2026-08-24T13:01:02", "buy", "6.25", "151.30", 0.08),
+            ("AVAX-USD", "2026-08-17T13:00:55", "buy", "41.0", "26.95", 0.10),
+            ("DOGE-USD", "2026-08-17T13:00:21", "sell", "9,200", "0.1043", 0.08),
+        ],
+    ),
+    dict(
+        slug="funding-aware-btc-perps",
+        name="Funding-aware BTC perps",
+        handle="basisbook",
+        venue="hyperliquid",
+        tags=["crypto", "perps"],
+        seed=23,
+        drift=0.0018,
+        vol=0.016,
+        days=104,
+        start=25000.0,
+        total_return=0.196,
+        max_drawdown=0.094,
+        sharpe=1.71,
+        sortino=2.20,
+        risk_score=7,
+        n_fills=1146,
+        paper_tails=27,
+        score=7.0,
+        description="Long BTC perps when funding is negative or flat, short ETH against it when ETH funding runs hot. Gross leverage capped at 2x; every position is visible on-chain.",
+        worst_periods=[
+            (
+                "Aug 5 to Aug 13",
+                -0.094,
+                "11 days",
+                "Short ETH leg squeezed while funding stayed high.",
+            ),
+            ("Jun 22 to Jun 25", -0.037, "4 days", ""),
+        ],
+        holdings=[
+            ("USDC", "cash", 1.0, None, None),
+            ("BTC-PERP", "perp", 1.35, 63405.0, "61,980.0"),
+            ("ETH-PERP", "perp", -0.42, 2647.2, "2,702.4"),
+        ],
+        signals=[
+            ("BTC-PERP", "2026-09-01T03:14:09", "buy", "0.085", "63,402.0", 0.22),
+            ("ETH-PERP", "2026-08-31T21:40:33", "sell", "1.20", "2,651.8", 0.13),
+            ("BTC-PERP", "2026-08-30T11:05:47", "sell", "0.060", "63,980.0", 0.15),
+            ("ETH-PERP", "2026-08-28T16:22:10", "buy", "0.80", "2,688.1", 0.09),
+            ("BTC-PERP", "2026-08-27T08:51:36", "buy", "0.140", "61,210.0", 0.34),
+        ],
+    ),
+    dict(
+        slug="quality-dividend-compounders",
+        name="Quality dividend compounders",
+        handle="plainvanilla",
+        venue="alpaca",
+        tags=["equities", "dividends"],
+        seed=41,
+        drift=0.0009,
+        vol=0.0085,
+        days=188,
+        start=15000.0,
+        total_return=0.112,
+        max_drawdown=0.061,
+        sharpe=1.52,
+        sortino=2.05,
+        risk_score=3,
+        n_fills=96,
+        paper_tails=64,
+        score=7.9,
+        description="Twelve US companies with ten years of rising dividends and low debt, equal weight, trimmed back when one passes 12% of the book. Dividends are reinvested by hand each month.",
+        worst_periods=[
+            (
+                "Apr 3 to Apr 21",
+                -0.061,
+                "26 days",
+                "Rate scare hit utilities and staples together.",
+            ),
+            ("Jul 29 to Aug 2", -0.024, "4 days", ""),
+        ],
+        holdings=[
+            ("MSFT", "equity", 0.11, 431.20, None),
+            ("JNJ", "equity", 0.09, 162.85, None),
+            ("PG", "equity", 0.09, 168.40, None),
+            ("KO", "equity", 0.08, 69.12, None),
+            ("HD", "equity", 0.08, 371.55, None),
+            ("PEP", "equity", 0.08, 172.30, None),
+            ("USD", "cash", 0.47, None, None),
+        ],
+        signals=[
+            ("KO", "2026-08-28T14:31:07", "buy", "12", "68.94", 0.06),
+            ("MSFT", "2026-08-21T15:02:44", "sell", "3", "438.10", 0.09),
+            ("PG", "2026-08-14T14:45:20", "buy", "5", "167.25", 0.06),
+            ("JNJ", "2026-08-07T19:12:58", "buy", "4", "160.40", 0.04),
+            ("HD", "2026-07-31T14:30:11", "buy", "2", "365.90", 0.05),
+        ],
+        broker_equity=True,
+    ),
+    dict(
+        slug="semis-swing-long-only",
+        name="Semis swing, long only",
+        handle="fabwatch",
+        venue="ibkr",
+        tags=["equities", "momentum"],
+        seed=11,
+        drift=0.0024,
+        vol=0.019,
+        days=76,
+        start=40000.0,
+        total_return=0.137,
+        max_drawdown=0.118,
+        sharpe=1.29,
+        sortino=1.63,
+        risk_score=6,
+        n_fills=58,
+        paper_tails=7,
+        score=4.6,
+        description="Swing trades in semiconductor names and SMH around earnings and supply-chain data. Long only, two to six positions, held days to weeks.",
+        worst_periods=[],
+        holdings=[
+            ("NVDA", "equity", 0.28, 118.65, None),
+            ("SMH", "equity", 0.24, 238.10, None),
+            ("AMD", "equity", 0.17, 152.42, None),
+            ("USD", "cash", 0.31, None, None),
+        ],
+        signals=[
+            ("AMD", "2026-08-29T15:47:00", "buy", "45", "151.10", 0.17),
+            ("TSM", "2026-08-27T19:55:00", "sell", "60", "171.80", 0.26),
+            ("NVDA", "2026-08-20T13:41:00", "buy", "95", "116.20", 0.28),
+            ("SMH", "2026-08-12T14:02:00", "buy", "40", "231.75", 0.23),
+        ],
+        tier="daily_verified",
+        broker_equity=True,
     ),
 ]
 
@@ -280,45 +492,119 @@ _CREATORS = {
         bio="Underdogs only. Expect long losing streaks.", followers=204, since="Jun 2026"
     ),
     "printday": dict(bio="Earnings season is the whole year.", followers=77, since="Jun 2026"),
+    "slowcandle": dict(
+        bio="Trend follower. Two coins, one rule, rebalanced on Sundays.",
+        followers=618,
+        since="Mar 2026",
+    ),
+    "rotationlab": dict(
+        bio="Momentum across the top twenty coins. Deep drawdowns, posted as they happen.",
+        followers=233,
+        since="May 2026",
+    ),
+    "basisbook": dict(
+        bio="Perps and funding on Hyperliquid. The address is public; so is every position.",
+        followers=402,
+        since="May 2026",
+    ),
+    "plainvanilla": dict(
+        bio="Boring on purpose. Dividend growers, equal weight, almost no trading.",
+        followers=1104,
+        since="Feb 2026",
+    ),
+    "fabwatch": dict(
+        bio="Ex-fab engineer. I trade the chip cycle, long only.",
+        followers=151,
+        since="Jun 2026",
+    ),
 }
 
 BENCHMARK_NOTE = (
     "S&P 500 and T-bill lines are sample benchmarks; the live benchmark set is an open question."
 )
-FEE_TEXT = "20% of profit above your high-water mark"
+CRYPTO_BENCHMARK_NOTE = (
+    "Bitcoin and T-bill lines are sample benchmarks; the live benchmark set is an open question."
+)
+# Pricing decision: flat subscriptions for followers, flat royalties for
+# creators. Never a share of returns (no performance fee, no high-water mark).
+PRICING_TEXT = "Flat subscription, never a share of returns"
 
 _STRIP_SPARK = 60
 
 
 def _series(s: dict) -> tuple[list[date], list[float]]:
     n = s["days"]
+    dates = _dates(n, AS_OF - timedelta(days=n - 1))
+    if "start" in s:  # asset samples: growth of the first day's equity, end pinned exactly
+        start = s["start"]
+        curve = [start] + _walk(s["seed"], n - 1, s["drift"], s["vol"], start=start)
+        k = start * (1 + s["total_return"]) / curve[-1]
+        return dates, [v * ((k - 1) * i / (n - 1) + 1) for i, v in enumerate(curve)]
     curve = _walk(s["seed"], n, s["drift"], s["vol"], start=6600.0)
     # Pin the end so the headline return matches the curve exactly.
     target = 6600.0 * (1 + s["total_return"])
     k = target / curve[-1]
     curve = [6600.0 + (v - 6600.0) * ((k - 1) * i / (n - 1) + 1) for i, v in enumerate(curve)]
-    return _dates(n, AS_OF - timedelta(days=n - 1)), curve
+    return dates, curve
+
+
+def _max_dd(s: dict) -> float:
+    """Asset samples take their worst drawdown from their own curve, so the
+    headline, the shaded window and the drawdown chart agree."""
+    if "start" not in s:
+        return s["max_drawdown"]
+    return max(_drawdown(_series(s)[1]))
+
+
+def _worst_periods(s: dict) -> list[tuple]:
+    """Asset samples: the worst period is read off the curve (peak to trough,
+    then days to recover), carrying the sample's note; binary samples keep
+    their hand-written list."""
+    if "start" not in s or not s["worst_periods"]:
+        return s["worst_periods"]
+    dates, curve = _series(s)
+    a, b = drawdown_window(curve)
+    back = next((i for i in range(b, len(curve)) if curve[i] >= curve[a]), None)
+    span = f"{dates[a]:%b %-d} to {dates[b]:%b %-d}"
+    recovery = f"{(dates[back] - dates[a]).days} days" if back is not None else "not recovered"
+    first = (span, -(1 - curve[b] / curve[a]), recovery, s["worst_periods"][0][3])
+    return [first]
+
+
+def _venue(s: dict) -> str:
+    return s.get("venue", "kalshi")
+
+
+def _venue_label(venue: str) -> str:
+    """Short venue name for page chrome ("Interactive Brokers", without the
+    profile's "(Flex)" report-type suffix)."""
+    return PROFILES[venue].display_name.replace(" (Flex)", "")
 
 
 def _row(s: dict) -> dict:
     dates, curve = _series(s)
+    venue = _venue(s)
+    classes = PROFILES[venue].asset_classes
     return {
         "slug": s["slug"],
         "name": s["name"],
         "display_name": s["handle"],
         "tags": s["tags"],
         "incubating": s["days"] < 90,
+        "venue": venue,
+        "venue_label": _venue_label(venue),
+        "asset_classes": list(classes),
+        "asset_class_label": ASSET_CLASS_LABELS[classes[0]],
+        "verification_tier": s.get("tier", "reconciled"),
         "total_return": s["total_return"],
-        "max_drawdown": s["max_drawdown"],
+        "max_drawdown": _max_dd(s),
         "risk_score": s["risk_score"],
         "track_days": s["days"],
         "reconciled": True,
         "spark": polyline(curve[-_STRIP_SPARK:], 120, 32),
         "spark_dd": window_x(curve[-_STRIP_SPARK:], 120),
         "sharpe": s["sharpe"],
-        "tailing_k": s["tailing_k"],
-        "capacity_k": s["capacity_k"],
-        "investors": s["investors"],
+        "paper_tails": s["paper_tails"],
         "score": s["score"],
         "demo": True,
     }
@@ -387,6 +673,171 @@ def _monthly(dates: list[date], curve: list[float]) -> list[list]:
     return out
 
 
+def _paper_terms(venue: str) -> dict:
+    """How a paper tail of this venue is priced, from the venue profile and
+    methodology ("Paper tailing", "Paper copying v2"). Display text only."""
+    profile = PROFILES[venue]
+    name = _venue_label(venue)
+    rate = f"{profile.fee_rate_bps / 100:.2f}%"
+    if profile.paper_fee_model is PaperFeeModel.BINARY_PXQ:
+        return {
+            "fill": "Creator's fill price, at the tick",
+            "costs": f"{name} fee formula",
+            "rows": [
+                (
+                    "Fill price",
+                    f"The creator's own fill price, snapped to {name}'s tick. This assumes the "
+                    "price was still there for you: the model's main optimism, stated on every "
+                    "paper figure.",
+                ),
+                (
+                    "Venue fee",
+                    f"{name}'s published formula, {rate} × contracts × price × (1 − price), "
+                    "charged on every paper fill.",
+                ),
+                (
+                    "Settlement",
+                    "Same result and time as the creator's position: $1 per winning contract.",
+                ),
+                ("Starts", "With the creator's next trade. Nothing earlier is replayed."),
+            ],
+        }
+    if profile.paper_fee_model is PaperFeeModel.US_EQUITY_REGULATORY:
+        costs = "No commission; FINRA activity fee on sales"
+        fee_row = (
+            "Fees",
+            f"{name} charges no commission; every paper sale pays the FINRA trading "
+            "activity fee. Dividends and splits are applied on their dates.",
+        )
+        stale = "3 days (end-of-day reports)" if venue in ("ibkr", "snaptrade") else "6 hours"
+    else:
+        costs = f"{name} taker fee, {rate}" + (", plus funding" if venue == "hyperliquid" else "")
+        fee_row = (
+            "Fees",
+            f"{name}'s taker fee, {rate} of notional, on every paper fill"
+            + (
+                ". Perp funding is paid or received every hour, and a position past its "
+                "maintenance margin is liquidated, as at the venue."
+                if venue == "hyperliquid"
+                else "."
+            ),
+        )
+        stale = "6 hours"
+    return {
+        "fill": "Venue quote when Koine saw the trade",
+        "costs": costs,
+        "rows": [
+            (
+                "Fill price",
+                f"{name}'s public quote at the moment Koine saw the creator's trade: the ask to "
+                "buy, the bid to sell. Never the creator's price, never hindsight.",
+            ),
+            ("No quote?", "The creator's price, moved 0.5% against you."),
+            fee_row,
+            (
+                "Late signals",
+                f"A trade Koine saw more than {stale} after it happened is skipped, and the skip "
+                "is counted on your portfolio.",
+            ),
+            ("Starts", "With the creator's next trade. Nothing earlier is replayed."),
+        ],
+    }
+
+
+def _usd(x: float) -> str:
+    return f"{'−' if x < 0 else ''}${abs(x):,.2f}"
+
+
+def _asset_view(s: dict, equity: float) -> dict:
+    """Holdings and exposure for an asset sample, built through the same
+    `public.holdings_view` / `exposure_view` a real v2 page uses. Spot and
+    equity weights are shares of equity; a perp's weight is signed notional
+    over equity and its value is unrealized P&L against the entry."""
+    rows, by_underlying = [], {}
+    unrealized = 0.0
+    for asset, kind, weight, price, entry in s["holdings"]:
+        if kind == "perp":
+            qty = weight * equity / price
+            value = qty * (price - float(entry.replace(",", "")))
+            unrealized += value
+            notional = abs(qty * price)
+            by_underlying[asset.split("-")[0]] = round(notional * 1e6)
+            rows.append(
+                {
+                    "asset": asset,
+                    "kind": "perp",
+                    "qty": f"{qty:+.4f}",
+                    "close_micros": round(price * 1e6),
+                    "value_micros": round(value * 1e6),
+                    "notional_micros": round(notional * 1e6),
+                    "entry": entry,
+                    "price_day": AS_OF.isoformat(),
+                }
+            )
+        elif kind == "cash":
+            rows.append({"asset": asset, "kind": "cash", "qty": None, "value_micros": 0})
+        else:
+            value = weight * equity
+            qty = value / price
+            places = 0 if kind == "equity" else (4 if price > 1000 else 2)
+            by_underlying[asset] = round(value * 1e6)
+            rows.append(
+                {
+                    "asset": asset,
+                    "kind": kind,
+                    "qty": f"{qty:,.{places}f}",
+                    "close_micros": round(price * 1e6),
+                    "value_micros": round(value * 1e6),
+                    "price_day": AS_OF.isoformat(),
+                }
+            )
+    invested = sum(r["value_micros"] for r in rows if r["kind"] in ("spot", "equity"))
+    for r in rows:  # cash is what is left of equity after positions and open perp P&L
+        if r["kind"] == "cash":
+            cash = round((equity - unrealized) * 1e6) - invested
+            r["value_micros"] = cash
+            r["qty"] = f"{cash / 1e6:,.2f}"
+    gross = sum(by_underlying.values())
+    top = max(by_underlying, key=by_underlying.get)
+    perp_notional = sum(r["notional_micros"] for r in rows if r["kind"] == "perp")
+    extras = {
+        "holdings": rows,
+        "exposure": {
+            "day": AS_OF.isoformat(),
+            "gross_micros": gross,
+            "by_underlying_micros": by_underlying,
+            "top_asset": top,
+            "top_share": by_underlying[top] / gross,
+            "perp_gross_leverage": perp_notional / (equity * 1e6) if perp_notional else None,
+        },
+    }
+    return {
+        "holdings": holdings_view(extras),
+        "exposure": exposure_view(extras),
+        "n_open": sum(1 for r in rows if r["kind"] != "cash"),
+    }
+
+
+_BINARY_DISCUSSION = [
+    ("isobar", "2h", False, "July drawdown was the Phoenix heat series. Has sizing changed since?"),
+    (None, "1h", True, "Cap per series is now 15% of book. Visible in the concentration number."),
+]
+_ASSET_DISCUSSION = [
+    (
+        "isobar",
+        "3h",
+        False,
+        "My paper tail is about 0.4% behind your curve this month. Is that just the spread?",
+    ),
+    (
+        None,
+        "2h",
+        True,
+        "Mostly, plus copy lag on the Sunday rebalance. Your portfolio page shows the lag per fill.",
+    ),
+]
+
+
 def strategy_page(slug: str) -> dict | None:
     s = _by_slug(slug)
     if s is None:
@@ -394,123 +845,178 @@ def strategy_page(slug: str) -> dict | None:
     dates, curve = _series(s)
     dd = _drawdown(curve)
     n = len(curve)
-    spx = _walk(4, n, 0.00055, 0.009, start=curve[0])
+    venue = _venue(s)
+    profile = PROFILES[venue]
+    asset_class = profile.asset_classes[0]
+    is_asset = "holdings" in s
+    crypto = asset_class == "crypto"
+    bench = _walk(5, n, 0.0006, 0.025, start=curve[0]) if crypto else None
+    spx = (
+        _walk(5, n, 0.0003, 0.009, start=curve[0])
+        if is_asset
+        else _walk(4, n, 0.00055, 0.009, start=curve[0])
+    )
     cash = [curve[0] * (1 + 0.000115) ** i for i in range(n)]
+    benchmark = (
+        ("Bitcoin, buy and hold", bench, "Bitcoin") if crypto else ("S&P 500", spx, "S&P 500")
+    )
     c = _CREATORS[s["handle"]]
     mine = [x for x in _STRATEGIES if x["handle"] == s["handle"]]
-    settlements = [
-        ("KXHIGHDEN-26AUG30-T95", "no", 60, 0.0, "2026-08-31"),
-        ("KXJOBS-26AUG-150", "no", 150, 150.0, "2026-08-29"),
-        ("KXFED-26SEP-25", "yes", 200, 200.0, "2026-08-28"),
-        ("KXHIGHNY-26AUG22-T91", "yes", 80, 0.0, "2026-08-23"),
-        ("KXCPI-26JUL-0.3", "no", 120, 120.0, "2026-08-12"),
-    ]
-    return {
+    curve_rows = [[d.isoformat(), v] for d, v in zip(dates, curve, strict=True)]
+    terms = _paper_terms(venue)
+    page = {
         "demo": True,
         "slug": s["slug"],
         "name": s["name"],
         "display_name": s["handle"],
-        "venue": "kalshi",
+        "venue": venue,
+        "venue_label": _venue_label(venue),
         "venue_env": "prod",
+        "asset_class": asset_class,
+        "asset_class_label": ASSET_CLASS_LABELS[asset_class],
+        "is_asset": is_asset,
         "status": "live",
         "style_tags": s["tags"],
         "description_unverified": s["description"],
         "verified_since": dates[0].isoformat(),
         "last_reconciled": AS_OF.isoformat() + "T02:14:00+00:00",
         "reconciled": True,
+        "verification_tier": s.get("tier", "reconciled"),
+        "verification": verification_view(profile, s.get("tier", "reconciled")),
         "incubating": s["days"] < 90,
         "stats": {
             "as_of": AS_OF.isoformat(),
             "track_days": s["days"],
             "n_fills": s["n_fills"],
-            "n_settlements": s["n_settlements"],
+            "n_settlements": s.get("n_settlements", 0),
             "total_return": s["total_return"],
-            "max_drawdown": s["max_drawdown"],
+            "max_drawdown": _max_dd(s),
             "sharpe": s["sharpe"],
             "sortino": s["sortino"],
-            "win_rate": s["win_rate"],
+            "win_rate": s.get("win_rate"),
             "risk_score": s["risk_score"],
             "equity": curve[-1],
             "realized_pnl": curve[-1] - curve[0],
             "flags": [],
-            "top_series_share": s["concentration"],
-            "equity_curve": [[d.isoformat(), v] for d, v in zip(dates, curve, strict=True)],
+            "top_series_share": s.get("concentration"),
+            "equity_curve": curve_rows,
             "drawdown_curve": [[d.isoformat(), x] for d, x in zip(dates, dd, strict=True)],
             "monthly_returns": _monthly(dates, curve),
         },
-        "recent_settlements": [
-            {
-                "ticker": t,
-                "result": side if pay else ("no" if side == "yes" else "yes"),
-                "side": side,
-                "count": float(count),
-                "payout": pay,
-                "settled_at": when,
-            }
-            for t, side, count, pay, when in settlements
-        ],
-        "benchmarks": [("S&P 500", spx, False), ("Cash, T-bill", cash, True)],
-        "benchmark_note": BENCHMARK_NOTE,
-        "vs_benchmark": s["total_return"] - (spx[-1] / spx[0] - 1),
-        "worst_periods": s["worst_periods"],
-        "risk_rows": [
-            ("Sharpe (annualised)", f"{s['sharpe']:.2f}"),
-            ("Sortino", f"{s['sortino']:.2f}"),
-            ("Worst month", f"{s['worst_month'] * 100:+.1f}%"),
-            ("Profitable months", s["profitable_months"]),
-            ("Win rate", f"{s['win_rate'] * 100:.0f}%"),
-            ("Largest single loss", f"${s['largest_loss']:,.2f}"),
-            ("Series concentration", f"{s['concentration'] * 100:.0f}% in one series"),
-            ("Settled trades", str(s["n_settlements"])),
-        ],
-        "capacity": {
-            "tailing_k": s["tailing_k"],
-            "capacity_k": s["capacity_k"],
-            "investors": s["investors"],
-            "left_k": s["capacity_k"] - s["tailing_k"],
-            "min_usd": 500,
-            "fee": FEE_TEXT,
+        "benchmarks": [(benchmark[0], benchmark[1], False), ("Cash, T-bill", cash, True)],
+        "benchmark_label": benchmark[2],
+        "benchmark_note": CRYPTO_BENCHMARK_NOTE if crypto else BENCHMARK_NOTE,
+        "vs_benchmark": s["total_return"] - (benchmark[1][-1] / benchmark[1][0] - 1),
+        "worst_periods": _worst_periods(s),
+        "tailing": {
+            "paper_tails": s["paper_tails"],
+            "min_usd": 100,
+            "fill": terms["fill"],
+            "costs": terms["costs"],
+            "pricing": PRICING_TEXT,
         },
         "creator": {"handle": s["handle"], "followers": c["followers"], "strategies": len(mine)},
         "discussion": [
-            (
-                "isobar",
-                "2h",
-                False,
-                "July drawdown was the Phoenix heat series. Has sizing changed since?",
-            ),
-            (
-                s["handle"],
-                "1h",
-                True,
-                "Cap per series is now 15% of book. Visible in the concentration number.",
-            ),
+            (h or s["handle"], when, is_creator, body)
+            for h, when, is_creator, body in (_ASSET_DISCUSSION if is_asset else _BINARY_DISCUSSION)
         ],
     }
+    if is_asset:
+        view = _asset_view(s, curve[-1])
+        page["stats"].update(
+            {
+                "valuation": "v2",
+                "chart_curve": curve_rows,
+                "holdings": view["holdings"],
+                "exposure": view["exposure"],
+                "n_open_positions": view["n_open"],
+                "twr": s["total_return"],
+                "asset_classes": [asset_class],
+                "price_sources": [venue],
+                "unpriced": [],
+                "carried_forward_days": 0,
+                "perp_entry_unknown": [],
+                "broker_equity": (
+                    {
+                        "ok": True,
+                        "venue": _usd(curve[-1]),
+                        "computed": _usd(curve[-1]),
+                        "as_of": AS_OF.isoformat(),
+                    }
+                    if s.get("broker_equity")
+                    else None
+                ),
+            }
+        )
+        page["recent_signals"] = [
+            {
+                "kind": "fill",
+                "asset": True,
+                "at": at + "+00:00",
+                "ticker": ticker,
+                "action": action,
+                "qty": qty,
+                "price": price,
+                "stake_fraction": stake,
+            }
+            for ticker, at, action, qty, price, stake in s["signals"]
+        ]
+        return page
+    page["recent_settlements"] = [
+        {
+            "ticker": t,
+            "result": side if pay else ("no" if side == "yes" else "yes"),
+            "side": side,
+            "count": float(count),
+            "payout": pay,
+            "settled_at": when,
+        }
+        for t, side, count, pay, when in [
+            ("KXHIGHDEN-26AUG30-T95", "no", 60, 0.0, "2026-08-31"),
+            ("KXJOBS-26AUG-150", "no", 150, 150.0, "2026-08-29"),
+            ("KXFED-26SEP-25", "yes", 200, 200.0, "2026-08-28"),
+            ("KXHIGHNY-26AUG22-T91", "yes", 80, 0.0, "2026-08-23"),
+            ("KXCPI-26JUL-0.3", "no", 120, 120.0, "2026-08-12"),
+        ]
+    ]
+    page["risk_rows"] = [
+        ("Sharpe (annualised)", f"{s['sharpe']:.2f}"),
+        ("Sortino", f"{s['sortino']:.2f}"),
+        ("Worst month", f"{s['worst_month'] * 100:+.1f}%"),
+        ("Profitable months", s["profitable_months"]),
+        ("Win rate", f"{s['win_rate'] * 100:.0f}%"),
+        ("Largest single loss", f"${s['largest_loss']:,.2f}"),
+        ("Series concentration", f"{s['concentration'] * 100:.0f}% in one series"),
+        ("Settled trades", str(s["n_settlements"])),
+    ]
+    return page
 
 
 def tail_page(slug: str) -> dict | None:
+    """The paper-tail setup flow. Paper only (invariant 8): there is no
+    account, key or balance to choose, and nothing is placed anywhere."""
     page = strategy_page(slug)
     if page is None:
         return None
+    allocation = 2000.00
+    dd_limit = 0.15
     return {
         "demo": True,
         "strategy": page,
-        "account": {"venue": "Kalshi", "last4": "4821", "balance": 12400.00, "connected": "Aug 14"},
-        "allocation": 2000.00,
-        "allocation_pct": 16,
-        "min_usd": 500,
-        "dd_limit": 0.15,
-        "stop_at": 1700.00,
-        "fee_rows": [
-            ("Performance fee", FEE_TEXT),
-            ("High-water mark", "$2,000.00, your starting allocation"),
-            ("Charged", "Monthly, only on new highs"),
+        "allocation": allocation,
+        "allocation_max": 25000,
+        "min_usd": 100,
+        "dd_limit": dd_limit,
+        "stop_at": allocation * (1 - dd_limit),
+        "terms": _paper_terms(page["venue"])["rows"],
+        "pricing_rows": [
+            ("Followers", "A flat monthly subscription. Never a share of returns."),
             (
-                "Example",
-                "Allocation grows to $2,300: fee is $60. Falls back to $2,100 next month: no fee until it passes $2,300 again.",
+                "Creators",
+                "A flat royalty from Koine, the same whether your paper tail is up or down.",
             ),
-            ("Subscriptions or other fees", "None"),
+            ("Performance fees", "None. Nobody is paid more because a strategy took more risk."),
+            ("Today", "Billing has not launched. Nothing is charged."),
         ],
     }
 
@@ -529,12 +1035,12 @@ def creator(handle: str) -> dict | None:
         "bio": c["bio"],
         "followers": c["followers"],
         "since": c["since"],
+        "venues": sorted({r["venue_label"] for r in mine}),
         "strategies": mine,
         "best": best,
         "worst": worst,
         "worst_dd": max(r["max_drawdown"] for r in mine),
-        "tailing_k": sum(r["tailing_k"] for r in mine),
-        "investors": sum(r["investors"] for r in mine),
+        "paper_tails": sum(r["paper_tails"] for r in mine),
         "nights": max(r["track_days"] for r in mine),
         "posts": posts,
     }
@@ -556,6 +1062,14 @@ _POSTS = [
         replies=4,
         strategy="fed-path-both-directions",
         body="September meeting is priced at 86% for a cut. I am on the NO side small, and the page will show it either way.",
+    ),
+    dict(
+        handle="basisbook",
+        when="1h",
+        likes=21,
+        replies=5,
+        strategy="funding-aware-btc-perps",
+        body="ETH funding is back above 30% annualised, so the short leg is on again at 0.4x. Gross leverage stays under 2x; the exposure panel shows it.",
     ),
     dict(
         handle="quietedge",
@@ -615,12 +1129,12 @@ def feed() -> dict:
             (
                 "isobar",
                 "10:14",
-                "Is the reconciliation panel showing computed vs. venue balance in the creator's account, or ours?",
+                "Is the reconciliation panel about the creator's account, or my paper tail?",
             ),
             (
                 "koine",
                 "10:16",
-                "The creator's. Your own account's reconciliation is on your Portfolio page.",
+                "The creator's. A paper tail has no venue account; its fills, fees and copy lag are on your Portfolio page.",
             ),
             (
                 "tailrisk",
@@ -630,79 +1144,77 @@ def feed() -> dict:
             (
                 "median_voter",
                 "10:31",
-                "Correlation column would help creators too. Investors keep asking me.",
+                "Correlation column would help creators too. Followers keep asking me.",
             ),
         ],
     }
 
 
 def portfolio() -> dict:
-    curve = _walk(19, 90, 0.0011, 0.007, start=7500.0)
-    curve = [v * (8262.10 / curve[-1]) for v in curve]
+    """A sample paper portfolio: four paper tails across Kalshi and Kraken.
+    Costs are what the paper copies paid the venue (fees, and the spread
+    against the creator's price), never a Koine fee."""
+    curve = _walk(19, 90, 0.0011, 0.007, start=8800.0)
+    curve = [v * (10423.90 / curve[-1]) for v in curve]
     dates = _dates(90, AS_OF - timedelta(days=89))
     allocs = [
-        (
-            "weather-cpi-mean-reversion",
-            "Weather & CPI mean reversion",
-            "quietedge",
-            2000,
-            2318.40,
-            0.159,
-            0.021,
-            34,
-        ),
-        (
-            "election-polling-arbitrage",
-            "Election polling arbitrage",
-            "median_voter",
-            3000,
-            3187.20,
-            0.062,
-            0.008,
-            41,
-        ),
-        (
-            "fed-path-both-directions",
-            "Fed path, both directions",
-            "rateswatch",
-            2500,
-            2756.50,
-            0.103,
-            0.034,
-            46,
-        ),
+        ("weather-cpi-mean-reversion", 2000, 2318.40, 0.159, 0.021, 34, "1.8 min"),
+        ("election-polling-arbitrage", 3000, 3187.20, 0.062, 0.008, 41, "2.4 min"),
+        ("fed-path-both-directions", 2500, 2756.50, 0.103, 0.034, 46, "1.6 min"),
+        ("btc-eth-weekly-trend", 2000, 2161.80, 0.081, 0.047, 29, "38 s"),
     ]
     return {
         "demo": True,
-        "value": 8262.10,
-        "pnl": 762.10,
-        "pnl_pct": 0.102,
+        "value": 10423.90,
+        "pnl": 923.90,
+        "pnl_pct": 923.90 / 9500,
         "current_dd": 0.021,
         "worst_dd": 0.068,
-        "fees_paid": 118.40,
-        "accounts": 3,
+        "trading_costs": 61.84,
+        "accounts": len(allocs),
         "curve": polyline(curve, 900, 200),
         "curve_lo": min(curve),
         "curve_hi": max(curve),
         "x_labels": [dates[i].strftime("%b %-d") for i in (0, 30, 60, 89)],
         "allocations": [
-            dict(slug=a, name=b, handle=c, allocated=d, value=e, ret=f, dd=g, days=h)
-            for a, b, c, d, e, f, g, h in allocs
+            dict(
+                slug=slug,
+                name=_by_slug(slug)["name"],
+                handle=_by_slug(slug)["handle"],
+                venue=_venue_label(_venue(_by_slug(slug))),
+                allocated=alloc,
+                value=value,
+                ret=ret,
+                dd=dd,
+                limit=0.15,
+                days=days,
+                status="active",
+                copy_lag=lag,
+            )
+            for slug, alloc, value, ret, dd, days, lag in allocs
         ],
         "activity": [
-            ("Today 02:14", "Reconciled", "3 accounts matched venue balances", None),
-            ("Yesterday", "Mirrored", "Fed path: NO on Sept cut ×120 @ 0.31", -37.20),
-            ("Aug 31", "Fee", "Election polling arbitrage, new high-water mark $3,187.20", -18.40),
-            ("Aug 29", "Mirrored", "Weather & CPI: settled NYC high above 91°F, NO", 41.20),
-            ("Aug 28", "Allocation", "Added $500 to Fed path, both directions", None),
+            ("Today 02:14", "Valued", "4 paper tails marked at the latest quotes", None),
+            (
+                "Aug 31",
+                "Paper fill",
+                "BTC/ETH trend: buy 0.0052 BTC @ 63,412.50 Kraken ask, 41 s after the creator",
+                None,
+            ),
+            ("Aug 31", "Venue fee", "Kraken taker fee on that fill, 0.80%", -2.64),
+            ("Aug 30", "Paper fill", "Fed path: NO on Sept cut ×120 @ 0.31", -37.20),
+            ("Aug 29", "Settled", "Weather & CPI: NYC high above 91°F settled NO", 41.20),
+            ("Aug 28", "Paper allocation", "Added $500 of paper money to Fed path", None),
         ],
         "risk": [
             ("Portfolio Sharpe, 90d", "1.92"),
             ("Current drawdown", "−2.1%"),
             ("Worst drawdown", "−6.8%"),
             ("Strategy correlation, avg", "0.18"),
-            ("Largest allocation", "38%"),
-            ("Fees paid to date", "$118.40"),
+            ("Largest allocation", "31%"),
+            ("Median copy lag", "1.7 min"),
+            ("Signals skipped", "2 (stale)"),
+            ("Simulated venue fees", "$61.84"),
         ],
     }
 
@@ -726,10 +1238,10 @@ def transparency() -> dict:
             ("> 40%", 1),
         ],
         "outcomes": [
-            ("Positions in profit", 61),
-            ("Positions stopped by a drawdown limit", 9),
-            ("Positions closed by the investor", 22),
-            ("Median fee paid, as share of profit", 20),
+            ("Paper tails in profit", 61),
+            ("Paper tails stopped by a drawdown limit", 9),
+            ("Paper tails closed by the follower", 22),
+            ("Crypto and stock paper fills priced at a live quote", 94),
         ],
         "failed": [
             (

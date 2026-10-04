@@ -1,8 +1,19 @@
 # Security and privacy: what we can see, and what we can never do
 
-This is the plain-English version of how Koine handles your Kalshi
-connection. It is deliberately short. If anything here stops being true, this
-page changes first.
+This is the plain-English version of how Koine handles your venue
+connections. The first sections use Kalshi, the first venue, as the example;
+the sections further down say what differs for Kraken, Hyperliquid, Alpaca,
+SnapTrade and the rest. It is deliberately short. If anything here stops being
+true, this page changes first.
+
+## Following a strategy never touches your money
+
+Tailing on Koine is **paper only**. A paper tail copies a creator's new
+trades into a simulated allocation, priced at the venue's quotes and charged
+the venue's fees, so you can see what following would have made. Koine never
+places an order in anyone's account, never asks a follower for any venue
+credential, and refuses any key or grant that can trade. There is no setting
+that turns this into live trading.
 
 ## What you give us
 
@@ -49,18 +60,23 @@ list. We poll these every few minutes and once nightly for reconciliation.
 
 - Your **display name** (you choose it), your strategy name, tags, and the
   description you write (labeled *unverified*).
-- Platform-computed statistics and charts derived from your fills and
-  settlements.
-- **Never** your email, your key id, your balance in dollars (only returns
-  and drawdowns as percentages, and realized P&L), or individual fills.
+- Platform-computed statistics and charts derived from your fills,
+  settlements and balances: returns, drawdowns, realized P&L and the equity
+  curve.
+- Your most recent trades and settlements (the latest few on the page, and
+  each new fill as a signal to followers, sized as a share of your equity),
+  your current holdings and exposure on crypto and stock venues, and the
+  balance that last night's reconciliation matched.
+- **Never** your email, your credentials or key id, or your account number.
 
 You can unlist the public page at any time from the dashboard.
 
 ## What "verified" means, exactly
 
-Every number on your page is computed by us from data pulled from Kalshi.
-Nightly we recompute your cash balance from stored fills and settlements and
-compare it with the balance Kalshi reports. If they disagree by more than
+Every number on your page is computed by us from data pulled from the
+venue. Nightly we recompute your balances from stored fills and settlements
+and compare them with the balances the venue reports (venues that report end
+of day only are checked against the latest daily statement). If they disagree by more than
 0.1%, the page is hidden until a human looks. Details: [methodology](/methodology).
 
 ## Reporting a problem

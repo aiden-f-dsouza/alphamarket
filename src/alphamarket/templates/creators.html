@@ -3,21 +3,22 @@
 {% block title %}For creators · Koine{% endblock %}
 {% block nav_active %}creators{% endblock %}
 {% block style %}
-  .hero { display:grid; grid-template-columns:minmax(0, 620px) minmax(0, 1fr); gap:80px; align-items:center; padding:88px 0 80px; }
+  .hero { display:grid; grid-template-columns:minmax(0, 620px) minmax(0, 1fr); gap:80px; align-items:center; padding-top:88px; padding-bottom:80px; }
   .hero h1 { font-size:60px; }
   .steps { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); }
   .steps > div { display:flex; flex-direction:column; gap:12px; padding:28px 28px 32px; border-right:1px solid var(--line); }
   .steps > div:last-child { border-right:0; }
-  .ctas { display:grid; grid-template-columns:1fr 1fr; gap:24px; padding:96px 0; }
+  .ctas { display:grid; grid-template-columns:1fr 1fr; gap:24px; padding-top:96px; padding-bottom:96px; }
   .ctas .card { padding:32px; gap:14px; }
-  @media (max-width:1000px) { .hero { grid-template-columns:1fr; padding:48px 0; gap:32px; } .hero h1 { font-size:44px; } .steps, .ctas { grid-template-columns:1fr; } .steps > div { border-right:0; border-bottom:1px solid var(--line); } }
+  @media (max-width:1000px) { .hero { grid-template-columns:minmax(0, 1fr); padding-top:48px; padding-bottom:48px; gap:32px; } .hero h1 { font-size:40px; } .steps, .ctas { grid-template-columns:minmax(0, 1fr); } .ctas { padding-top:64px; padding-bottom:64px; } .ctas .card { padding:28px 24px; } .steps > div { border-right:0; border-bottom:1px solid var(--line); } }
 {% endblock %}
 {% block body %}
 <div class="section hero">
   <div class="stack" style="gap:28px">
     <span class="label good">For creators</span>
-    <h1>Get paid for outcomes. Keep your edge to yourself.</h1>
-    <p class="lead" style="font-size:18px;max-width:540px">Koine verifies your track record straight from the venue and publishes a page you cannot fake and do not have to explain. Investors tail it from their own accounts. You earn only when they profit.</p>
+    <h1>Get paid for a record you can prove. Keep your edge to yourself.</h1>
+    <p class="lead" style="font-size:18px;max-width:540px">Koine verifies your track record straight from the venue and publishes a page you cannot fake and do not have to explain. Followers paper-tail it to see what copying you is worth before they risk anything. You earn a flat royalty, never a share of their returns.</p>
+    <p class="small text2" style="max-width:540px">Built for prediction markets (Kalshi, Polymarket), crypto (Kraken, Coinbase, Binance.US, Hyperliquid perps) and US stocks and ETFs (Alpaca, Interactive Brokers, other brokers through SnapTrade). Some venues open for connection as their partner approvals land.</p>
     <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin-top:4px">
       <a class="btn lg" href="{{ '/dashboard/connect' if user else '/signup' }}">Verify a track record</a>
       <a href="/marketplace" class="text2" style="display:inline-flex;align-items:center;gap:8px;font-weight:500">See an example page {{ m.icon("arrow", 14) }}</a>
@@ -25,7 +26,7 @@
   </div>
   <div class="card" style="padding:8px 28px 16px">
     <div class="hairline-list" style="padding-top:12px"><span class="label" style="display:block;padding:0 0 6px;border-bottom:0">Koine never sees</span>
-      <div style="align-items:center">{{ m.icon("eye-off", 18, "var(--brand)") }}<span>Your model, code or signals</span></div>
+      <div style="align-items:center">{{ m.icon("eye-off", 18, "var(--brand)") }}<span>Your model, code or thesis</span></div>
       <div style="align-items:center">{{ m.icon("eye-off", 18, "var(--brand)") }}<span>Your open orders in real time</span></div>
       <div style="align-items:center">{{ m.icon("lock", 18, "var(--brand)") }}<span>Any ability to move your money</span></div>
     </div>
@@ -40,23 +41,23 @@
 <div class="section stack" style="gap:32px">
   <h2>Three steps. Nothing to explain.</h2>
   <div class="card steps">
-    <div><span class="mono muted small">01</span><h3 style="font-size:20px">Connect a read-only key</h3><p class="small text2">From your venue account. We check its scope on the spot: a key that can trade is refused. It is encrypted at rest and erased when you disconnect.</p></div>
+    <div><span class="mono muted small">01</span><h3 style="font-size:20px">Connect read-only</h3><p class="small text2">An API key, an OAuth approval, a report token or a public wallet address, depending on the venue. We prove it cannot trade on the spot: one that can is refused. Credentials are encrypted at rest and erased when you disconnect.</p></div>
     <div><span class="mono muted small">02</span><h3 style="font-size:20px">We compute and publish the record</h3><p class="small text2">Fills, settlements and fees flow into an append-only ledger, reconciled against your balance every night. After 90 days of incubation the page goes live on the marketplace.</p></div>
-    <div><span class="mono muted small">03</span><h3 style="font-size:20px">Investors tail you. You get paid on their profit.</h3><p class="small text2">Set your capacity. Investors mirror from their own accounts. You earn a performance fee on the gains above each investor's high-water mark.</p></div>
+    <div><span class="mono muted small">03</span><h3 style="font-size:20px">Followers paper-tail you. You earn a flat royalty.</h3><p class="small text2">Followers copy your new trades with paper money at real venue prices, so they see what following you is worth before they risk anything. Your royalty is flat: the same whether they are up or down.</p></div>
   </div>
 </div>
 
 <div class="section ctas">
   <div class="card">
-    <span class="label">Fees, in one line</span>
-    <span class="serif brand-c" style="font-size:28px;line-height:1.2">You earn 20% of an investor's profit above their high-water mark. Koine keeps a quarter of that.</span>
-    <p class="small text2">No listing fee, no subscription. An investor who is under water pays nothing, so neither of us is paid until they recover. Tailing and fees launch after the verification layer; connecting a key today starts your verified window.</p>
+    <span class="label">Pricing, in one line</span>
+    <span class="serif brand-c" style="font-size:28px;line-height:1.2">Followers pay a flat subscription. Creators earn a flat royalty. Nobody is paid a share of returns.</span>
+    <p class="small text2">No listing fee and no performance fee. Pay never depends on how a strategy performs, so nothing rewards swinging for the fences. Billing launches after the verification layer; connecting today starts your verified window.</p>
   </div>
   <div class="card ink">
     <span class="label">Already have a record elsewhere?</span>
     <span class="serif" style="font-size:28px;line-height:1.2">We can only verify what the venue can show us.</span>
     <span class="small text2">Your verified window starts the day you connect. Older activity is imported where the venue allows and is labelled by how far back the data reaches.</span>
-    <div style="margin-top:4px"><a class="btn light" href="{{ '/dashboard/connect' if user else '/signup' }}">Connect Kalshi</a></div>
+    <div style="margin-top:4px"><a class="btn light" href="{{ '/dashboard/connect' if user else '/signup' }}">Connect a venue</a></div>
   </div>
 </div>
 {% endblock %}
