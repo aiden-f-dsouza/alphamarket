@@ -450,7 +450,7 @@ def account_action_form(
             return RedirectResponse(f"/dashboard/connect/claim/{account.id}", status_code=303)
         elif action == "claim":
             ratelimit.check(request, "venues_user", user.id)
-            claim_account(db, user, account.id)
+            claim_account(db, user, account.id, limiter=get_web_limiter(request.app))
         elif action == "disconnect":
             mfa.ensure_step_up(request, db, user)
             credentials.disconnect(
