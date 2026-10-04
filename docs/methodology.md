@@ -1169,4 +1169,11 @@ reason and the count are public, not the symbol or the size.
 public quote, else the last daily close, else at cost, with the unrealized
 profit or loss, the median delay between the creator's fill and Koine seeing
 it (copy lag) and the signals that were skipped, by reason. The portfolio value
-is the sum of its allocations' equity; its drawdown is measured on that sum.
+is the sum of its allocations' equity. Starting a new tail adds paper money,
+not profit, so the portfolio chart shows paper profit or loss in dollars (value
+minus the paper money put in so far), and its drawdown is measured on a
+flow-adjusted index, the same rule as deposits on a strategy page: a day's
+return is (V_d - new paper money_d) / V_(d-1) - 1. Example: a $1,000 tail falls
+to $900 on the day a $500 tail starts. The summed value rises from $1,000 to
+$1,400, but the index goes 1 to (1,400 - 500) / 1,000 = 0.9: a 10% drawdown,
+and the chart reads -$100.

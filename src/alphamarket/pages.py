@@ -846,6 +846,30 @@ def _combined_curve(views: list[dict]) -> list[tuple[str, float]]:
     return out
 
 
+def _allocated_by_day(views: list[dict], days: list[str]) -> list[float]:
+    """Paper money put in by each day: an allocation counts from the UTC day
+    of its first snapshot, the day it starts contributing to _combined_curve."""
+    starts = []
+    for v in views:
+        if v["curve"]:
+            first = min(_utc(at) for at, _ in v["curve"]).date().isoformat()
+            starts.append((first, v["allocation"]))
+    return [sum(a for first, a in starts if first <= day) for day in days]
+
+
+def _flow_adjusted_index(values: list[float], allocated: list[float]) -> list[float]:
+    """Growth of 1 across the combined curve with new allocations removed, as
+    strategy pages do for deposits (methodology, E14): a day's return is
+    (V_d - new paper money_d) / V_(d-1) - 1, so starting a tail is not a gain
+    and does not raise the peak drawdown is measured from."""
+    index, out = 1.0, []
+    for i, value in enumerate(values):
+        if i and values[i - 1] > 0:
+            index *= (value - (allocated[i] - allocated[i - 1])) / values[i - 1]
+        out.append(index)
+    return out
+
+
 def _position_rows(view: dict) -> list[dict]:
     """One allocation's positions in a single shape. Asset rows (paper.py
     asset_view_extras) carry kind/symbol/mark/value/unrealized; binary rows
@@ -891,9 +915,17 @@ def portfolio_view(summary: dict, handles: dict[str, str], now: datetime | None 
     views = summary["allocations"]
     allocated = summary["allocated"]
     curve = _combined_curve(views)
-    equity = [e for _, e in curve]
+    days = [d for d, _ in curve]
+    put_in = _allocated_by_day(views, days)
+    # The chart is paper P&L in dollars and drawdown is read off the
+    # flow-adjusted index: summed value would show every new tail as a jump.
+    equity = [e - a for (_, e), a in zip(curve, put_in, strict=True)]
+    index = _flow_adjusted_index([e for _, e in curve], put_in)
     dd = drawdown_series(
-        [(datetime.fromisoformat(d).date(), round(e * 1_000_000)) for d, e in curve]
+        [
+            (datetime.fromisoformat(d).date(), round(x * 1e9))
+            for d, x in zip(days, index, strict=True)
+        ]
     )
     positions, allocations = [], []
     lag_all, skipped_all = [], 0

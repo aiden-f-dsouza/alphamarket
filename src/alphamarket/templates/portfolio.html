@@ -35,7 +35,7 @@
     </div>
     {% if p.curve %}
     <div class="body" style="gap:10px;padding:20px 28px">
-      <div class="spread"><span class="label">Paper value{% if not p.real %} · 90 days{% endif %}</span><span class="mono small muted">net of simulated venue fees</span></div>
+      <div class="spread"><span class="label">{% if p.real %}Paper P&amp;L{% else %}Paper value · 90 days{% endif %}</span><span class="mono small muted">net of simulated venue fees{% if p.real %} · new tails are not gains{% endif %}</span></div>
       <div class="chart" style="grid-template-columns:52px 1fr">
         <div class="y" style="padding-bottom:22px">{% for i in range(5) %}<span>{{ m.usd(p.curve_hi - (p.curve_hi - p.curve_lo) * i / 4, 0) }}</span>{% endfor %}</div>
         <div class="stack" style="gap:8px">

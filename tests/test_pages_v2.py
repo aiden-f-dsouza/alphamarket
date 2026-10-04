@@ -1051,3 +1051,44 @@ def test_public_signals_handle_asset_and_binary_rows(client, db):
         and "19.4%" in html
     )
     assert "0.50000000" not in html  # quantities read as numbers, not atom strings
+
+
+def test_portfolio_new_tail_is_not_a_gain_and_drawdown_is_flow_adjusted():
+    # Tail a: 1,000 on 09-01, 900 on 09-02 (-10%). Tail b starts on 09-02 at
+    # 500. Summed value 1,000 -> 1,400 would read as +40% and no drawdown.
+    # P&L: 0 -> (1,400 - 1,500) = -100. Index: 1 -> (1,400 - 500) / 1,000
+    # = 0.9, so the drawdown is 10%.
+    def v(slug, curve, allocation):
+        return {
+            "strategy_slug": slug,
+            "strategy_name": slug.upper(),
+            "status": "active",
+            "stop_reason": None,
+            "started_at": curve[0][0],
+            "allocation": allocation,
+            "equity": curve[-1][1],
+            "return": 0.0,
+            "drawdown": 0.0,
+            "drawdown_limit": 0.2,
+            "positions": [],
+            "curve": curve,
+        }
+
+    a = v(
+        "a", [["2026-09-01T00:00:00+00:00", 1_000.0], ["2026-09-02T00:00:00+00:00", 900.0]], 1_000.0
+    )
+    b = v("b", [["2026-09-02T12:00:00+00:00", 500.0]], 500.0)
+    p = pages.portfolio_view(
+        {
+            "allocations": [a, b],
+            "allocated": 1_500.0,
+            "value": 1_400.0,
+            "pnl": -100.0,
+            "n_active": 2,
+        },
+        {},
+        now=datetime(2026, 9, 3, tzinfo=UTC),
+    )
+    assert (p["curve_lo"], p["curve_hi"]) == (-100.0, 0.0)
+    assert p["current_dd"] == pytest.approx(0.10)
+    assert p["worst_dd"] == pytest.approx(0.10)
