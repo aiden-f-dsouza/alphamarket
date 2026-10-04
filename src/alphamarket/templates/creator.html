@@ -5,7 +5,7 @@
   .head { display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:48px; align-items:start; }
   .cols { display:grid; grid-template-columns:minmax(0, 1fr) 400px; gap:32px; align-items:start; }
   .srow { display:grid; grid-template-columns:minmax(0, 1fr) 112px 80px 80px 56px 110px; align-items:center; gap:16px; padding:16px 0; border-bottom:1px solid var(--line); }
-  .srow .r { text-align:right; }
+  .srow .r { text-align:right; } .srow .badge { white-space:nowrap; align-self:flex-start; }
   .post { display:flex; flex-direction:column; gap:10px; padding:18px 0; border-bottom:1px solid var(--line); }
   .ctx { display:inline-flex; align-items:center; gap:6px; font:11px var(--mono); color:var(--good); margin-left:auto; }
   .ptabs { display:flex; align-items:center; gap:24px; border-bottom:1px solid var(--line2); } .ptabs span { font-size:14px; font-weight:500; padding:12px 0; color:var(--muted); border-bottom:1.5px solid transparent; } .ptabs span.on { color:var(--text); border-bottom-color:var(--brand); }
@@ -27,7 +27,7 @@
   <div class="stat"><span class="label">Best strategy, net</span><span class="v {{ 'good' if c.best.total_return >= 0 else 'bad' }}">{{ m.pct(c.best.total_return) }}<small>{{ c.best.track_days }}d</small></span></div>
   <div class="stat"><span class="label">Worst strategy, net</span><span class="v {{ 'good' if c.worst.total_return >= 0 else 'bad' }}">{{ m.pct(c.worst.total_return) }}<small>{{ c.worst.track_days }}d</small></span></div>
   <div class="stat"><span class="label">Worst drawdown</span><span class="v bad">{{ m.pct(-c.worst_dd) }}</span></div>
-  <div class="stat"><span class="label">Reconciliation</span><span class="v">{{ c.nights }} of {{ c.nights }}<small>nights matched</small></span></div>
+  <div class="stat"><span class="label">Reconciliation</span><span class="v">{{ c.nights }}/{{ c.nights }}<small>nights matched</small></span></div>
   <div class="stat"><span class="label">Paper tails</span><span class="v">{{ c.paper_tails }}<small>following</small></span></div>
 </div></div>
 <div class="cols">

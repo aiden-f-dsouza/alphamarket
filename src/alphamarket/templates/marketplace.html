@@ -17,6 +17,7 @@
   .lrow .r { text-align:right; }
   .lrow:last-child { border-bottom:0; }
   @media (max-width:1000px) { .lrow { grid-template-columns:40px minmax(0, 1fr) 80px; padding:14px 16px; gap:12px; } .lrow .hide { display:none; } .tabs { flex-direction:column; align-items:stretch; } .tabs > div { overflow-x:auto; gap:20px; } .tabs a { white-space:nowrap; } .search { width:100%; margin-bottom:10px; } }
+  @media (max-width:600px) { .filters > div:first-child { flex-wrap:nowrap !important; overflow-x:auto; padding-bottom:4px; max-width:100%; } .filters .chip { white-space:nowrap; flex-shrink:0; } .filters > div:first-child > span { flex-shrink:0; } }
 {% endblock %}
 {% block content %}
 <div class="spread">

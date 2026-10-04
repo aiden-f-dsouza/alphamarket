@@ -22,7 +22,7 @@ nothing here describes a live account, a performance fee or a high-water mark.
 import random
 from datetime import date, timedelta
 
-from alphamarket.charts import polyline, window_x
+from alphamarket.charts import drawdown_window, polyline, window_x
 from alphamarket.connectors.base import PaperFeeModel
 from alphamarket.connectors.registry import PROFILES
 from alphamarket.public import (
@@ -281,7 +281,12 @@ _STRATEGIES = [
         score=7.4,
         description="Long BTC and ETH while the 20-week trend is up, scaled out to stablecoins when it breaks. Rebalanced on Sunday evenings, so expect to give back the first leg of every reversal.",
         worst_periods=[
-            ("Jun 17 to Jul 8", -0.162, "29 days", "Trend broke twice inside three weeks."),
+            (
+                "Jun 17 to Jul 8",
+                -0.162,
+                "29 days",
+                "Two trend breaks in a row; the weekly rule gave back gains both times.",
+            ),
             ("Aug 2 to Aug 6", -0.058, "5 days", ""),
         ],
         holdings=[
@@ -322,7 +327,7 @@ _STRATEGIES = [
                 "Jul 1 to Jul 26",
                 -0.247,
                 "34 days",
-                "Rotation chased SOL and AVAX into the July slide.",
+                "Rotation bought the leaders just before they reversed.",
             ),
             ("Aug 12 to Aug 15", -0.083, "6 days", ""),
         ],
@@ -543,6 +548,29 @@ def _series(s: dict) -> tuple[list[date], list[float]]:
     return dates, curve
 
 
+def _max_dd(s: dict) -> float:
+    """Asset samples take their worst drawdown from their own curve, so the
+    headline, the shaded window and the drawdown chart agree."""
+    if "start" not in s:
+        return s["max_drawdown"]
+    return max(_drawdown(_series(s)[1]))
+
+
+def _worst_periods(s: dict) -> list[tuple]:
+    """Asset samples: the worst period is read off the curve (peak to trough,
+    then days to recover), carrying the sample's note; binary samples keep
+    their hand-written list."""
+    if "start" not in s or not s["worst_periods"]:
+        return s["worst_periods"]
+    dates, curve = _series(s)
+    a, b = drawdown_window(curve)
+    back = next((i for i in range(b, len(curve)) if curve[i] >= curve[a]), None)
+    span = f"{dates[a]:%b %-d} to {dates[b]:%b %-d}"
+    recovery = f"{(dates[back] - dates[a]).days} days" if back is not None else "not recovered"
+    first = (span, -(1 - curve[b] / curve[a]), recovery, s["worst_periods"][0][3])
+    return [first]
+
+
 def _venue(s: dict) -> str:
     return s.get("venue", "kalshi")
 
@@ -569,7 +597,7 @@ def _row(s: dict) -> dict:
         "asset_class_label": ASSET_CLASS_LABELS[classes[0]],
         "verification_tier": s.get("tier", "reconciled"),
         "total_return": s["total_return"],
-        "max_drawdown": s["max_drawdown"],
+        "max_drawdown": _max_dd(s),
         "risk_score": s["risk_score"],
         "track_days": s["days"],
         "reconciled": True,
@@ -822,8 +850,12 @@ def strategy_page(slug: str) -> dict | None:
     asset_class = profile.asset_classes[0]
     is_asset = "holdings" in s
     crypto = asset_class == "crypto"
-    bench = _walk(4, n, 0.0012, 0.03, start=curve[0]) if crypto else None
-    spx = _walk(4, n, 0.00055, 0.009, start=curve[0])
+    bench = _walk(5, n, 0.0006, 0.025, start=curve[0]) if crypto else None
+    spx = (
+        _walk(5, n, 0.0003, 0.009, start=curve[0])
+        if is_asset
+        else _walk(4, n, 0.00055, 0.009, start=curve[0])
+    )
     cash = [curve[0] * (1 + 0.000115) ** i for i in range(n)]
     benchmark = (
         ("Bitcoin, buy and hold", bench, "Bitcoin") if crypto else ("S&P 500", spx, "S&P 500")
@@ -858,7 +890,7 @@ def strategy_page(slug: str) -> dict | None:
             "n_fills": s["n_fills"],
             "n_settlements": s.get("n_settlements", 0),
             "total_return": s["total_return"],
-            "max_drawdown": s["max_drawdown"],
+            "max_drawdown": _max_dd(s),
             "sharpe": s["sharpe"],
             "sortino": s["sortino"],
             "win_rate": s.get("win_rate"),
@@ -875,7 +907,7 @@ def strategy_page(slug: str) -> dict | None:
         "benchmark_label": benchmark[2],
         "benchmark_note": CRYPTO_BENCHMARK_NOTE if crypto else BENCHMARK_NOTE,
         "vs_benchmark": s["total_return"] - (benchmark[1][-1] / benchmark[1][0] - 1),
-        "worst_periods": s["worst_periods"],
+        "worst_periods": _worst_periods(s),
         "tailing": {
             "paper_tails": s["paper_tails"],
             "min_usd": 100,

@@ -2,7 +2,7 @@
 {% import "_macros.html" as m %}
 {% block title %}Koine · Follow traders who can prove it{% endblock %}
 {% block style %}
-  .hero { display:grid; grid-template-columns:minmax(0, 600px) minmax(0, 540px); justify-content:space-between; align-items:center; gap:48px; padding:88px 0 80px; }
+  .hero { display:grid; grid-template-columns:minmax(0, 600px) minmax(0, 540px); justify-content:space-between; align-items:center; gap:48px; padding-top:88px; padding-bottom:80px; }
   .hero h1 { font-size:64px; }
   .hero-card { width:100%; max-width:540px; box-shadow:0 24px 60px -30px rgba(20,21,24,.25); }
   .trust { display:flex; align-items:center; gap:22px; flex-wrap:wrap; font:12px var(--mono); color:var(--muted); }
@@ -17,9 +17,9 @@
   .proof { display:grid; grid-template-columns:1fr 1fr; gap:64px; padding-top:112px; align-items:start; }
   .lrow { display:grid; grid-template-columns:minmax(0, 1fr) 68px 68px 52px 76px; align-items:center; gap:12px; padding:14px 0; border-top:1px solid var(--line); }
   .lrow .r { text-align:right; }
-  .ctas { display:grid; grid-template-columns:1fr 1fr; gap:24px; padding:112px 0 96px; }
+  .ctas { display:grid; grid-template-columns:1fr 1fr; gap:24px; padding-top:112px; padding-bottom:96px; }
   .ctas .card { padding:40px; gap:16px; }
-  @media (max-width:1000px) { .hero { grid-template-columns:minmax(0, 1fr); padding:48px 0; } .hero h1 { font-size:44px; } .points, .how, .proof, .ctas { grid-template-columns:minmax(0, 1fr); gap:32px; } .how, .proof { padding-top:72px; } .ctas { padding:72px 0 64px; } .ctas .card { padding:28px 24px; } .points > div { border-right:0; border-bottom:1px solid var(--line); } .lrow { grid-template-columns:minmax(0, 1fr) 80px; } .lrow .hide { display:none; } }
+  @media (max-width:1000px) { .hero { grid-template-columns:minmax(0, 1fr); padding-top:48px; padding-bottom:48px; } .hero h1 { font-size:44px; } .points, .how, .proof, .ctas { grid-template-columns:minmax(0, 1fr); gap:32px; } .how, .proof { padding-top:72px; } .ctas { padding-top:72px; padding-bottom:64px; } .ctas .card { padding:28px 24px; } .points > div { border-right:0; border-bottom:1px solid var(--line); } .lrow { grid-template-columns:minmax(0, 1fr) 80px; } .lrow .hide { display:none !important; } #signup { padding-top:72px !important; } }
   @media (max-width:600px) { .hero h1 { font-size:38px; } }
 {% endblock %}
 {% block body %}

@@ -176,6 +176,9 @@
     .footer { padding:32px 16px; gap:28px; } .demo-strip { padding:8px 16px; }
     .card > .body, .body { padding-left:16px; padding-right:16px; } .stat { padding:14px 16px; }
     .spread { flex-wrap:wrap; }
+    .hero-card > .row:first-child { flex-direction:column; gap:12px; }
+    .chart .x span:nth-child(2), .chart .x span:nth-child(4) { display:none; }
+    .hero-card .stats.two .stat { flex-direction:column !important; align-items:flex-start !important; gap:6px; }
   }
   {% block style %}{% endblock %}
 </style>

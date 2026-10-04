@@ -3,14 +3,14 @@
 {% block title %}For creators · Koine{% endblock %}
 {% block nav_active %}creators{% endblock %}
 {% block style %}
-  .hero { display:grid; grid-template-columns:minmax(0, 620px) minmax(0, 1fr); gap:80px; align-items:center; padding:88px 0 80px; }
+  .hero { display:grid; grid-template-columns:minmax(0, 620px) minmax(0, 1fr); gap:80px; align-items:center; padding-top:88px; padding-bottom:80px; }
   .hero h1 { font-size:60px; }
   .steps { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); }
   .steps > div { display:flex; flex-direction:column; gap:12px; padding:28px 28px 32px; border-right:1px solid var(--line); }
   .steps > div:last-child { border-right:0; }
-  .ctas { display:grid; grid-template-columns:1fr 1fr; gap:24px; padding:96px 0; }
+  .ctas { display:grid; grid-template-columns:1fr 1fr; gap:24px; padding-top:96px; padding-bottom:96px; }
   .ctas .card { padding:32px; gap:14px; }
-  @media (max-width:1000px) { .hero { grid-template-columns:minmax(0, 1fr); padding:48px 0; gap:32px; } .hero h1 { font-size:40px; } .steps, .ctas { grid-template-columns:minmax(0, 1fr); } .ctas { padding:64px 0; } .ctas .card { padding:28px 24px; } .steps > div { border-right:0; border-bottom:1px solid var(--line); } }
+  @media (max-width:1000px) { .hero { grid-template-columns:minmax(0, 1fr); padding-top:48px; padding-bottom:48px; gap:32px; } .hero h1 { font-size:40px; } .steps, .ctas { grid-template-columns:minmax(0, 1fr); } .ctas { padding-top:64px; padding-bottom:64px; } .ctas .card { padding:28px 24px; } .steps > div { border-right:0; border-bottom:1px solid var(--line); } }
 {% endblock %}
 {% block body %}
 <div class="section hero">

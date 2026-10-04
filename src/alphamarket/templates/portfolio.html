@@ -30,7 +30,7 @@
       <div class="stat"><span class="label">P&amp;L, all time</span><span class="v {{ 'good' if p.pnl >= 0 else 'bad' }}" style="font-size:28px">{{ "+" if p.pnl >= 0 }}{{ m.usd(p.pnl) }}<small>{{ m.pct(p.pnl_pct) }}</small></span></div>
       <div class="stat"><span class="label">Current drawdown</span><span class="v bad" style="font-size:28px">{{ m.pct(-p.current_dd) }}<small>worst {{ m.pct(-p.worst_dd) }}</small></span></div>
       {% if p.real %}<div class="stat"><span class="label">Open positions</span><span class="v" style="font-size:28px">{{ p.n_positions }}<small>{{ m.usd(p.unrealized) }} unrealized</small></span></div>
-      {% else %}<div class="stat"><span class="label">Venue fees, simulated</span><span class="v" style="font-size:28px">{{ m.usd(p.trading_costs) }}<small>paid by the paper fills</small></span></div>{% endif %}
+      {% else %}<div class="stat"><span class="label">Venue fees</span><span class="v" style="font-size:28px">{{ m.usd(p.trading_costs) }}<small>simulated, paid by paper fills</small></span></div>{% endif %}
     </div>
     {% if p.curve %}
     <div class="body" style="gap:10px;padding:20px 28px">
