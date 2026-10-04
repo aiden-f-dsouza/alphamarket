@@ -82,6 +82,12 @@ class JobKind(StrEnum):
     # abandoned connect whose first delete failed (aggregator_jobs.py). 22 chars;
     # jobs.kind is String(40).
     AGGREGATOR_DELETE_USER = "aggregator_delete_user"
+    # P7: NOT work. A row of this kind is a coordination lease (acquire_lease
+    # below): "stream process X holds account 7's websocket". No handler is
+    # ever registered for it, so no worker claims it; venue_account_id stays
+    # NULL so it never blocks the account's own jobs (one running job per
+    # account) and an expired one never puts the account in `error`.
+    LEASE = "lease"
 
 
 # Lower runs first. Copy lag matters for creators with followers, so their
@@ -403,6 +409,182 @@ def enqueue(
             .values(priority=priority, updated_at=now)
         )
     return job_id
+
+
+def enqueue_fresh(
+    db: Session,
+    kind: str,
+    *,
+    account_id: int,
+    priority: int | None = None,
+    now: datetime | None = None,
+) -> tuple[int | None, str]:
+    """Queue `kind` for the account so that a run STARTS after this call, for
+    callers that just committed new input (a streamed fill) the job must see.
+    Returns (job id or None, outcome): "queued", "coalesced" (a pending job
+    will start later anyway: nothing to add, so a burst queues one job) or
+    "busy" (both slots are running; the next scheduled run picks it up).
+
+    Plain enqueue() coalesces into a RUNNING job too, which may already have
+    read its input before the caller's commit and would never see it. So
+    when the default key is running, a follow-up is queued under
+    "<key>:next"; claim() runs one job per account at a time, so the
+    follow-up starts after the running one ends. Flushes, does not commit."""
+    base = default_dedupe_key(kind, account_id)
+    for key in (base, f"{base}:next"):
+        job_id = enqueue(
+            db, kind, account_id=account_id, priority=priority, dedupe_key=key, now=now
+        )
+        if job_id is not None:
+            return job_id, "queued"
+        status = db.scalar(
+            select(Job.status).where(Job.dedupe_key == key, Job.status.in_(ACTIVE_JOB_STATUSES))
+        )
+        if status == JobStatus.PENDING:
+            return None, "coalesced"
+        if status is None:  # it finished between the insert and the look: retry once
+            job_id = enqueue(
+                db, kind, account_id=account_id, priority=priority, dedupe_key=key, now=now
+            )
+            if job_id is not None:
+                return job_id, "queued"
+    return None, "busy"
+
+
+# ---- leases (coordination rows, not work; P7 stream subscriptions) ---------------
+#
+# A lease is a `jobs` row of kind LEASE whose dedupe_key names the thing held
+# ("stream:account:7"). The partial unique index on active dedupe keys makes
+# the INSERT race-free; an expired lease (lease_until passed: its holder died)
+# is taken over by a conditional UPDATE, so at most one holder ever wins.
+# The worker's reaper may turn an expired lease row back to `pending`; any
+# acquirer (or the late holder's renewal) takes such a row over too.
+
+
+def _lease_row_where(key: str):
+    return (Job.dedupe_key == key, Job.kind == JobKind.LEASE)
+
+
+def acquire_lease(
+    db: Session,
+    key: str,
+    holder: str,
+    ttl_seconds: int,
+    *,
+    payload: dict | None = None,
+    now: datetime | None = None,
+) -> bool:
+    """Take the lease `key` for `holder` (or extend it if already held).
+    False when someone else holds it and it has not expired. Commits."""
+    now = now or utcnow()
+    until = now + timedelta(seconds=ttl_seconds)
+    stmt = (
+        _insert(db)
+        .values(
+            kind=JobKind.LEASE.value,
+            venue_account_id=None,
+            dedupe_key=key,
+            payload=payload or {},
+            priority=PRIORITY_MAINTENANCE,
+            status=JobStatus.RUNNING,
+            run_after=now,
+            attempts=0,
+            max_attempts=get_settings().worker_max_attempts,
+            deferrals=0,
+            locked_by=holder,
+            lease_until=until,
+            created_at=now,
+            updated_at=now,
+        )
+        .on_conflict_do_nothing(index_elements=["dedupe_key"], index_where=_ACTIVE_WHERE)
+        .returning(Job.id)
+    )
+    if db.execute(stmt).scalar() is not None:
+        db.commit()
+        return True
+    values = {
+        "status": JobStatus.RUNNING,
+        "locked_by": holder,
+        "lease_until": until,
+        "attempts": 0,
+        "updated_at": now,
+    }
+    if payload is not None:
+        values["payload"] = payload
+    n = db.execute(
+        _update_jobs()
+        .where(
+            *_lease_row_where(key),
+            or_(
+                Job.status == JobStatus.PENDING,
+                (Job.status == JobStatus.RUNNING)
+                & or_(Job.locked_by == holder, Job.lease_until < now),
+            ),
+        )
+        .values(**values)
+    ).rowcount
+    db.commit()
+    return n == 1
+
+
+def renew_lease(
+    db: Session, key: str, holder: str, ttl_seconds: int, *, now: datetime | None = None
+) -> bool:
+    """Extend `holder`'s lease. A lease the reaper turned back to pending
+    (this holder was too slow) is retaken if nobody else took it. False:
+    the lease is lost, and whatever it guarded must stop. Commits."""
+    now = now or utcnow()
+    n = db.execute(
+        _update_jobs()
+        .where(
+            *_lease_row_where(key),
+            or_(
+                (Job.status == JobStatus.RUNNING) & (Job.locked_by == holder),
+                Job.status == JobStatus.PENDING,
+            ),
+        )
+        .values(
+            status=JobStatus.RUNNING,
+            locked_by=holder,
+            lease_until=now + timedelta(seconds=ttl_seconds),
+            attempts=0,
+            updated_at=now,
+        )
+    ).rowcount
+    db.commit()
+    return n == 1
+
+
+def release_lease(db: Session, key: str, holder: str, *, now: datetime | None = None) -> bool:
+    """Give the lease up (only if `holder` still has it). Commits."""
+    now = now or utcnow()
+    n = db.execute(
+        _update_jobs()
+        .where(
+            *_lease_row_where(key),
+            Job.status == JobStatus.RUNNING,
+            Job.locked_by == holder,
+        )
+        .values(
+            status=JobStatus.DONE, done_at=now, lease_until=None, locked_by=None, updated_at=now
+        )
+    ).rowcount
+    db.commit()
+    return n == 1
+
+
+def live_leases(db: Session, prefix: str, *, now: datetime | None = None) -> dict[str, str]:
+    """{key: holder} of every unexpired lease whose key starts with `prefix`."""
+    now = now or utcnow()
+    rows = db.execute(
+        select(Job.dedupe_key, Job.locked_by).where(
+            Job.kind == JobKind.LEASE,
+            Job.status == JobStatus.RUNNING,
+            Job.lease_until >= now,
+            Job.dedupe_key.startswith(prefix, autoescape=True),
+        )
+    ).all()
+    return {key: holder for key, holder in rows}
 
 
 def claim(

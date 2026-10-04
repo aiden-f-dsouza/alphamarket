@@ -1,6 +1,6 @@
 # Deploy (M4.4; target chosen in docs/implementation_plan.md section 2)
 
-Target: **Fly.io + Fly Managed Postgres**, `web` and `worker` process
+Target: **Fly.io + Fly Managed Postgres**, `web` and `worker` (plus the optional `stream`) process
 GROUPS from the one Dockerfile image (`fly.toml`; the image runs as a
 non-root user), **Cloudflare** in front for TLS/WAF/rate rules/CDN, a
 **static egress IP** so users can IP-restrict venue keys, and (a later
@@ -55,6 +55,34 @@ fly deploy
 
 `DATABASE_URL` from Fly is `postgres://`; the app rewrites it to
 `postgresql+psycopg://` at startup (config.py).
+
+## The optional `stream` process (P7)
+
+`fly.toml` declares a third process group, `stream`
+(`python -m alphamarket.stream`): websockets for creators with active paper
+allocations, so paper copies lag by seconds instead of a polling interval
+(docs/worker.md "Streaming"). It is optional: the poller is the source of
+truth, and `fly scale count stream=0` turns streaming off with no other
+effect. Turn it on once creators have paper followers:
+
+```
+fly scale count stream=1
+```
+
+- Outbound only (no `http_service`), same secrets as `worker` (it decrypts
+  keys through the vault, audited as purpose `stream`).
+- More than one machine is safe: each streamed account is a Postgres lease,
+  so no account is subscribed twice; a stopped machine's accounts move to
+  another within `STREAM_LEASE_SECONDS` (120 s).
+- **Hyperliquid caps websocket user subscriptions at 10 unique users per
+  IP.** Every machine behind one static egress IP shares those 10 slots
+  (keyed by `EGRESS_IP`, which must therefore name the real shared IP on
+  every machine, as for the worker's rate buckets); the 10 most-followed
+  Hyperliquid creators stream, the rest are polled. More needs a second
+  egress IP (another region) with its own `EGRESS_IP`.
+- Kraken streams only for keys that also carry the optional "WebSocket
+  interface" permission (docs/venues/kraken.md); Coinbase and Kraken stay
+  behind their partner approvals like every other path.
 
 ## Secrets (full list)
 

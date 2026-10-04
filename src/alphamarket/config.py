@@ -109,6 +109,14 @@ class Settings(BaseSettings):
     worker_sync_tick_seconds: int = 30  # how often the ticker looks for due syncs
     rate_limiter_backend: str = "postgres"  # "postgres" (shared) | "memory" (one process)
 
+    # ---- P7 streaming (stream.py, docs/worker.md "Streaming") ----
+    stream_refresh_seconds: int = 30  # re-read who to stream; renew leases
+    stream_lease_seconds: int = 120  # a dead stream process's accounts free up after this
+    stream_max_accounts: int = 200  # websockets one stream process holds at most
+    stream_backoff_base_seconds: float = 1.0  # reconnect: base x 2^n, full jitter
+    stream_backoff_cap_seconds: float = 120.0
+    stream_unavailable_cooloff_seconds: int = 6 * 3600  # e.g. key lacks WS permission
+
     # ---- p3-vault ----
     # Credential vault v2 (vault.py): which KeyWrapper wraps per-record data
     # keys. "local" = Fernet on VAULT_KEY (dev/tests; preflight refuses it in

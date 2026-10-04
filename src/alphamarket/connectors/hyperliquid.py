@@ -79,6 +79,10 @@ from alphamarket.connectors.base import (
     RateScope,
     ReadOnlyEvidence,
     ReadOnlyProof,
+    StreamEvent,
+    StreamingSource,
+    StreamProtocolError,
+    StreamUnavailable,
 )
 from alphamarket.money import MAX_DECIMALS, MICROS_PER_UNIT, to_atoms
 
@@ -87,6 +91,14 @@ INFO_URLS = {
     "testnet": "https://api.hyperliquid-testnet.xyz/info",
 }
 INFO_URL = INFO_URLS["prod"]
+# P7: the public websocket next to each info endpoint (docs "Websocket").
+WS_URLS = {
+    "prod": "wss://api.hyperliquid.xyz/ws",
+    "testnet": "wss://api.hyperliquid-testnet.xyz/ws",
+}
+# Docs "Rate limits and user limits" (checked 2026-09-26): "at most 10 unique
+# users" across user-specific websocket subscriptions, per IP.
+WS_USERS_PER_IP = 10
 
 FILLS_PAGE_LIMIT = 2000  # userFillsByTime: "at most 2000 fills per response"
 TIME_RANGE_PAGE_LIMIT = 500  # userFunding / ledger updates / fundingHistory
@@ -687,6 +699,10 @@ class HyperliquidConnector(_Info, AssetVenueConnector):
             liquidity="taker" if r.get("crossed") else "maker",
         )
 
+    def stream_source(self) -> HyperliquidFillStream:
+        """P7: the `userFills` websocket subscription for this address."""
+        return HyperliquidFillStream(self, ws_url_for(self.info_url))
+
     # ---- events: funding stream, then ledger-update stream ----------------------
 
     def fetch_events_page(
@@ -1142,3 +1158,88 @@ class HyperliquidMarketData(_Info, AssetMarketData):
                 break
             cursor = int(rows[-1]["time"]) + 1  # one row per coin per time
         return out
+
+
+# ---- P7: public websocket (StreamMode.FILLS) ------------------------------------
+
+
+def ws_url_for(info_url: str) -> str:
+    """The websocket next to an info endpoint: the documented one per env,
+    else the same host with /ws (tests, a self-hosted node later)."""
+    for env, url in INFO_URLS.items():
+        if info_url == url:
+            return WS_URLS[env]
+    base = info_url.removesuffix("/info")
+    return "wss://" + base.split("://", 1)[-1] + "/ws"
+
+
+class HyperliquidFillStream(StreamingSource):
+    """`userFills` for one address on the public websocket (no credential).
+
+    FILLS mode: each element of `data.fills` is the very object REST
+    `userFillsByTime` returns (docs "Websocket > Subscriptions", WsFill: coin,
+    px, sz, side, time, startPosition, dir, closedPnl, hash, oid, crossed,
+    fee, tid, feeToken, builderFee?, liquidation?), so it is normalized by
+    the same HyperliquidConnector.to_fill and lands with the same id (`tid`)
+    and the same legs as the poller's copy: ingest stores it once.
+
+    Frames (VERIFIED live 2026-10-04 by a one-off public probe of the
+    subscription: ack, then a snapshot of 30 fills whose keys are exactly the
+    REST row keys; ping answered {"channel":"pong"}):
+      ack       {"channel":"subscriptionResponse","data":{"method":"subscribe",
+                 "subscription":{"type":"userFills","user":"0x.."}}}
+      snapshot  {"channel":"userFills","data":{"isSnapshot":true,
+                 "user":"0x..","fills":[...]}}  first, the recent fills
+      update    {"channel":"userFills","data":{"user":"0x..","fills":[...]}}
+      pong      {"channel":"pong"}
+      error     {"channel":"error","data":"<text>"}
+    The snapshot is ingested too (duplicates are skipped), which closes any
+    gap a reconnect left. The server drops a connection it has not heard
+    from for 60 s, so the core pings every 30 s."""
+
+    venue = "hyperliquid"
+    ping_interval_seconds = 30.0
+    idle_timeout_seconds = 75.0  # pongs answer every ping
+
+    def __init__(self, connector: HyperliquidConnector, ws_url: str) -> None:
+        self.connector = connector
+        self.ws_url = ws_url
+
+    def url(self) -> str:
+        return self.ws_url
+
+    def subscribe_frames(self) -> list[str]:
+        sub = {"type": "userFills", "user": self.connector.address}
+        return [json.dumps({"method": "subscribe", "subscription": sub})]
+
+    def ping_frame(self) -> str | None:
+        return json.dumps({"method": "ping"})
+
+    def parse(self, frame: str | bytes) -> list[StreamEvent]:
+        try:
+            msg = json.loads(frame)
+        except ValueError:
+            raise StreamProtocolError("hyperliquid: frame is not JSON") from None
+        if not isinstance(msg, dict):
+            return []
+        channel = msg.get("channel")
+        if channel == "error":
+            text = str(msg.get("data") or "")[:200]
+            # The per-IP user cap ("Cannot track more than 10 total users"
+            # [VERIFY wording]): the slot leases should never let it happen;
+            # if another process on this IP ignores them, back off for long.
+            if "users" in text.lower():
+                raise StreamUnavailable(f"hyperliquid: {text}")
+            raise StreamProtocolError(f"hyperliquid: {text}")
+        if channel != "userFills":
+            return []  # subscriptionResponse, pong
+        data = msg.get("data") or {}
+        user = str(data.get("user") or "").lower()
+        if user and user != self.connector.address:
+            return []  # not this account's subscription
+        rows = [r for r in data.get("fills") or [] if isinstance(r, dict)]
+        if not rows:
+            return []
+        rows.sort(key=lambda r: (int(r["time"]), fill_id(r)))
+        fills = [self.connector.to_fill(r) for r in rows]
+        return [StreamEvent(fills=fills, ref=fills[-1].venue_fill_id)]

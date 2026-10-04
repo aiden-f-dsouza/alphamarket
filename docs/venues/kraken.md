@@ -164,6 +164,46 @@ rewards), DOT28.S (28-day bonded), USD.HOLD, *.F (auto-earn), *.B
 variant is a CONVERT; valuation prices a variant as its underlying (ETH2.S
 and ETH2 by ETH/USD, DOT28.S by DOT/USD), and USD/USDC/USDT variants at par.
 
+## Streaming (P7)
+
+`KrakenExecutionStream`: WS v2 `wss://ws-auth.kraken.com/v2`, private
+`executions` channel (the successor of v1 `ownTrades`), subscribed with a
+token from REST `GetWebSocketsToken` (fetched on every connect; valid 15 min
+until used, then for the connection; held in memory only, never logged).
+Mode NUDGE: a `trade`/`filled` execution queues the account's sync, which
+ingests the fill through Ledgers + TradesHistory as always. The execution
+report is NOT ingested: it carries no Ledgers rows, so its legs (ZUSD at 4
+dp, running balances) could not match the polled copy and ingest would
+quarantine the duplicate.
+
+Permission: `GetWebSocketsToken` needs the key's **"WebSocket interface"**
+permission (UI: "Access WebSockets API"). It is compatible with a read-only
+key: the permission grants no trading of its own; placing an order over the
+websocket still needs "Create & Modify Orders", which `prove_read_only`'s
+AddOrder(validate) probe already refuses, and a key with it is rejected
+whatever transport it would use [VERIFY with a real key that a query +
+WebSocket key gets `EGeneral:Permission denied` for WS `add_order`]. The
+connect screen still asks for the three query permissions only, so most
+keys will not have it: `GetWebSocketsToken` then answers `EGeneral:Permission
+denied`, the stream reports the account unavailable, and it is simply polled
+(retried after `STREAM_UNAVAILABLE_COOLOFF_SECONDS`). Asking users to tick
+the fourth permission is a product decision for the connect copy (not made
+here; the consent text is unchanged).
+
+[VERIFY] on a real key: the frame shapes in
+`tests/fixtures/streams/kraken_ws_v2.json` (docs examples); whether a trade
+emits `exec_type` `trade`, `filled` or both (both nudge; duplicates
+coalesce); that a trade's `exec_id` equals the TradesHistory txid (only
+logged); how fast a websocket trade appears in REST Ledgers (if REST lags,
+the nudged sync can miss it and the next scheduled sync takes it).
+
+Nonces: `GetWebSocketsToken` is a signed private call made from the stream
+process, whose nonce counter is separate from the worker's. One call per
+(re)connect can still interleave with a sync of the same key and earn an
+`EAPI:Invalid nonce` on either side (the job retries; the stream backs off).
+If that shows up in practice, raise the key's nonce window or move the token
+fetch into a job [VERIFY frequency on a real key].
+
 ## Known gaps
 
 - Terms: needs written consent (above).

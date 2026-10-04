@@ -90,6 +90,23 @@ numbers under load — see `docs/implementation_plan.md` P2 (outbound limiter).
 so `VenueProfile.history_depth = "all"`. This has not been confirmed against
 a real, long-lived account.
 
+## Streaming (P7)
+
+`CoinbaseUserStream`: Advanced Trade websocket
+`wss://advanced-trade-ws-user.coinbase.com`, channels `user` and
+`heartbeats` (the latter keeps the subscription open), each subscribe frame
+signed with a fresh CDP JWT without a `uri` claim (`build_ws_jwt`, as the
+SDK's `build_ws_jwt`). Mode NUDGE: the `user` channel reports orders
+(`cumulative_quantity`, `avg_price`, `status`), not fills keyed by
+`trade_id`, so a rise in an order's `cumulative_quantity` queues the
+account's sync instead of writing anything.
+
+[VERIFY] with a real View-only key: that it may subscribe to `user` at all
+(an auth error frame makes the account poll-only for the cool-off); which
+portfolio's orders a portfolio-scoped key sees (extra orders only cost an
+extra sync); the frame shapes in `tests/fixtures/streams/coinbase_ws_user.json`
+(docs examples).
+
 ## Known gaps
 
 - **v2 transactions auth is unconfirmed.** The task and the research doc

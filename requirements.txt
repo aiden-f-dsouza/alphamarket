@@ -1,6 +1,7 @@
 # Vercel installs from this file (it does not read pyproject/uv.lock).
 # Keep in sync with the runtime dependencies in pyproject.toml. The worker-only
-# dependency (apscheduler) is omitted: no worker runs on Vercel.
+# dependencies (apscheduler; websockets for the P7 stream process) are omitted:
+# no worker or stream process runs on Vercel.
 fastapi>=0.115
 sqlalchemy>=2.0
 psycopg[binary]>=3.2

@@ -272,6 +272,22 @@ class AlpacaConnector(AssetVenueConnector):
     def __repr__(self) -> str:  # never show the token
         return f"AlpacaConnector(env={self.env!r}, account_id={self.account_id!r})"
 
+    def stream_source(self) -> None:
+        """P7: not streamed yet; the account is polled.
+
+        TODO(P7): `trade_updates` on wss://{paper-,}api.alpaca.markets/stream
+        ({"action":"auth"} with the OAuth token, then {"action":"listen",
+        "data":{"streams":["trade_updates"]}}) would be a NUDGE source: its
+        `fill`/`partial_fill` events carry an execution_id, while the poller's
+        FILL activities carry their own activity id, so the stream could not
+        be ingested directly. Blocked on [VERIFY]: does trade_updates accept
+        an OAuth token granted with NO `trading` scope (Koine's read-only
+        grant), and does it then deliver fills? docs/venues/alpaca.md lists
+        the stream among what a read-only grant exposes, but that is not
+        confirmed on a registered app. Until a sandbox app answers it, Koine
+        does not open a trading-stream connection with a user's grant."""
+        return None
+
     # ---- transport -------------------------------------------------------
 
     def _send(

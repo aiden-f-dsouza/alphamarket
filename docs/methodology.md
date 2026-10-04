@@ -903,6 +903,17 @@ not copied (it is still shown). If no quote can be had (the data budget is
 spent or the source is down), the signal is stored without one and paper
 followers use the creator's price with a stated penalty instead.
 
+**Streaming shortens the lag, nothing else.** For creators whose strategy
+has active paper copies, Koine may hold a live connection to the venue
+(Hyperliquid's fill feed for the most-followed creators, and on Kraken or
+Coinbase a notice that triggers an immediate import). A fill imported that
+way is the same fill, with the same id and the same ledger entries, as the
+one the regular import fetches minutes later; it is stored once, whichever
+arrives first, and `observed_at` is simply earlier. The regular import stays
+the record of truth: when a live connection drops, the next regular import
+picks up anything it missed, and the only effect is a longer copy lag on
+those signals.
+
 <!-- wave2:p6-engine -->
 ## Paper copying v2: sizing, fill price, fees
 
