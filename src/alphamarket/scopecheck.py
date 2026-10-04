@@ -18,20 +18,32 @@ from sqlalchemy.orm import Session
 
 from alphamarket import alerts, audit, credentials
 from alphamarket.audit import AuditAction
-from alphamarket.connectors.base import ReadOnlyEvidence, ReadOnlyProof, VenueConnector
+from alphamarket.connectors.base import (
+    RateLimited,
+    ReadOnlyEvidence,
+    ReadOnlyProof,
+    VenueConnector,
+)
 from alphamarket.ingest import connector_for
 from alphamarket.models import VenueAccount, VenueAccountStatus
-from alphamarket.venue_limits import VenueLimiter
+from alphamarket.venue_limits import VenueBusy, VenueLimiter, rate_limit_from_http
 
 logger = logging.getLogger(__name__)
 
 RECHECK_STATUSES = (VenueAccountStatus.ACTIVE, VenueAccountStatus.ERROR)
 
 
-def prove(connector: VenueConnector) -> ReadOnlyEvidence:
+def prove(connector: VenueConnector, *, raise_limits: bool = False) -> ReadOnlyEvidence:
+    """`raise_limits` is set by web requests (venues.py): a refusal by the outbound
+    limiter (VenueBusy) or a 429 from the venue is not "undetermined", it is
+    "busy, try again", so it propagates to venue_limits.call_venue."""
     try:
         return connector.prove_read_only()
+    except VenueBusy:
+        raise  # only a web request's throttle raises it; never an undetermined pass
     except Exception as exc:  # network, parse: undetermined, never a pass
+        if raise_limits and (isinstance(exc, RateLimited) or rate_limit_from_http(exc)):
+            raise
         return ReadOnlyEvidence(
             method=ReadOnlyProof.NONE,
             read_only=None,

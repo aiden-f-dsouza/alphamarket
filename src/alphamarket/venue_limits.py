@@ -68,6 +68,10 @@ BREAKER_THRESHOLD = 5  # consecutive 5xx/timeouts that open a venue's circuit
 BREAKER_OPEN_MS = 2 * 60 * 1000  # how long an open circuit stays open
 DEFAULT_RETRY_AFTER_S = 60.0  # 429 without a usable Retry-After header
 WEB_MAX_WAIT_SECONDS = 2.0  # the longest a web request sleeps for a token
+# A bucket that was refunded after a refusal has lost a milli-token or two to
+# integer refill rounding, so the retry after the sleep can still be a few ms
+# short; that is slept off, a real shortfall is not.
+WEB_ROUNDING_SLACK_SECONDS = 0.1
 
 
 def now_ms() -> int:
@@ -642,6 +646,14 @@ class _FailFastThrottle:
             return
         except BudgetExhausted as exc:
             if exc.retry_after_seconds > self.max_wait_seconds:
+                raise VenueBusy(venue, exc.retry_after_seconds, "budget") from None
+            wait = exc.retry_after_seconds
+        self.sleep(wait)
+        try:
+            self.inner.before(endpoint)
+            return
+        except BudgetExhausted as exc:
+            if exc.retry_after_seconds > WEB_ROUNDING_SLACK_SECONDS:
                 raise VenueBusy(venue, exc.retry_after_seconds, "budget") from None
             wait = exc.retry_after_seconds
         self.sleep(wait)

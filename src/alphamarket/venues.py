@@ -33,6 +33,7 @@ import json
 import logging
 import re
 import secrets
+from collections.abc import Callable
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -44,7 +45,7 @@ from alphamarket import audit, consent, credentials
 from alphamarket.audit import AuditAction
 from alphamarket.auth import current_user
 from alphamarket.config import get_settings
-from alphamarket.connectors.base import CredentialKind, OwnershipProof
+from alphamarket.connectors.base import CredentialKind, OwnershipProof, RateLimited, Throttle
 from alphamarket.connectors.registry import (
     SUPPORTED_VENUES,
     aggregator_register_user,
@@ -72,7 +73,14 @@ from alphamarket.reconcile import (
     take_anchor,
 )
 from alphamarket.scopecheck import apply_evidence, evidence_json, prove
-from alphamarket.venue_limits import VenueBusy, call_venue, get_web_limiter
+from alphamarket.venue_limits import (
+    VenueBusy,
+    VenueLimiter,
+    call_venue,
+    credential_ref,
+    get_web_limiter,
+    rate_limit_from_http,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/venues", tags=["venues"])
@@ -230,7 +238,7 @@ WRITABLE_KEY_DETAIL = (
 )
 
 
-def verify_new_credential(
+def _verify_new_credential(
     db: Session,
     user: User,
     venue: str,
@@ -242,6 +250,7 @@ def verify_new_credential(
     reject_target: tuple[str, str | int],
     reject_details: dict | None = None,
     writable_detail: str = WRITABLE_KEY_DETAIL,
+    throttle: Throttle | None = None,
 ):
     """The checks every new credential passes before Koine stores it (connect,
     finishing a pending connect, rotate): build the connector, make the
@@ -249,14 +258,24 @@ def verify_new_credential(
     writable credential is audited (CREDENTIAL_REJECTED on `reject_target`)
     and committed before the 422, since offering one is a security event even
     though nothing is stored. Returns (connector, evidence). Error details are
-    generic on purpose: no exception text may echo key material back."""
+    generic on purpose: no exception text may echo key material back.
+
+    `throttle` is the web request's fail-fast Throttle (venue_limits.call_venue
+    hands it in): it goes on the connector, and a refusal by it (VenueBusy) or a
+    429 from the venue is passed up unchanged for call_venue to turn into
+    "busy, try again", never swallowed as a failed login or an undetermined
+    read-only probe."""
     profile = get_profile(venue)
     try:
         connector = build_connector(venue, venue_env, key_id, secret, account_ref=account_ref)
+        if throttle is not None:
+            connector.set_throttle(throttle)
         connector.check_connection()
-    except HTTPException:
+    except (HTTPException, VenueBusy):
         raise
-    except Exception:
+    except Exception as exc:
+        if throttle is not None and _is_rate_limited(exc):
+            raise
         raise HTTPException(
             status_code=422,
             detail=(
@@ -265,7 +284,7 @@ def verify_new_credential(
                 else f"{profile.display_name} does not know this account."
             ),
         ) from None
-    evidence = prove(connector)
+    evidence = prove(connector, raise_limits=throttle is not None)
     if evidence.read_only is False:
         target_type, target_id = reject_target
         audit.record(
@@ -283,6 +302,74 @@ def verify_new_credential(
         db.commit()
         raise HTTPException(status_code=422, detail=writable_detail)
     return connector, evidence
+
+
+def _is_rate_limited(exc: BaseException) -> bool:
+    return isinstance(exc, RateLimited) or rate_limit_from_http(exc) is not None
+
+
+def busy_http_error(display_name: str, exc: VenueBusy) -> HTTPException:
+    """The 503 a web request answers when venue_limits.VenueBusy stopped its
+    venue call: user-safe text and a Retry-After the page can pass on."""
+    return HTTPException(
+        status_code=503,
+        detail=venue_busy_message(display_name),
+        headers={"Retry-After": str(max(1, round(exc.retry_after_seconds)))},
+    )
+
+
+def web_venue_call[T](
+    limiter: VenueLimiter | None, venue: str, key_id: str, call: Callable[[Throttle | None], T]
+) -> T:
+    """venue_limits.call_venue for a request handler: the venue's buckets,
+    429 backoff and circuit breaker, never a wait of more than a couple of
+    seconds, and a busy venue is a 503 HTTPException (nothing was changed)."""
+    try:
+        return call_venue(limiter, venue, credential_ref(venue, key_id), call)
+    except VenueBusy as exc:
+        logger.warning("%s call refused: %s", venue, exc.reason)
+        raise busy_http_error(get_profile(venue).display_name, exc) from None
+
+
+def verify_new_credential(
+    db: Session,
+    user: User,
+    venue: str,
+    venue_env: str,
+    key_id: str,
+    secret: str | None,
+    account_ref: str | None,
+    *,
+    reject_target: tuple[str, str | int],
+    reject_details: dict | None = None,
+    writable_detail: str = WRITABLE_KEY_DETAIL,
+    limiter: VenueLimiter | None = None,
+):
+    """_verify_new_credential through the outbound limiter (see web_venue_call):
+    what rotate.py calls. Without a limiter (scripts, tests) it is the bare check."""
+    return web_venue_call(
+        limiter,
+        venue,
+        key_id,
+        lambda throttle: _verify_new_credential(
+            db,
+            user,
+            venue,
+            venue_env,
+            key_id,
+            secret,
+            account_ref,
+            reject_target=reject_target,
+            reject_details=reject_details,
+            writable_detail=writable_detail,
+            throttle=throttle,
+        ),
+    )
+
+
+def venue_busy_message(display_name: str) -> str:
+    """What a page says when venue_limits.VenueBusy stopped a web call."""
+    return f"{display_name} is busy, try again in a minute."
 
 
 def connect_account(
@@ -350,20 +437,29 @@ def connect_account(
         screen = consent.require_consent(db, user, payload.venue, payload.consent_sha256, request)
 
     venue_env = get_settings().venue_env(payload.venue)
-    connector, evidence = verify_new_credential(
-        db,
-        user,
-        payload.venue,
-        venue_env,
-        key_id,
-        secret,
-        payload.account_ref,
-        reject_target=("venue", payload.venue),
-    )
 
-    # Reconciliation anchor: the balance at this moment is what every later
-    # equity number is measured from (see ledger.py).
-    anchor = take_anchor(connector)
+    # The venue calls (credential check, read-only proof, the anchor's balance and
+    # fills) are one unit through the outbound limiter: a busy venue is a 503
+    # before anything below is written, so a PENDING account stays PENDING and
+    # the user can submit again.
+    def _verify_and_anchor(throttle: Throttle | None):
+        connector, evidence = _verify_new_credential(
+            db,
+            user,
+            payload.venue,
+            venue_env,
+            key_id,
+            secret,
+            payload.account_ref,
+            reject_target=("venue", payload.venue),
+            throttle=throttle,
+        )
+        # Reconciliation anchor: the balance at this moment is what every later
+        # equity number is measured from (see ledger.py).
+        return connector, evidence, take_anchor(connector)
+
+    limiter = get_web_limiter(request.app) if request is not None else None
+    connector, evidence, anchor = web_venue_call(limiter, payload.venue, key_id, _verify_and_anchor)
 
     key_proves_ownership = profile.ownership is OwnershipProof.KEY
     if pending is not None:
@@ -442,11 +538,6 @@ def connect_account(
     }
 
 
-def venue_busy_message(display_name: str) -> str:
-    """What a page says when venue_limits.VenueBusy stopped a web call."""
-    return f"{display_name} is busy, try again in a minute."
-
-
 def begin_aggregator_connect(
     db: Session,
     user: User,
@@ -480,11 +571,7 @@ def begin_aggregator_connect(
         )
     except VenueBusy as exc:
         logger.warning("%s user registration refused: %s", venue, exc.reason)
-        raise HTTPException(
-            status_code=503,
-            detail=venue_busy_message(profile.display_name),
-            headers={"Retry-After": str(max(1, round(exc.retry_after_seconds)))},
-        ) from None
+        raise busy_http_error(profile.display_name, exc) from None
     except Exception:
         logger.warning("%s user registration failed", venue)
         raise HTTPException(
@@ -540,8 +627,25 @@ class ClaimIn(BaseModel):
     signature: str | None = Field(default=None, max_length=400)
 
 
+def _verify_claim(limiter: VenueLimiter | None, account: VenueAccount, connector, payload: str):
+    """connector.verify_claim through the outbound limiter (a busy venue is a
+    503 and the account stays unclaimed, so the user can submit again)."""
+
+    def call(throttle: Throttle | None):
+        if throttle is not None:
+            connector.set_throttle(throttle)
+        return connector.verify_claim(payload)
+
+    return web_venue_call(limiter, account.venue, account.key_id, call)
+
+
 def claim_account(
-    db: Session, user: User, account_id: int, *, signature: str | None = None
+    db: Session,
+    user: User,
+    account_id: int,
+    *,
+    signature: str | None = None,
+    limiter: VenueLimiter | None = None,
 ) -> dict:
     """Prove ownership of an address-keyed account; idempotent once claimed.
 
@@ -565,7 +669,9 @@ def claim_account(
                 status_code=422,
                 detail="Sign the Koine message with your wallet, then submit the signature.",
             )
-        found = connector.verify_claim(connector.claim_payload(account.claim_code, sig))
+        found = _verify_claim(
+            limiter, account, connector, connector.claim_payload(account.claim_code, sig)
+        )
         if found is None:
             raise HTTPException(
                 status_code=502,
@@ -581,7 +687,7 @@ def claim_account(
                 ),
             )
     else:
-        found = connector.verify_claim(account.claim_code)
+        found = _verify_claim(limiter, account, connector, account.claim_code)
         if found is None:
             raise HTTPException(
                 status_code=502, detail="Could not read the venue profile; try again."
@@ -607,12 +713,17 @@ def claim_account(
 )
 def claim(
     account_id: int,
+    request: Request,
     payload: ClaimIn | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
     return claim_account(
-        db, user, account_id, signature=payload.signature if payload is not None else None
+        db,
+        user,
+        account_id,
+        signature=payload.signature if payload is not None else None,
+        limiter=get_web_limiter(request.app),
     )
 
 

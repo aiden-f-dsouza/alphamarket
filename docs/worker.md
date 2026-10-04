@@ -172,6 +172,18 @@ a 429 raises `VenueBusy` and nothing is sent. Pages answer 503 with
 `Retry-After` and "SnapTrade is busy, try again in a minute"; a disconnect
 does not fail but hands its `deleteUser` to the job below.
 
+So do the other request-path venue calls: the connect check, read-only proof
+and anchor of `venues.connect_account` (every venue; the SnapTrade finish POST,
+the JSON and form connects, the OAuth callback), `rotate.rotate_credential`
+and the ownership claim (`venues.claim_account`). They run as one unit inside
+`web_venue_call`, which turns `VenueBusy` into a 503 with `Retry-After`
+before anything is written, so a PENDING account stays PENDING and the same
+form can be submitted again. A 429 from the venue during the check or the
+proof is passed up as busy (never as a failed login or an "undetermined"
+proof). Not yet routed: the dashboard's inline sync, reconcile and claim
+buttons (`pages.account_action_form`) and the manual `POST /venues/{id}/sync`
+and `/reconcile`, which call the venue with no limiter.
+
 Backends: `PostgresBuckets` (default; `rate_buckets` and `venue_circuits`
 tables, refill+take in one `UPDATE ... RETURNING`, shared by all processes)
 and `MemoryBuckets` (`RATE_LIMITER_BACKEND=memory`: one process only, since
