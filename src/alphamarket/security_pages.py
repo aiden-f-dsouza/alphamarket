@@ -18,25 +18,15 @@ from alphamarket.auth import optional_user, totp_enabled
 from alphamarket.connectors.registry import PROFILES
 from alphamarket.db import get_db
 from alphamarket.models import AuditLog, User, VenueAccount
-from alphamarket.pages import _render
+from alphamarket.pages import _render, safe_next
 
 router = APIRouter(include_in_schema=False)
 # wave2: POST /account/email (JSON) rides on this router, which main.py includes.
 
 
 def _safe_next(next_url: str | None, default: str = "/dashboard/security") -> str:
-    """Only same-site paths: never an open redirect. Browsers read a
-    backslash as a slash (`/\\evil.com` goes to evil.com) and drop tabs and
-    newlines, so those are refused too."""
-    if (
-        next_url
-        and next_url.startswith("/")
-        and not next_url.startswith("//")
-        and "\\" not in next_url
-        and not any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in next_url)
-    ):
-        return next_url
-    return default
+    """pages.safe_next (the one open-redirect guard), defaulting here."""
+    return safe_next(next_url, default)
 
 
 def _status(exc: HTTPException) -> int:
@@ -47,23 +37,26 @@ def _status(exc: HTTPException) -> int:
 
 
 @router.get("/login/2fa", response_class=HTMLResponse)
-def login_2fa_page(request: Request, db: Session = Depends(get_db)):
+def login_2fa_page(request: Request, next: str = "", db: Session = Depends(get_db)):
     if sessions.pending(db, request) is None:
         return RedirectResponse("/login", status_code=303)
-    return _render(request, "login_2fa.html", user=None, error=None)
+    return _render(request, "login_2fa.html", user=None, error=None, next=safe_next(next, ""))
 
 
 @router.post("/login/2fa")
-def login_2fa(request: Request, code: str = Form(), db: Session = Depends(get_db)):
+def login_2fa(
+    request: Request, code: str = Form(), next: str = Form(""), db: Session = Depends(get_db)
+):
+    next = safe_next(next, "")
     try:
         mfa.complete_login(request, db, code)
     except HTTPException as exc:
         if sessions.pending(db, request) is None:
             return RedirectResponse("/login", status_code=303)
-        resp = _render(request, "login_2fa.html", user=None, error=str(exc.detail))
+        resp = _render(request, "login_2fa.html", user=None, error=str(exc.detail), next=next)
         resp.status_code = _status(exc)
         return resp
-    return RedirectResponse("/dashboard", status_code=303)
+    return RedirectResponse(next or "/dashboard", status_code=303)
 
 
 # ---- /dashboard/security --------------------------------------------------------

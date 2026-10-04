@@ -207,7 +207,7 @@ def test_v2_page_shows_holdings_exposure_and_twr_not_settled_trades(client, db):
 
     html = client.get("/s/eth-swing").text
     assert "Holdings and exposure" in html
-    assert "BTC-PERP" in html and "entry 60000" in html
+    assert "BTC-PERP" in html and "entry 60,000" in html
     assert "$100.00" in html and "unrealized" in html  # perp: unrealized P&L, not a holding
     assert "$4,500.00" in html and "47%" in html  # ETH value and 47.37% share
     assert "$7,600.00" in html and "59%" in html and "0.32×" in html  # exposure panel
@@ -595,7 +595,7 @@ def test_portfolio_for_a_logged_in_user_shows_a_perp_with_unrealized_value(
     assert "Sample data" not in html
     assert "Perp Pro" in html and "BTC-PERP" in html
     # 0.01 x (62,550 - 60,000) = 25.50 unrealized
-    assert "Entry" in html and "60000" in html and "62550" in html
+    assert "Entry" in html and "60,000" in html and "62,550" in html  # formatted
     assert "$25.50" in html and "unrealized" in html
     assert "copy lag 42 s" in html
     assert "2 below minimum size" in html and "1 stale signal" in html
@@ -687,7 +687,7 @@ def test_portfolio_activity_lists_paper_fills_and_settlements(client, session_fa
     html = client.get("/portfolio").text
     assert "buy yes ×5 KXBTC-1 @ $0.42" in html
     assert "KXBTC-1 → yes" in html and "+$5.00" in html
-    assert "sell 0.01 BTC-PERP @ 50500" in html and "Liquidation" in html
+    assert "sell 0.01 BTC-PERP @ 50,500" in html and "Liquidation" in html
 
 
 def test_portfolio_empty_state_and_visibility(client, viewer):
@@ -1044,4 +1044,10 @@ def test_public_signals_handle_asset_and_binary_rows(client, db):
     _stats(db, asset, v2_extras())
     db.commit()
     html = client.get("/s/sig-asset").text
-    assert "ETH/USD" in html and "0.50000000" in html and "19.4%" in html
+    assert (
+        "ETH/USD" in html
+        and 'text2">0.5</span>' in html
+        and "@ 3,100.5" in html
+        and "19.4%" in html
+    )
+    assert "0.50000000" not in html  # quantities read as numbers, not atom strings

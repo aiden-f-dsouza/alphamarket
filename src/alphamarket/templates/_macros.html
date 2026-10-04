@@ -50,6 +50,15 @@
 {%- if x is none %}—{% else %}{{ "−" if x < 0 }}{{ "%.*f"|format(digits, x|abs) }}{% endif -%}
 {%- endmacro %}
 
+{# Quantities and prices as the venue reported them, made readable (numfmt.fmt_num): thousands separators, a real minus, cash to the cent, coin sizes keep their significant decimals. #}
+{% macro qty(x, kind=None) -%}
+{{ fmt_num(x, 2 if kind == "cash" else None) }}
+{%- endmacro %}
+
+{% macro price(x) -%}
+{{ fmt_num(x) }}
+{%- endmacro %}
+
 {% macro sparkline(points, good=True) -%}
 <svg width="112" height="30" viewBox="0 0 120 32" style="display:block"><polyline points="{{ points }}" fill="none" stroke="{{ 'var(--good)' if good else 'var(--bad)' }}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>
 {%- endmacro %}

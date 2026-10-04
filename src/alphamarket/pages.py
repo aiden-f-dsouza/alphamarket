@@ -4,8 +4,9 @@ transparency, research, security), invite. Jinja templates, plain forms,
 charts as inline SVG built server-side (`charts.py`); no client-side scripts.
 
 Everything numeric shown to real users comes from strategy_stats /
-equity_snapshots (platform-computed, invariant #5). With DEMO_MODE on, pages
-the MVP cannot compute yet (tailing, portfolio, feed, creator profiles) and
+equity_snapshots (platform-computed, invariant #5). Paper tailing, following
+and /portfolio work for real users from plain forms (w3-tail-ui). With
+DEMO_MODE on, pages the MVP cannot compute yet (feed, creator profiles) and
 the marketplace are padded from `demo.py`, always under a "Sample data"
 banner; those routes 404 when demo mode is off, and preflight refuses to
 launch with it on.
@@ -14,6 +15,7 @@ launch with it on.
 from datetime import UTC, datetime
 from pathlib import Path
 from statistics import median
+from urllib.parse import quote
 
 import markdown
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -32,7 +34,13 @@ from alphamarket.connectors.registry import PROFILES, get_profile
 from alphamarket.consent import STALE_DETAIL as STALE_CONSENT
 from alphamarket.consent import consent_text
 from alphamarket.db import get_db
-from alphamarket.follows import feed_items
+from alphamarket.follows import (
+    feed_items,
+    follow_strategy,
+    follower_count,
+    is_following,
+    unfollow_strategy,
+)
 from alphamarket.marks import sigil, tag_color
 from alphamarket.models import (
     Allocation,
@@ -47,6 +55,8 @@ from alphamarket.models import (
     User,
     VenueAccount,
 )
+from alphamarket.money import format_atoms
+from alphamarket.numfmt import fmt_num
 from alphamarket.portfolio import portfolio_summary
 from alphamarket.public import (
     ASSET_CLASS_LABELS,
@@ -63,6 +73,23 @@ from alphamarket.public import (
 from alphamarket.reconcile import reconcilable, reconcile_account
 from alphamarket.stats import drawdown_series
 from alphamarket.strategies import ListingIn, update_listing
+from alphamarket.tail_terms import (
+    DEFAULT_DRAWDOWN_BPS,
+    DRAWDOWN_CHOICES_BPS,
+    PRICING_ROWS,
+    paper_terms,
+    tailing_card,
+)
+from alphamarket.tails import (
+    MAX_ALLOCATION_MICROS,
+    MIN_ALLOCATION_MICROS,
+    AllocationIn,
+    active_allocation,
+    active_tail_count,
+    create_allocation,
+    owned_allocation,
+    stop_by_user,
+)
 from alphamarket.venue_limits import get_web_limiter
 from alphamarket.venues import (
     ConnectIn,
@@ -76,11 +103,31 @@ from alphamarket.venues import (
 router = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 DOCS = Path(__file__).resolve().parents[2] / "docs"
-templates.env.globals.update(sigil=sigil, tag_color=tag_color)
+templates.env.globals.update(sigil=sigil, tag_color=tag_color, fmt_num=fmt_num)
 
 
 def _user(request: Request, db: Session) -> User | None:
     return auth.optional_user(request, db)  # DB session cookie (sessions.py)
+
+
+def safe_next(next_url: str | None, default: str = "/dashboard") -> str:
+    """Only same-site paths: never an open redirect. Browsers read a
+    backslash as a slash (`/\\evil.com` goes to evil.com) and drop tabs and
+    newlines, so those are refused too."""
+    if (
+        next_url
+        and next_url.startswith("/")
+        and not next_url.startswith("//")
+        and "\\" not in next_url
+        and not any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in next_url)
+    ):
+        return next_url
+    return default
+
+
+def login_url(next_path: str) -> str:
+    """/login that comes back to `next_path` afterwards."""
+    return "/login?next=" + quote(next_path, safe="/")
 
 
 def _demo() -> bool:
@@ -169,24 +216,26 @@ def index(request: Request, db: Session = Depends(get_db)):
     )
 
 
-def _auth(request: Request, db: Session, mode: str, error: str | None = None):
+def _auth(request: Request, db: Session, mode: str, error: str | None = None, next_url: str = ""):
     """Login and sign-up get their own pages so an error is shown next to the
     form that produced it, not at the bottom of the landing page. A visitor who
-    is already logged in is sent to the dashboard instead of an empty form; a
-    failed submission always shows its error."""
+    is already logged in is sent on (to `next` when it is a same-site path,
+    else the dashboard) instead of an empty form; a failed submission always
+    shows its error. `next` rides along as a hidden field."""
+    next_url = safe_next(next_url, "")
     if error is None and _user(request, db) is not None:
-        return RedirectResponse("/dashboard", status_code=303)
-    return _render(request, "auth.html", mode=mode, error=error, user=None)
+        return RedirectResponse(next_url or "/dashboard", status_code=303)
+    return _render(request, "auth.html", mode=mode, error=error, user=None, next=next_url)
 
 
 @router.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, db: Session = Depends(get_db)):
-    return _auth(request, db, "login")
+def login_page(request: Request, next: str = "", db: Session = Depends(get_db)):
+    return _auth(request, db, "login", next_url=next)
 
 
 @router.get("/signup", response_class=HTMLResponse)
-def signup_page(request: Request, db: Session = Depends(get_db)):
-    return _auth(request, db, "signup")
+def signup_page(request: Request, next: str = "", db: Session = Depends(get_db)):
+    return _auth(request, db, "signup", next_url=next)
 
 
 @router.get("/creators", response_class=HTMLResponse)
@@ -261,6 +310,7 @@ def signup_form(
     email: str = Form(),
     password: str = Form(),
     display_name: str = Form(),
+    next: str = Form(""),
     db: Session = Depends(get_db),
 ):
     try:
@@ -268,10 +318,10 @@ def signup_form(
             auth.SignupIn(email=email, password=password, display_name=display_name), request, db
         )
     except HTTPException as exc:
-        return _auth(request, db, "signup", exc.detail)
+        return _auth(request, db, "signup", exc.detail, next_url=next)
     except ValueError as exc:  # pydantic validation
-        return _auth(request, db, "signup", str(exc))
-    return RedirectResponse("/dashboard", status_code=303)
+        return _auth(request, db, "signup", str(exc), next_url=next)
+    return RedirectResponse(safe_next(next), status_code=303)
 
 
 @router.post("/login-form")
@@ -279,21 +329,31 @@ def login_form(
     request: Request,
     email: str = Form(),
     password: str = Form(),
+    next: str = Form(""),
     db: Session = Depends(get_db),
 ):
     try:
         result = auth.login(auth.LoginIn(email=email, password=password), request, db)
     except HTTPException as exc:
         if exc.status_code == 429:
-            resp = _auth(request, db, "login", "Too many attempts. Wait a minute and try again.")
+            resp = _auth(
+                request,
+                db,
+                "login",
+                "Too many attempts. Wait a minute and try again.",
+                next_url=next,
+            )
             resp.status_code = 429
             return resp
-        return _auth(request, db, "login", "Invalid credentials")
+        return _auth(request, db, "login", "Invalid credentials", next_url=next)
     except ValueError:
-        return _auth(request, db, "login", "Invalid credentials")
+        return _auth(request, db, "login", "Invalid credentials", next_url=next)
+    next = safe_next(next, "")
     if result.get("mfa_required"):
-        return RedirectResponse("/login/2fa", status_code=303)
-    return RedirectResponse("/dashboard", status_code=303)
+        # The second step carries `next` on to its own redirect.
+        target = "/login/2fa" + (f"?next={quote(next, safe='/')}" if next else "")
+        return RedirectResponse(target, status_code=303)
+    return RedirectResponse(next or "/dashboard", status_code=303)
 
 
 @router.post("/logout-form")
@@ -560,27 +620,190 @@ def strategy_page(request: Request, slug: str, db: Session = Depends(get_db)):
             charts=_charts(page["stats"], page["benchmarks"]),
             demo=True,
         )
+    user = _user(request, db)
     page = page_data(db, strategy)
+    page["tailing"] = _tailing(db, strategy, page, user)
+    page["follow"] = {
+        "count": follower_count(db, strategy.id),
+        "following": user is not None and is_following(db, user.id, strategy.id),
+        "own": user is not None and strategy.user_id == user.id,
+        "login": login_url(f"/s/{strategy.slug}"),
+    }
     return _render(
         request,
         "strategy.html",
-        user=_user(request, db),
+        user=user,
         page=page,
         charts=_charts(page["stats"]),
         demo=page["sample_data"],  # w3-seed: a seeded record carries the sample banner
     )
 
 
-# ---- demo-only investor surface (tailing, portfolio, feed, creator profiles) ----
+# ---- w3-tail-ui: paper tailing and following from the HTML pages ---------------------
+# Every action reuses the JSON-route logic (tails.create_allocation, stop_by_user,
+# follows.follow_strategy), with the same rate limit, so both surfaces enforce
+# the same rules. Paper only (invariant 8): no form here can ask for live mode.
+
+
+def _tailing(db: Session, strategy: Strategy, page: dict, user: User | None) -> dict | None:
+    """The strategy page's tail card for a real (or seeded) strategy, with the
+    viewer's state: `anon` (log in first), `own` (a creator cannot tail
+    themselves), `active` (already tailing: see /portfolio) or `ready`."""
+    venue = page.get("venue")
+    if venue not in PROFILES:
+        return None
+    card = tailing_card(venue, active_tail_count(db, strategy.id))
+    tail_path = f"/s/{strategy.slug}/tail"
+    if user is None:
+        card.update(state="anon", href=login_url(tail_path))
+    elif strategy.user_id == user.id:
+        card.update(state="own", href=None)
+    elif active_allocation(db, user.id, strategy.id) is not None:
+        card.update(state="active", href="/portfolio")
+    else:
+        card.update(state="ready", href=tail_path)
+    return card
+
+
+DRAWDOWN_LABELS = [(bps, f"−{bps // 100}%") for bps in DRAWDOWN_CHOICES_BPS]
+
+
+def _tail_ctx(
+    db: Session,
+    strategy: Strategy,
+    user: User,
+    allocation: str = "2000",
+    drawdown_bps: int = DEFAULT_DRAWDOWN_BPS,
+    confirmed: bool = False,
+    error: str | None = None,
+) -> dict:
+    page = page_data(db, strategy)
+    venue = page["venue"]
+    return {
+        "real": True,
+        "strategy": page,
+        "terms": paper_terms(venue)["rows"] if venue in PROFILES else [],
+        "pricing_rows": PRICING_ROWS,
+        "min_usd": MIN_ALLOCATION_MICROS // 1_000_000,
+        "max_usd": MAX_ALLOCATION_MICROS // 1_000_000,
+        "allocation_input": allocation,
+        "dd_choices": DRAWDOWN_LABELS,
+        "dd_bps": drawdown_bps,
+        "confirmed": confirmed,
+        "error": error,
+        "own": strategy.user_id == user.id,
+        "active": active_allocation(db, user.id, strategy.id) is not None,
+    }
+
+
+def _render_tail(request: Request, t: dict, user: User, status_code: int = 200) -> HTMLResponse:
+    resp = _render(request, "tail.html", user=user, t=t, demo=t["strategy"]["sample_data"])
+    resp.status_code = status_code
+    return resp
 
 
 @router.get("/s/{slug}/tail", response_class=HTMLResponse)
 def tail_page(request: Request, slug: str, db: Session = Depends(get_db)):
-    _demo_or_404()
-    t = demo.tail_page(slug)
-    if t is None:
-        raise HTTPException(status_code=404)
-    return _render(request, "tail.html", user=_user(request, db), t=t, demo=True)
+    """The paper-tail form for a publicly visible strategy (logged-in users;
+    a visitor is sent to log in and comes back here). With DEMO_MODE on, the
+    static sample strategies keep their sample flow."""
+    try:
+        strategy = visible_strategy_or_404(db, slug)
+    except HTTPException:
+        if not (_demo() and demo.has_strategy(slug)):
+            raise
+        t = demo.tail_page(slug)
+        return _render(request, "tail.html", user=_user(request, db), t=t, demo=True)
+    user = _user(request, db)
+    if user is None:
+        return RedirectResponse(login_url(f"/s/{strategy.slug}/tail"), status_code=303)
+    return _render_tail(request, _tail_ctx(db, strategy, user), user)
+
+
+@router.post("/s/{slug}/tail")
+def tail_form(
+    request: Request,
+    slug: str,
+    allocation: str = Form(""),
+    drawdown_limit_bps: str = Form(str(DEFAULT_DRAWDOWN_BPS)),
+    confirm: str | None = Form(None),
+    db: Session = Depends(get_db),
+):
+    """Start a paper tail: tails.create_allocation does every check (paper
+    only, not your own strategy, $100 to $1,000,000, one active tail per
+    strategy); this adds the paper-only confirmation box. Errors re-render
+    the form with what was entered."""
+    strategy = visible_strategy_or_404(db, slug)
+    user = _user(request, db)
+    if user is None:
+        return RedirectResponse(login_url(f"/s/{strategy.slug}/tail"), status_code=303)
+    amount = allocation.strip().replace(",", "").removeprefix("$").strip()
+    try:
+        bps = int(drawdown_limit_bps)
+    except ValueError:
+        bps = -1  # refused by AllocationIn below
+    error, code = None, 422
+    if confirm != "on":
+        error = "Tick the box to confirm you understand this is a paper simulation."
+    else:
+        try:
+            ratelimit.check(request, "follow_user", user.id)  # the JSON route's limit
+            payload = AllocationIn(
+                strategy_slug=strategy.slug, allocation=amount, drawdown_limit_bps=bps
+            )
+            create_allocation(db, user, payload)
+        except ValidationError:
+            error = "Choose a drawdown limit from the list."
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                raise
+            error, code = str(exc.detail), exc.status_code
+    if error is not None:
+        if bps not in DRAWDOWN_CHOICES_BPS:
+            bps = DEFAULT_DRAWDOWN_BPS
+        t = _tail_ctx(db, strategy, user, amount, bps, confirm == "on", error)
+        return _render_tail(request, t, user, code)
+    return RedirectResponse("/portfolio?notice=started", status_code=303)
+
+
+@router.post("/s/{slug}/follow")
+def follow_form(request: Request, slug: str, db: Session = Depends(get_db)):
+    user = _user(request, db)
+    if user is None:
+        visible_strategy_or_404(db, slug)
+        return RedirectResponse(login_url(f"/s/{slug}"), status_code=303)
+    ratelimit.check(request, "follow_user", user.id)  # the JSON route's limit
+    strategy, _ = follow_strategy(db, user, slug)
+    return RedirectResponse(f"/s/{strategy.slug}", status_code=303)
+
+
+@router.post("/s/{slug}/unfollow")
+def unfollow_form(request: Request, slug: str, db: Session = Depends(get_db)):
+    user = _user(request, db)
+    if user is None:
+        return RedirectResponse(login_url(f"/s/{slug}"), status_code=303)
+    unfollow_strategy(db, user, slug)
+    return RedirectResponse(f"/s/{slug}", status_code=303)
+
+
+@router.post("/portfolio/allocations/{allocation_id}/stop")
+def stop_tail_form(request: Request, allocation_id: int, db: Session = Depends(get_db)):
+    """Stop one of your paper tails (tails.stop_by_user); someone else's is a 404."""
+    user = _user(request, db)
+    if user is None:
+        return RedirectResponse(login_url("/portfolio"), status_code=303)
+    stop_by_user(db, owned_allocation(db, allocation_id, user))
+    return RedirectResponse("/portfolio?notice=stopped", status_code=303)
+
+
+PORTFOLIO_NOTICES = {
+    "started": "Paper tail started. It copies the creator's trades from their next one; "
+    "nothing earlier is replayed.",
+    "stopped": "Paper tail stopped. No new trades are copied; its history stays here.",
+}
+
+
+# ---- demo-only investor surface (portfolio, feed, creator profiles) ----------------
 
 
 def _age(seconds: int | None) -> str:
@@ -684,6 +907,7 @@ def portfolio_view(summary: dict, handles: dict[str, str], now: datetime | None 
             positions.append({**r, "allocation": v["strategy_name"], "slug": v["strategy_slug"]})
         allocations.append(
             {
+                "id": v.get("id"),
                 "slug": v["strategy_slug"],
                 "name": v["strategy_name"],
                 "handle": handles.get(v["strategy_slug"], ""),
@@ -747,7 +971,7 @@ def _portfolio_activity(db: Session, allocation_ids: list[int], limit: int = 12)
         .limit(limit)
     ):
         count, price = f.count_micros / 1e6, f.price_micros / 1e6  # display only
-        what = f"{f.action} {f.side} ×{count:g} {f.ticker} @ ${price:.2f}"
+        what = f"{f.action} {f.side} ×{fmt_num(count)} {f.ticker} @ ${price:.2f}"
         events.append((f.filled_at, ("Paper fill", what, None)))
     for f in db.scalars(
         select(MirrorAssetFill)
@@ -756,8 +980,8 @@ def _portfolio_activity(db: Session, allocation_ids: list[int], limit: int = 12)
         .limit(limit)
     ):
         inst = db.get(Instrument, f.instrument_id)
-        qty = f"{f.qty_atoms / 10**f.qty_decimals:g}"
-        what = f"{f.action} {qty} {inst.symbol if inst else '?'} @ {f.price}"
+        qty = fmt_num(format_atoms(f.qty_atoms, f.qty_decimals))
+        what = f"{f.action} {qty} {inst.symbol if inst else '?'} @ {fmt_num(f.price)}"
         events.append(
             (
                 f.filled_at,
@@ -784,7 +1008,7 @@ def _portfolio_activity(db: Session, allocation_ids: list[int], limit: int = 12)
 
 
 @router.get("/portfolio", response_class=HTMLResponse)
-def portfolio(request: Request, db: Session = Depends(get_db)):
+def portfolio(request: Request, notice: str = "", db: Session = Depends(get_db)):
     """A logged-in user sees their own paper allocations; with DEMO_MODE on a
     visitor without an account sees the sample portfolio; otherwise 404."""
     user = _user(request, db)
@@ -801,7 +1025,14 @@ def portfolio(request: Request, db: Session = Depends(get_db)):
         p = portfolio_view(summary, handles)
         p["activity"] = _portfolio_activity(db, ids)
         # w3-seed: a seeded demo investor's paper book is sample data (invariant 7).
-        return _render(request, "portfolio.html", user=user, p=p, demo=user.is_demo)
+        return _render(
+            request,
+            "portfolio.html",
+            user=user,
+            p=p,
+            demo=user.is_demo,
+            notice=PORTFOLIO_NOTICES.get(notice),  # fixed texts: nothing is reflected
+        )
     _demo_or_404()
     return _render(request, "portfolio.html", user=None, p=demo.portfolio(), demo=True)
 
@@ -869,11 +1100,11 @@ def _post_body(item: dict, strategy_name: str) -> str:
     share = item.get("stake_fraction")
     size = f" ({share:.1%} of equity)" if share is not None else ""
     if item.get("asset"):
-        price = item.get("price_str") or "—"
+        price = fmt_num(item.get("price_str"))
         lag = item.get("copy_lag_seconds")
         seen = f" Seen {_age(lag)} after the fill." if lag is not None else ""
         return (
-            f"{strategy_name}: {item['action']} {item['qty']} {item['ticker']} at {price}"
+            f"{strategy_name}: {item['action']} {fmt_num(item['qty'])} {item['ticker']} at {price}"
             f"{size}, {item['side']} position.{seen}"
         )
     cents = round(item["price"] * 100)

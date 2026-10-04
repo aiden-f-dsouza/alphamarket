@@ -13,6 +13,7 @@
   </div>
   {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
   <form method="post" action="/login/2fa" class="card">
+    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
     <div class="body" style="padding:28px;gap:18px">
       <label class="field"><span class="label">Code</span><input class="mono" name="code" required minlength="6" maxlength="40" autocomplete="one-time-code" autofocus placeholder="123456"><span class="note">Recovery codes look like abcd-efgh-ijkl-mnop and work once.</span></label>
       <div style="padding-top:4px"><button class="btn" type="submit" style="width:100%">Verify and log in</button></div>
