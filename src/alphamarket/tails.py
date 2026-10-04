@@ -43,6 +43,31 @@ class AllocationIn(BaseModel):
     mode: str = AllocationMode.PAPER
 
 
+def active_allocation(db: Session, user_id: int, strategy_id: int) -> Allocation | None:
+    """The user's running paper tail of this strategy (at most one)."""
+    return db.scalar(
+        select(Allocation).where(
+            Allocation.user_id == user_id,
+            Allocation.strategy_id == strategy_id,
+            Allocation.status == AllocationStatus.ACTIVE,
+        )
+    )
+
+
+def active_tail_count(db: Session, strategy_id: int) -> int:
+    """How many paper tails of this strategy are running (the page's
+    "Paper tails · N following")."""
+    return (
+        db.scalar(
+            select(func.count(Allocation.id)).where(
+                Allocation.strategy_id == strategy_id,
+                Allocation.status == AllocationStatus.ACTIVE,
+            )
+        )
+        or 0
+    )
+
+
 def create_allocation(db: Session, user: User, payload: AllocationIn) -> Allocation:
     try:
         mode = AllocationMode(payload.mode)
@@ -64,14 +89,7 @@ def create_allocation(db: Session, user: User, payload: AllocationIn) -> Allocat
         raise HTTPException(
             status_code=422, detail="Allocation must be between $100 and $1,000,000"
         )
-    active = db.scalar(
-        select(Allocation).where(
-            Allocation.user_id == user.id,
-            Allocation.strategy_id == strategy.id,
-            Allocation.status == AllocationStatus.ACTIVE,
-        )
-    )
-    if active is not None:
+    if active_allocation(db, user.id, strategy.id) is not None:
         raise HTTPException(status_code=409, detail="You already have an active tail here")
     row = Allocation(
         user_id=user.id,
@@ -112,7 +130,7 @@ def list_allocations(db: Session = Depends(get_db), user: User = Depends(current
     return [allocation_view(db, a) for a in rows]
 
 
-def _owned(db: Session, allocation_id: int, user: User) -> Allocation:
+def owned_allocation(db: Session, allocation_id: int, user: User) -> Allocation:
     row = db.get(Allocation, allocation_id)
     if row is None or row.user_id != user.id:
         raise HTTPException(status_code=404, detail="Allocation not found")
@@ -123,15 +141,21 @@ def _owned(db: Session, allocation_id: int, user: User) -> Allocation:
 def get_allocation(
     allocation_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)
 ):
-    return allocation_view(db, _owned(db, allocation_id, user))
+    return allocation_view(db, owned_allocation(db, allocation_id, user))
+
+
+def stop_by_user(db: Session, row: Allocation) -> None:
+    """The follower stops a tail (JSON route and the /portfolio form). A tail
+    that already stopped stays as it is."""
+    if row.status == AllocationStatus.ACTIVE:
+        stop_allocation(db, row, "user")
+        snapshot_allocation(db, row)
 
 
 @router.post("/allocations/{allocation_id}/stop")
 def stop(allocation_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    row = _owned(db, allocation_id, user)
-    if row.status == AllocationStatus.ACTIVE:
-        stop_allocation(db, row, "user")
-        snapshot_allocation(db, row)
+    row = owned_allocation(db, allocation_id, user)
+    stop_by_user(db, row)
     return allocation_view(db, row)
 
 
@@ -139,7 +163,7 @@ def stop(allocation_id: int, db: Session = Depends(get_db), user: User = Depends
 def run_now(allocation_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
     """Apply pending signals and settlements now (the worker also does this
     after every sync)."""
-    row = _owned(db, allocation_id, user)
+    row = owned_allocation(db, allocation_id, user)
     mirrored, settled = process_allocation(db, row)
     snapshot_allocation(db, row)
     return {"mirrored": mirrored, "settled": settled, **allocation_view(db, row)}

@@ -23,7 +23,6 @@ import random
 from datetime import date, timedelta
 
 from alphamarket.charts import drawdown_window, polyline, window_x
-from alphamarket.connectors.base import PaperFeeModel
 from alphamarket.connectors.registry import PROFILES
 from alphamarket.public import (
     ASSET_CLASS_LABELS,
@@ -31,6 +30,7 @@ from alphamarket.public import (
     holdings_view,
     verification_view,
 )
+from alphamarket.tail_terms import PRICING_ROWS, paper_terms, tailing_card, venue_label
 
 VERIFIED_SINCE = date(2026, 5, 6)
 AS_OF = date(2026, 9, 1)
@@ -525,9 +525,6 @@ BENCHMARK_NOTE = (
 CRYPTO_BENCHMARK_NOTE = (
     "Bitcoin and T-bill lines are sample benchmarks; the live benchmark set is an open question."
 )
-# Pricing decision: flat subscriptions for followers, flat royalties for
-# creators. Never a share of returns (no performance fee, no high-water mark).
-PRICING_TEXT = "Flat subscription, never a share of returns"
 
 _STRIP_SPARK = 60
 
@@ -575,10 +572,7 @@ def _venue(s: dict) -> str:
     return s.get("venue", "kalshi")
 
 
-def _venue_label(venue: str) -> str:
-    """Short venue name for page chrome ("Interactive Brokers", without the
-    profile's "(Flex)" report-type suffix)."""
-    return PROFILES[venue].display_name.replace(" (Flex)", "")
+_venue_label = venue_label
 
 
 def _row(s: dict) -> dict:
@@ -671,77 +665,6 @@ def _monthly(dates: list[date], curve: list[float]) -> list[list]:
         base = last[keys[i - 1]] if i else first[key]
         out.append([key[0], key[1], last[key] / base - 1])
     return out
-
-
-def _paper_terms(venue: str) -> dict:
-    """How a paper tail of this venue is priced, from the venue profile and
-    methodology ("Paper tailing", "Paper copying v2"). Display text only."""
-    profile = PROFILES[venue]
-    name = _venue_label(venue)
-    rate = f"{profile.fee_rate_bps / 100:.2f}%"
-    if profile.paper_fee_model is PaperFeeModel.BINARY_PXQ:
-        return {
-            "fill": "Creator's fill price, at the tick",
-            "costs": f"{name} fee formula",
-            "rows": [
-                (
-                    "Fill price",
-                    f"The creator's own fill price, snapped to {name}'s tick. This assumes the "
-                    "price was still there for you: the model's main optimism, stated on every "
-                    "paper figure.",
-                ),
-                (
-                    "Venue fee",
-                    f"{name}'s published formula, {rate} × contracts × price × (1 − price), "
-                    "charged on every paper fill.",
-                ),
-                (
-                    "Settlement",
-                    "Same result and time as the creator's position: $1 per winning contract.",
-                ),
-                ("Starts", "With the creator's next trade. Nothing earlier is replayed."),
-            ],
-        }
-    if profile.paper_fee_model is PaperFeeModel.US_EQUITY_REGULATORY:
-        costs = "No commission; FINRA activity fee on sales"
-        fee_row = (
-            "Fees",
-            f"{name} charges no commission; every paper sale pays the FINRA trading "
-            "activity fee. Dividends and splits are applied on their dates.",
-        )
-        stale = "3 days (end-of-day reports)" if venue in ("ibkr", "snaptrade") else "6 hours"
-    else:
-        costs = f"{name} taker fee, {rate}" + (", plus funding" if venue == "hyperliquid" else "")
-        fee_row = (
-            "Fees",
-            f"{name}'s taker fee, {rate} of notional, on every paper fill"
-            + (
-                ". Perp funding is paid or received every hour, and a position past its "
-                "maintenance margin is liquidated, as at the venue."
-                if venue == "hyperliquid"
-                else "."
-            ),
-        )
-        stale = "6 hours"
-    return {
-        "fill": "Venue quote when Koine saw the trade",
-        "costs": costs,
-        "rows": [
-            (
-                "Fill price",
-                f"{name}'s public quote at the moment Koine saw the creator's trade: the ask to "
-                "buy, the bid to sell. Never the creator's price, never hindsight.",
-            ),
-            ("No quote?", "The creator's price, moved 0.5% against you."),
-            fee_row,
-            (
-                "Late signals",
-                f"A trade Koine saw more than {stale} after it happened is skipped, and the skip "
-                "is counted on your portfolio.",
-            ),
-            ("Starts", "With the creator's next trade. Nothing earlier is replayed."),
-        ],
-    }
 
 
 def _usd(x: float) -> str:
@@ -863,7 +786,6 @@ def strategy_page(slug: str) -> dict | None:
     c = _CREATORS[s["handle"]]
     mine = [x for x in _STRATEGIES if x["handle"] == s["handle"]]
     curve_rows = [[d.isoformat(), v] for d, v in zip(dates, curve, strict=True)]
-    terms = _paper_terms(venue)
     page = {
         "demo": True,
         "slug": s["slug"],
@@ -908,13 +830,7 @@ def strategy_page(slug: str) -> dict | None:
         "benchmark_note": CRYPTO_BENCHMARK_NOTE if crypto else BENCHMARK_NOTE,
         "vs_benchmark": s["total_return"] - (benchmark[1][-1] / benchmark[1][0] - 1),
         "worst_periods": _worst_periods(s),
-        "tailing": {
-            "paper_tails": s["paper_tails"],
-            "min_usd": 100,
-            "fill": terms["fill"],
-            "costs": terms["costs"],
-            "pricing": PRICING_TEXT,
-        },
+        "tailing": tailing_card(venue, s["paper_tails"]),
         "creator": {"handle": s["handle"], "followers": c["followers"], "strategies": len(mine)},
         "discussion": [
             (h or s["handle"], when, is_creator, body)
@@ -1008,16 +924,8 @@ def tail_page(slug: str) -> dict | None:
         "min_usd": 100,
         "dd_limit": dd_limit,
         "stop_at": allocation * (1 - dd_limit),
-        "terms": _paper_terms(page["venue"])["rows"],
-        "pricing_rows": [
-            ("Followers", "A flat monthly subscription. Never a share of returns."),
-            (
-                "Creators",
-                "A flat royalty from Koine, the same whether your paper tail is up or down.",
-            ),
-            ("Performance fees", "None. Nobody is paid more because a strategy took more risk."),
-            ("Today", "Billing has not launched. Nothing is charged."),
-        ],
+        "terms": paper_terms(page["venue"])["rows"],
+        "pricing_rows": PRICING_ROWS,
     }
 
 

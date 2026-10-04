@@ -15,6 +15,7 @@
   <div class="stack" style="gap:8px"><span class="label">Portfolio</span><h1 style="font-size:40px">Your paper tails</h1></div>
   <div style="display:flex;gap:12px"><a class="btn" href="/marketplace">Browse strategies</a></div>
 </div>
+{% if notice %}<div class="notice" role="status" style="border-color:var(--brand);color:var(--text)">{{ notice }}</div>{% endif %}
 <div class="notice" style="display:flex;align-items:center;gap:10px">{{ m.icon("lock", 14, "var(--text2)") }}<span>Paper only. Each tail replays the creator's trades with simulated money at the venue's quotes, after venue fees. Koine places no order in any account and holds no money.</span></div>
 {% if p.real and not p.allocations %}
 <div class="card"><div class="body" style="padding:40px;align-items:flex-start;gap:16px">
@@ -53,7 +54,8 @@
     <div class="arow">
       <div class="stack" style="gap:3px"><a href="/s/{{ a.slug }}" style="font-weight:500">{{ a.name }}</a><span class="mono small muted">{{ a.handle }}{% if a.venue %} · {{ a.venue }}{% endif %} · {{ a.days }}d paper tail{% if a.status is defined %} · {{ a.status }}{% if a.stop_reason %} ({{ a.stop_reason|replace("_", " ") }}){% endif %}{% endif %}{% if a.copy_lag is defined %} · copy lag {{ a.copy_lag }}{% endif %}</span>
         {% if a.skipped %}<span class="mono small warn">skipped: {% for reason, n in a.skipped %}{{ n }} {{ reason|replace("_", " ") }}{{ ", " if not loop.last }}{% endfor %}</span>{% endif %}
-        {% for c in a.symbol_changes %}<span class="small warn">{{ c.symbol }} changed symbol{% if c.new_symbol %} to {{ c.new_symbol }}{% endif %} on {{ c.ex_date }}. Paper copies do not convert symbol changes yet: this position stays under {{ c.symbol }}, at its last price, and the creator's trades{% if c.new_symbol %} in {{ c.new_symbol }}{% endif %} will not reduce it.</span>{% endfor %}</div>
+        {% for c in a.symbol_changes %}<span class="small warn">{{ c.symbol }} changed symbol{% if c.new_symbol %} to {{ c.new_symbol }}{% endif %} on {{ c.ex_date }}. Paper copies do not convert symbol changes yet: this position stays under {{ c.symbol }}, at its last price, and the creator's trades{% if c.new_symbol %} in {{ c.new_symbol }}{% endif %} will not reduce it.</span>{% endfor %}
+        {% if p.real and a.id is defined and a.status == "active" %}<form method="post" action="/portfolio/allocations/{{ a.id }}/stop" data-confirm="Stop paper-tailing {{ a.name }}? No new trades will be copied. Its history stays on this page." style="margin-top:6px"><button class="btn secondary sm" type="submit">Stop paper tail</button></form>{% endif %}</div>
       <span class="mono r text2" style="font-size:14px">{{ m.usd(a.allocated, 0) }}</span>
       <span class="mono r hide">{{ m.usd(a.value) }}</span>
       <span class="mono r {{ 'good' if a.ret >= 0 else 'bad' }} hide" style="font-size:14px">{{ m.pct(a.ret) }}</span>
@@ -77,9 +79,9 @@
     <tr><th>Strategy</th><th>Position</th><th>Side</th><th class="num">Quantity</th><th class="num">Entry</th><th class="num">Mark</th><th class="num">Value</th><th class="num">Unrealized</th></tr>
     {% for pos in p.positions %}
     <tr><td class="text2">{{ pos.allocation }}</td><td class="mono">{{ pos.symbol }}{% if pos.kind %} <span class="muted">{{ pos.kind }}</span>{% endif %}</td><td>{{ pos.side or "—" }}</td>
-      <td class="num">{{ pos.qty if pos.qty is not none else "—" }}</td>
-      <td class="num">{{ pos.entry if pos.entry else "—" }}</td>
-      <td class="num">{% if pos.mark %}{{ pos.mark }}<span class="muted"> {{ pos.mark_source }}</span>{% else %}<span class="muted">at cost</span>{% endif %}</td>
+      <td class="num">{{ m.qty(pos.qty) if pos.qty is not none else "—" }}</td>
+      <td class="num">{{ m.price(pos.entry) if pos.entry else "—" }}</td>
+      <td class="num">{% if pos.mark %}{{ m.price(pos.mark) }}<span class="muted"> {{ pos.mark_source }}</span>{% else %}<span class="muted">at cost</span>{% endif %}</td>
       <td class="num">{{ m.usd(pos.value) if pos.value is not none else "—" }}</td>
       <td class="num {{ ('good' if pos.unrealized >= 0 else 'bad') if pos.unrealized is not none else 'muted' }}">{{ m.usd(pos.unrealized) if pos.unrealized is not none else "—" }}</td></tr>
     {% endfor %}

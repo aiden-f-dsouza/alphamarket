@@ -32,8 +32,13 @@
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       {{ sigil(page.slug, 36) }}
       {% if page.demo %}<a href="/u/{{ page.display_name }}" style="font-weight:500">by {{ page.display_name }}</a><span class="small muted">· {{ page.venue_label or "Kalshi" }} · {{ page.creator.strategies }} verified strateg{{ "y" if page.creator.strategies == 1 else "ies" }} · {{ page.creator.followers }} followers</span>
-      {% else %}<span style="font-weight:500">by {{ page.display_name }}</span><span class="small muted">· {{ page.venue_label if page.is_asset else page.venue }}</span>{% endif %}
+      {% else %}<span style="font-weight:500">by {{ page.display_name }}</span><span class="small muted">· {{ page.venue_label if page.is_asset else page.venue }}{% if page.follow %} · {{ page.follow.count }} follower{{ "s" if page.follow.count != 1 }}{% endif %}</span>{% endif %}
       <span style="display:flex;gap:6px;margin-left:6px">{% for t in page.style_tags %}{{ m.cat(t) }}{% endfor %}</span>
+      {% if page.follow and not page.follow.own %}
+      {% if page.follow.following %}<form class="inline" method="post" action="/s/{{ page.slug }}/unfollow"><button class="btn secondary sm" type="submit" title="Stop seeing this strategy's trades in your feed">{{ m.icon("check", 14) }}Following · unfollow</button></form>
+      {% elif user %}<form class="inline" method="post" action="/s/{{ page.slug }}/follow"><button class="btn secondary sm" type="submit" title="See this strategy's trades in your feed">{{ m.icon("plus", 14) }}Follow</button></form>
+      {% else %}<a class="btn secondary sm" href="{{ page.follow.login }}" title="Log in to follow">{{ m.icon("plus", 14) }}Follow</a>{% endif %}
+      {% endif %}
     </div>
     <span class="mono small muted">platform-verified since {{ page.verified_since[:10] if page.verified_since else "first reconciliation pending" }}</span>
   </div>
@@ -47,7 +52,19 @@
       <div><span>Trading costs</span><span>{{ page.tailing.costs }}</span></div>
       <div><span>Koine pricing</span><span>{{ page.tailing.pricing }}</span></div>
     </div>
+    {% set ts = page.tailing.state %}
+    {% if ts == "active" %}
+    <span class="small text2">You are paper-tailing this strategy. Its positions and copy lag are on your portfolio.</span>
+    <a class="btn lg secondary" href="/portfolio">View in your portfolio</a>
+    {% elif ts == "own" %}
+    <button class="btn lg" type="button" disabled>Start a paper tail</button>
+    <span class="small muted">This is your strategy. Creators cannot paper-tail their own record.</span>
+    {% elif ts == "anon" %}
+    <a class="btn lg" href="{{ page.tailing.href }}">Start a paper tail</a>
+    <span class="small muted">Log in or create a free account first; you come straight back here.</span>
+    {% else %}
     <a class="btn lg" href="/s/{{ page.slug }}/tail">Start a paper tail</a>
+    {% endif %}
     <span class="small muted" style="display:inline-flex;align-items:center;gap:6px">{{ m.icon("lock", 12, "var(--muted)") }}Paper only. Koine never places an order or touches your money.</span>
   </div></div>
   {% endif %}
@@ -110,8 +127,8 @@
       <div style="overflow-x:auto"><table>
         <tr><th>Asset</th><th>Type</th><th class="num">Quantity</th><th class="num">Price</th><th class="num">Value</th><th class="num">Share</th></tr>
         {% for h in st.holdings %}
-        <tr><td class="mono">{{ h.asset }}</td><td class="text2">{{ h.kind }}</td><td class="num">{{ h.qty }}</td>
-          <td class="num">{% if h.kind == "perp" %}<span class="muted">entry {{ h.entry if h.entry else "unknown" }}</span>{% else %}{{ h.price_label if h.price_label else "—" }}{% endif %}</td>
+        <tr><td class="mono">{{ h.asset }}</td><td class="text2">{{ h.kind }}</td><td class="num">{{ m.qty(h.qty, h.kind) }}</td>
+          <td class="num">{% if h.kind == "perp" %}<span class="muted">entry {{ m.price(h.entry) if h.entry else "unknown" }}</span>{% else %}{{ h.price_label if h.price_label else "—" }}{% endif %}</td>
           <td class="num {{ 'bad' if h.value < 0 else '' }}">{% if h.kind == "perp" %}<span title="Unrealized P&amp;L; notional {{ h.notional_label }}">{{ h.value_label }} <span class="muted">unrealized</span></span>{% else %}{{ h.value_label }}{% endif %}</td>
           <td class="num">{{ m.pct(h.weight, 0) if h.weight is not none else "·" }}</td></tr>
         {% endfor %}
@@ -217,7 +234,7 @@
       <div class="spread" style="align-items:baseline;padding-bottom:8px;border-bottom:1px solid var(--line2)"><span class="label">Recent trades</span><span class="mono small muted">{{ page.recent_signals|length }} of {{ st.n_fills }}</span></div>
       {% for s in page.recent_signals %}
       <div class="srow">
-        <div class="stack" style="gap:3px;min-width:0"><span class="mono small tk">{{ s.ticker }} <span class="text2">{{ s.qty if s.qty is not none else "" }}</span></span><span class="mono muted" style="font-size:11px">{{ s.at[:16]|replace("T", " ") }} UTC{% if s.price is not none %} · @ {{ s.price }}{% endif %}</span></div>
+        <div class="stack" style="gap:3px;min-width:0"><span class="mono small tk">{{ s.ticker }} <span class="text2">{{ m.qty(s.qty) if s.qty is not none else "" }}</span></span><span class="mono muted" style="font-size:11px">{{ s.at[:16]|replace("T", " ") }} UTC{% if s.price is not none %} · @ {{ m.price(s.price_str or s.price) }}{% endif %}</span></div>
         <span class="side {{ 'good' if s.action == 'buy' else 'bad' }}">{{ s.action }}</span>
         <span class="mono small muted" style="text-align:right">{% if s.stake_fraction is not none %}{{ "%.1f"|format(s.stake_fraction * 100) }}%{% endif %}</span>
       </div>

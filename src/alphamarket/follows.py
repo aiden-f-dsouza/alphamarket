@@ -11,7 +11,7 @@ from fractions import Fraction
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from alphamarket.auth import current_user
@@ -43,27 +43,23 @@ def _follow_out(strategy: Strategy, follow: Follow) -> dict:
     }
 
 
-@router.post(
-    "/follows/{slug}",
-    response_model=FollowOut,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(rate_limit("follow_user", by="user"))],  # p3-auth
-)
-def follow(slug: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+def follow_strategy(db: Session, user: User, slug: str) -> tuple[Strategy, Follow]:
+    """Idempotent: following twice keeps the first follow."""
     strategy = visible_strategy_or_404(db, slug)
     existing = db.scalar(
         select(Follow).where(Follow.user_id == user.id, Follow.strategy_id == strategy.id)
     )
     if existing:
-        return _follow_out(strategy, existing)
+        return strategy, existing
     row = Follow(user_id=user.id, strategy_id=strategy.id)
     db.add(row)
     db.commit()
-    return _follow_out(strategy, row)
+    return strategy, row
 
 
-@router.delete("/follows/{slug}", status_code=status.HTTP_204_NO_CONTENT)
-def unfollow(slug: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+def unfollow_strategy(db: Session, user: User, slug: str) -> None:
+    """Idempotent; works on a strategy that has since gone private, so a
+    follower can always stop watching it."""
     strategy = db.scalar(select(Strategy).where(Strategy.slug == slug))
     if strategy is None:
         raise HTTPException(status_code=404, detail="Strategy not found")
@@ -73,6 +69,34 @@ def unfollow(slug: str, db: Session = Depends(get_db), user: User = Depends(curr
     if row is not None:
         db.delete(row)
         db.commit()
+
+
+def follower_count(db: Session, strategy_id: int) -> int:
+    return db.scalar(select(func.count(Follow.id)).where(Follow.strategy_id == strategy_id)) or 0
+
+
+def is_following(db: Session, user_id: int, strategy_id: int) -> bool:
+    return (
+        db.scalar(
+            select(Follow.id).where(Follow.user_id == user_id, Follow.strategy_id == strategy_id)
+        )
+        is not None
+    )
+
+
+@router.post(
+    "/follows/{slug}",
+    response_model=FollowOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit("follow_user", by="user"))],  # p3-auth
+)
+def follow(slug: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    return _follow_out(*follow_strategy(db, user, slug))
+
+
+@router.delete("/follows/{slug}", status_code=status.HTTP_204_NO_CONTENT)
+def unfollow(slug: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    unfollow_strategy(db, user, slug)
 
 
 @router.get("/follows", response_model=list[FollowOut])
