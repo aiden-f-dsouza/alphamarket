@@ -35,6 +35,7 @@ from alphamarket.connectors.registry import PROFILES
 from alphamarket.db import get_db
 from alphamarket.models import (
     EquitySnapshot,
+    Instrument,
     Settlement,
     Strategy,
     StrategyStatus,
@@ -322,13 +323,37 @@ def v2_stats_view(extras: dict) -> dict:
 # ---- signals (both shapes) -----------------------------------------------------------------
 
 
+def instrument_label(inst: Instrument | None, fallback: str = "?") -> str:
+    """How an instrument reads on a page: spot pairs as BASE/QUOTE in canonical
+    codes (Kraken's XXBTZUSD is BTC/USD), perps by their position code
+    (BTC-PERP), stocks and contracts by their symbol."""
+    if inst is None:
+        return fallback
+    if inst.type == "spot":
+        return f"{inst.base_asset}/{inst.quote_asset}"
+    if inst.type == "perp":
+        return inst.base_asset if inst.base_asset.endswith("-PERP") else f"{inst.base_asset}-PERP"
+    return inst.symbol
+
+
+def instrument_labels(db: Session, signals) -> dict[int, str]:
+    """instrument_label for every asset signal's instrument, keyed by id."""
+    ids = {s.instrument_id for s in signals if s.instrument_id is not None}
+    if not ids:
+        return {}
+    rows = db.scalars(select(Instrument).where(Instrument.id.in_(ids))).all()
+    return {i.id: instrument_label(i) for i in rows}
+
+
 def signal_items(db: Session, strategy: Strategy, limit: int = 20) -> list[dict]:
     """Recent signals of a strategy, binary and asset rows alike (one
     renderer for the page, the JSON API and the feed: follows.signal_item)."""
     from alphamarket.follows import signal_item
     from alphamarket.signals import recent_signals
 
-    return [signal_item(strategy, s) for s in recent_signals(db, strategy.id, limit)]
+    signals = recent_signals(db, strategy.id, limit)
+    labels = instrument_labels(db, signals)
+    return [signal_item(strategy, s, labels) for s in signals]
 
 
 # ---- strategy page ---------------------------------------------------------------------------

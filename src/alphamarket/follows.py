@@ -19,7 +19,7 @@ from alphamarket.db import get_db
 from alphamarket.jobs import aware
 from alphamarket.models import Allocation, Follow, Settlement, Signal, Strategy, User
 from alphamarket.money import format_atoms
-from alphamarket.public import publicly_visible, visible_strategy_or_404
+from alphamarket.public import instrument_labels, publicly_visible, visible_strategy_or_404
 from alphamarket.ratelimit import rate_limit
 from alphamarket.stats import micros_to_float
 from alphamarket.valuation import parse_price
@@ -113,7 +113,7 @@ def list_follows(db: Session = Depends(get_db), user: User = Depends(current_use
 # ---- feed ----------------------------------------------------------------------
 
 
-def asset_signal_item(strategy: Strategy, s: Signal) -> dict:
+def asset_signal_item(strategy: Strategy, s: Signal, labels: dict[int, str] | None = None) -> dict:
     """An asset signal (signals v2) in the feed's shape. `count` and `price`
     are display floats of the exact strings also returned (`qty`,
     `price_str`); `stake_fraction` = notional / creator equity, None when the
@@ -133,6 +133,8 @@ def asset_signal_item(strategy: Strategy, s: Signal) -> dict:
         "strategy_slug": strategy.slug,
         "strategy_name": strategy.name,
         "ticker": s.ticker,
+        # public.instrument_label: what a page shows (BTC/USD, not XXBTZUSD)
+        "label": (labels or {}).get(s.instrument_id, s.ticker),
         "side": s.side,
         "action": s.action,
         "count": float(qty),
@@ -145,9 +147,9 @@ def asset_signal_item(strategy: Strategy, s: Signal) -> dict:
     }
 
 
-def signal_item(strategy: Strategy, s: Signal) -> dict:
+def signal_item(strategy: Strategy, s: Signal, labels: dict[int, str] | None = None) -> dict:
     if s.is_asset:
-        return asset_signal_item(strategy, s)
+        return asset_signal_item(strategy, s, labels)
     return {
         "kind": "fill",
         "at": s.filled_at.isoformat(),
@@ -199,7 +201,8 @@ def feed_items(db: Session, strategies: list[Strategy], limit: int = FEED_LIMIT)
         .order_by(Settlement.settled_at.desc(), Settlement.id.desc())
         .limit(limit)
     ).all()
-    items = [signal_item(by_id[s.strategy_id], s) for s in signals]
+    labels = instrument_labels(db, signals)
+    items = [signal_item(by_id[s.strategy_id], s, labels) for s in signals]
     items += [settlement_item(by_id[s.strategy_id], s) for s in settlements]
     items.sort(key=lambda i: i["at"], reverse=True)
     return items[:limit]

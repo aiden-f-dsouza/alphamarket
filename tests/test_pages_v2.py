@@ -958,10 +958,10 @@ def test_activity_flag_summary_orders_reasons_by_count(db):
 # ---- public signals: both shapes -------------------------------------------------------------
 
 
-def _asset_signal(db, strategy) -> Signal:
+def _asset_signal(db, strategy, symbol="ETH/USD") -> Signal:
     inst = Instrument(
         venue="kraken",
-        symbol="ETH/USD",
+        symbol=symbol,
         type="spot",
         base_asset="ETH",
         quote_asset="USD",
@@ -985,7 +985,7 @@ def _asset_signal(db, strategy) -> Signal:
         strategy_id=strategy.id,
         asset_fill_id=fill.id,
         instrument_id=inst.id,
-        ticker="ETH/USD",
+        ticker=symbol,
         side="long",
         action="buy",
         creator_equity_micros=8_000 * M,
@@ -1092,3 +1092,30 @@ def test_portfolio_new_tail_is_not_a_gain_and_drawdown_is_flow_adjusted():
     assert (p["curve_lo"], p["curve_hi"]) == (-100.0, 0.0)
     assert p["current_dd"] == pytest.approx(0.10)
     assert p["worst_dd"] == pytest.approx(0.10)
+
+
+def test_instrument_label_reads_like_the_market_not_the_venue_code():
+    from alphamarket.models import Instrument
+    from alphamarket.public import instrument_label
+
+    def inst(symbol, type_, base, quote):
+        return Instrument(symbol=symbol, type=type_, base_asset=base, quote_asset=quote)
+
+    assert instrument_label(inst("XXBTZUSD", "spot", "BTC", "USD")) == "BTC/USD"
+    assert instrument_label(inst("SOL-USD", "spot", "SOL", "USD")) == "SOL/USD"
+    assert instrument_label(inst("BTC", "perp", "BTC-PERP", "USDC")) == "BTC-PERP"
+    assert instrument_label(inst("AVGO", "equity", "AVGO", "USD")) == "AVGO"
+    assert instrument_label(None, "XXBTZUSD") == "XXBTZUSD"
+
+
+def test_strategy_page_and_json_label_kraken_pairs_by_canonical_codes(client, db):
+    s = _strategy(db, "kraken", "eth-pairs", "ETH Pairs")
+    _stats(db, s, v2_extras())
+    _asset_signal(db, s, symbol="XETHZUSD")
+    db.commit()
+
+    html = client.get("/s/eth-pairs").text
+    recent = html.split("Recent trades", 1)[1]
+    assert "ETH/USD" in recent and "XETHZUSD" not in recent
+    (item,) = client.get("/api/strategies/eth-pairs/signals").json()["signals"]
+    assert item["label"] == "ETH/USD" and item["ticker"] == "XETHZUSD"  # API keeps the venue code

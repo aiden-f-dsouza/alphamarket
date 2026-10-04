@@ -62,6 +62,7 @@ from alphamarket.public import (
     ASSET_CLASS_LABELS,
     ASSET_CLASS_ORDER,
     all_tags,
+    instrument_label,
     is_visible,
     list_visible,
     page_data,
@@ -1013,7 +1014,7 @@ def _portfolio_activity(db: Session, allocation_ids: list[int], limit: int = 12)
     ):
         inst = db.get(Instrument, f.instrument_id)
         qty = fmt_num(format_atoms(f.qty_atoms, f.qty_decimals))
-        what = f"{f.action} {qty} {inst.symbol if inst else '?'} @ {fmt_num(f.price)}"
+        what = f"{f.action} {qty} {instrument_label(inst)} @ {fmt_num(f.price)}"
         events.append(
             (
                 f.filled_at,
@@ -1135,8 +1136,9 @@ def _post_body(item: dict, strategy_name: str) -> str:
         price = fmt_num(item.get("price_str"))
         lag = item.get("copy_lag_seconds")
         seen = f" Seen {_age(lag)} after the fill." if lag is not None else ""
+        label = item.get("label") or item["ticker"]
         return (
-            f"{strategy_name}: {item['action']} {fmt_num(item['qty'])} {item['ticker']} at {price}"
+            f"{strategy_name}: {item['action']} {fmt_num(item['qty'])} {label} at {price}"
             f"{size}, {item['side']} position.{seen}"
         )
     cents = round(item["price"] * 100)

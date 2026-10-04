@@ -234,7 +234,7 @@
       <div class="spread" style="align-items:baseline;padding-bottom:8px;border-bottom:1px solid var(--line2)"><span class="label">Recent trades</span><span class="mono small muted">{{ page.recent_signals|length }} of {{ st.n_fills }}</span></div>
       {% for s in page.recent_signals %}
       <div class="srow">
-        <div class="stack" style="gap:3px;min-width:0"><span class="mono small tk">{{ s.ticker }} <span class="text2">{{ m.qty(s.qty) if s.qty is not none else "" }}</span></span><span class="mono muted" style="font-size:11px">{{ s.at[:16]|replace("T", " ") }} UTC{% if s.price is not none %} · @ {{ m.price(s.price_str or s.price) }}{% endif %}</span></div>
+        <div class="stack" style="gap:3px;min-width:0"><span class="mono small tk">{{ s.label or s.ticker }} <span class="text2">{{ m.qty(s.qty) if s.qty is not none else "" }}</span></span><span class="mono muted" style="font-size:11px">{{ s.at[:16]|replace("T", " ") }} UTC{% if s.price is not none %} · @ {{ m.price(s.price_str or s.price) }}{% endif %}</span></div>
         <span class="side {{ 'good' if s.action == 'buy' else 'bad' }}">{{ s.action }}</span>
         <span class="mono small muted" style="text-align:right">{% if s.stake_fraction is not none %}{{ "%.1f"|format(s.stake_fraction * 100) }}%{% endif %}</span>
       </div>
