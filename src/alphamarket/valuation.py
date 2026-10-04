@@ -955,3 +955,112 @@ class LedgerSweep:
             self._qtys(self._flows),
             self._prices.before(day),
         )
+
+
+# ---- perf: the end state of a growing ledger, folded incrementally -----------------
+
+
+class OutOfOrderFill(ValueError):
+    """A perp fill folded before the last one folded (LedgerFold.add_fill)."""
+
+
+class LedgerFold:
+    """Holdings and the perp book at the END of a ledger that only grows,
+    folded one leg and one perp fill at a time, and serializable, so a caller
+    can keep the state (paper_book's checkpoints) and later fold only what is
+    new. With L the legs and F the perp fills folded so far:
+
+        holdings()        == holdings_at(anchor, L, t)        for any t >= every leg
+        perp_positions()  == perp_positions_at(anchor, F, t)  for any t >= every fill
+
+    exactly, scales included: an asset's scale is the max decimals over the
+    anchor and what was folded, widened as finer legs arrive (_widen and
+    _PerpBook.widen, as in LedgerSweep), so every formula still lives once.
+    Legs may come in any order (holdings are sums). Fills must come in the
+    order perp_positions_at applies them: occurred_at non-decreasing, ties in
+    input order; an earlier fill raises OutOfOrderFill, so a caller resuming
+    a saved state replays from scratch instead. tests/test_paper_checkpoints.py
+    pins the equality."""
+
+    STATE_VERSION = 1
+
+    def __init__(self, anchor: Sequence[AnchorIn]) -> None:
+        _check_anchor(anchor)
+        self.anchor = tuple(anchor)
+        self._scales = _asset_scales(anchor, ())
+        self._held = {
+            row.asset: _rescale(row.atoms, row.decimals, self._scales[row.asset]) for row in anchor
+        }
+        self._book = _new_book(anchor, ())
+        self.fills_through: datetime | None = None  # occurred_at of the last fill folded
+
+    def add_leg(self, leg: LegIn) -> None:
+        _widen(self._scales, leg.asset, leg.decimals, self._held)
+        atoms = _rescale(leg.delta_atoms, leg.decimals, self._scales[leg.asset])
+        self._held[leg.asset] = self._held.get(leg.asset, 0) + atoms
+
+    def add_fill(self, fill: PerpFillIn) -> None:
+        if self.fills_through is not None and fill.occurred_at < self.fills_through:
+            raise OutOfOrderFill(
+                f"{fill.asset} fill at {fill.occurred_at} is before {self.fills_through}"
+            )
+        self._book.widen(fill.asset, fill.decimals)
+        self._book.apply(fill)
+        self.fills_through = fill.occurred_at
+
+    def holdings(self) -> dict[str, Qty]:
+        return {a: Qty(atoms, self._scales[a]) for a, atoms in self._held.items() if atoms}
+
+    def perp_positions(self) -> dict[str, PerpPosition]:
+        return self._book.positions()
+
+    # The state is JSON-safe with every integer and fraction as a string, never
+    # a float (invariant 1), so a JSON column round-trips it exactly.
+
+    def to_state(self) -> dict:
+        book = self._book
+        return {
+            "v": self.STATE_VERSION,
+            "anchor": _anchor_state(self.anchor),
+            "held": {a: str(atoms) for a, atoms in sorted(self._held.items())},
+            "scales": dict(sorted(self._scales.items())),
+            "perp_qty": {a: str(q) for a, q in sorted(book.qty.items())},
+            "perp_entry": {
+                a: None if e is None else f"{e.numerator}/{e.denominator}"
+                for a, e in sorted(book.entry.items())
+            },
+            "perp_scales": dict(sorted(book.scales.items())),
+            "fills_through": (
+                None
+                if self.fills_through is None
+                else self.fills_through.astimezone(UTC).isoformat()
+            ),
+        }
+
+    @classmethod
+    def from_state(cls, anchor: Sequence[AnchorIn], state: dict) -> "LedgerFold":
+        """The fold that to_state() described. Raises ValueError for a state of
+        another version or one made over a different anchor."""
+        if state.get("v") != cls.STATE_VERSION:
+            raise ValueError(f"fold state version {state.get('v')!r}")
+        if state.get("anchor") != _anchor_state(anchor):
+            raise ValueError("fold state was made over a different anchor")
+        fold = cls(anchor)
+        fold._held = {a: int(atoms) for a, atoms in state["held"].items()}
+        fold._scales = {a: int(d) for a, d in state["scales"].items()}
+        book = fold._book
+        book.scales.clear()
+        book.scales.update({a: int(d) for a, d in state["perp_scales"].items()})
+        book.qty = {a: int(q) for a, q in state["perp_qty"].items()}
+        book.entry = {a: None if e is None else Fraction(e) for a, e in state["perp_entry"].items()}
+        for decimals in (*fold._scales.values(), *book.scales.values()):
+            _require_decimals(decimals)
+        if set(fold._held) - set(fold._scales) or set(book.qty) - set(book.scales):
+            raise ValueError("fold state has a quantity without a scale")
+        through = state.get("fills_through")
+        fold.fills_through = None if through is None else datetime.fromisoformat(through)
+        return fold
+
+
+def _anchor_state(anchor: Sequence[AnchorIn]) -> list[list]:
+    return [[a.asset, str(a.atoms), a.decimals, a.entry_price] for a in anchor]
