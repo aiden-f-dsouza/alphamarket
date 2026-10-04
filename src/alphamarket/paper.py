@@ -16,7 +16,9 @@ process_asset_allocation(db, allocation) -> tuple[int, int]
     so dividends and funding keep accruing on what is still held). Returns
     (signals mirrored, lifecycle events applied). COMMIT (or roll back)
     before returning, even when nothing was done: worker.handle_mirror holds
-    a FOR UPDATE SKIP LOCKED lock on the allocation row until then. Per
+    a FOR UPDATE SKIP LOCKED lock on the allocation row until then. Just
+    before that commit, paper_book.save_checkpoint_safely brings the book
+    checkpoint (a cache; paper_book docstring) up to the pass. Per
     signal: skip with a
     mirror_skips row (filled_at < started_at is skipped silently, as in M6;
     stale_signal, creator_equity_unknown, non_usd_quote, below_minimum_size,
@@ -73,7 +75,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from fractions import Fraction
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.orm import Session
 
@@ -105,7 +107,7 @@ from alphamarket.models import (
 from alphamarket.money import MICROS_PER_UNIT
 from alphamarket.paper_book import (
     CASH_ASSET,
-    FollowerBook,
+    BookState,
     LegSpec,
     cash_leg,
     cost_micros_up,
@@ -496,7 +498,7 @@ def _split_between(db: Session, instrument: Instrument, start: datetime, end: da
     return found is not None
 
 
-def _position_atoms(book: FollowerBook, instrument: Instrument) -> int:
+def _position_atoms(book: BookState, instrument: Instrument) -> int:
     """The follower's signed position in the instrument at its qty_decimals
     (floored toward zero if the book holds finer atoms)."""
     asset = instrument.base_asset
@@ -539,7 +541,7 @@ def _legs(
     ]
 
 
-def realized_pnl_micros(book: FollowerBook, instrument: Instrument, close_atoms: int, price: str):
+def realized_pnl_micros(book: BookState, instrument: Instrument, close_atoms: int, price: str):
     """Perp P&L realized by closing `close_atoms` of the follower's position at
     `price`: close_qty x (price - entry) x side, floored to the micro (a gain
     rounds down, a loss rounds up)."""
@@ -586,7 +588,7 @@ def mirror_asset_signal(
     executor = get_asset_executor(allocation.mode)
     action = Action(signal.action)
     price = executor.quote(signal, action, profile)
-    book = paper_book.load_book(db, allocation)
+    book = paper_book.book_state(db, allocation)
     sized = size_asset_order(
         signal,
         instrument,
@@ -723,6 +725,9 @@ def process_asset_allocation(
     try:
         mirrored = mirror_asset_pending(db, allocation, now)
         applied = apply_lifecycle(db, allocation, now)
+        # The book checkpoint (a cache) commits with the legs it folded, still
+        # under worker.handle_mirror's row lock (paper_book docstring).
+        paper_book.save_checkpoint_safely(db, allocation)
         db.commit()  # releases worker.handle_mirror's row lock
     except Exception:
         db.rollback()
@@ -742,13 +747,25 @@ class _Marked:
 
 
 def _instruments_by_asset(db: Session, allocation: Allocation) -> dict[str, Instrument]:
+    """Each asset's instrument: the one on its newest leg (the leg with the
+    highest id among those carrying an instrument). One row per (asset,
+    instrument) pair from SQL, not one per leg."""
+    newest = func.max(MirrorLedgerEntry.id)
     rows = db.execute(
-        select(MirrorLedgerEntry.asset, Instrument)
-        .join(Instrument, Instrument.id == MirrorLedgerEntry.instrument_id)
-        .where(MirrorLedgerEntry.allocation_id == allocation.id)
-        .order_by(MirrorLedgerEntry.id)
+        select(MirrorLedgerEntry.asset, MirrorLedgerEntry.instrument_id, newest)
+        .where(
+            MirrorLedgerEntry.allocation_id == allocation.id,
+            MirrorLedgerEntry.instrument_id.is_not(None),
+        )
+        .group_by(MirrorLedgerEntry.asset, MirrorLedgerEntry.instrument_id)
+        .order_by(newest)
     ).all()
-    return {asset: inst for asset, inst in rows}
+    found: dict[str, Instrument] = {}
+    for asset, instrument_id, _ in rows:
+        inst = db.get(Instrument, instrument_id)
+        if inst is not None:
+            found[asset] = inst
+    return found
 
 
 def _mark(
@@ -782,9 +799,19 @@ def cost_basis_micros(db: Session, allocation: Allocation) -> dict[str, int]:
     """Average cost (cash paid, fees excluded) of each spot/equity holding:
     a buy adds its cash paid; a sell removes cost x sold / held; a split
     changes the quantity, never the cost. Truncated to the micro."""
+    # Cash legs other than FILL_QUOTE (fees, funding, dividends: most of a perp
+    # or long-lived book) never reach the fold below, so SQL leaves them out.
+    # A group's first leg is never one of them (paper_book: FILL_BASE or SPLIT
+    # leads every group with a non-cash leg), so group order is unchanged.
     entries = db.scalars(
         select(MirrorLedgerEntry)
-        .where(MirrorLedgerEntry.allocation_id == allocation.id)
+        .where(
+            MirrorLedgerEntry.allocation_id == allocation.id,
+            or_(
+                MirrorLedgerEntry.asset != CASH_ASSET,
+                MirrorLedgerEntry.kind == LegKind.FILL_QUOTE,
+            ),
+        )
         .order_by(MirrorLedgerEntry.occurred_at, MirrorLedgerEntry.id)
     ).all()
     groups: dict[str, list[MirrorLedgerEntry]] = {}
@@ -832,10 +859,12 @@ def value_asset_allocation(
     from alphamarket.stats import micros_to_float
 
     now = now or utcnow()
-    book = paper_book.load_book(db, allocation)
+    book = paper_book.book_state(db, allocation)
     instruments = _instruments_by_asset(db, allocation)
     venues = _pricing_venues(db, allocation)
-    costs = cost_basis_micros(db, allocation) if book.holdings else {}
+    # Costs are read for spot/equity holdings only.
+    spot = any(not asset.endswith(PERP_SUFFIX) for asset in book.holdings)
+    costs = cost_basis_micros(db, allocation) if spot else {}
     positions: list[dict] = []
     open_cost = open_value = unmarked = 0
     for asset, qty in sorted(book.holdings.items()):
@@ -949,7 +978,7 @@ def symbol_change_notices(
     today = aware(now or utcnow()).astimezone(UTC).date()
     held = {
         asset
-        for asset, qty in paper_book.load_book(db, allocation).holdings.items()
+        for asset, qty in paper_book.book_state(db, allocation).holdings.items()
         if qty.atoms > 0
     }
     equities = sorted(

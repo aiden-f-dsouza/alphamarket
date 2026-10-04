@@ -8,16 +8,15 @@ Rows in, dataclasses out; no arithmetic beyond sign and selection.
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from alphamarket.connectors.base import InstrumentType, LegKind
 from alphamarket.connectors.registry import get_profile, price_asset
-from alphamarket.ingest import account_entries
 from alphamarket.jobs import aware
-from alphamarket.models import AssetFill, Instrument, PriceDaily, VenueAccount
+from alphamarket.models import AssetFill, Instrument, LedgerEntry, PriceDaily, VenueAccount
 from alphamarket.reconcile import latest_anchor_balances
 from alphamarket.valuation import AnchorIn, LegIn, PerpFillIn, PriceIn
 
@@ -41,51 +40,129 @@ class ValuationInputs:
         return {a.asset for a in self.anchor} | {leg.asset for leg in self.legs}
 
 
-def account_inputs(db: Session, account: VenueAccount) -> ValuationInputs | None:
-    """The anchor vector (newest anchor_balances set; for an account anchored
-    before ledger v2, its cash anchor in the profile's quote asset), every
-    ledger leg after it, and every perp fill after it as a signed PerpFillIn
-    (buy +, sell -). None when the account was never anchored."""
+def account_anchor(
+    db: Session, account: VenueAccount
+) -> tuple[tuple[AnchorIn, ...], datetime] | None:
+    """(anchor vector, anchor_at): the newest anchor_balances set, or for an
+    account anchored before ledger v2 its cash anchor in the profile's quote
+    asset. None when the account was never anchored. Reads no legs."""
     rows = latest_anchor_balances(db, account)
     if rows:
         anchor_at = max(aware(r.as_of) for r in rows)
         anchor = tuple(
             AnchorIn(r.asset, r.atoms, r.decimals, entry_price=r.entry_price) for r in rows
         )
-    elif account.anchor_at is not None and account.anchor_balance_micros is not None:
-        anchor_at = aware(account.anchor_at)
+        return anchor, anchor_at
+    if account.anchor_at is not None and account.anchor_balance_micros is not None:
         quote = get_profile(account.venue).quote_asset
-        anchor = (AnchorIn(quote, account.anchor_balance_micros, CASH_DECIMALS),)
-    else:
-        return None
-    legs = tuple(
-        LegIn(
-            asset=e.asset,
-            delta_atoms=e.delta_atoms,
-            decimals=e.decimals,
-            kind=LegKind(e.kind),
-            occurred_at=aware(e.occurred_at),
+        return (AnchorIn(quote, account.anchor_balance_micros, CASH_DECIMALS),), aware(
+            account.anchor_at
         )
-        for e in account_entries(db, account.id, after=anchor_at)
-    )
+    return None
+
+
+def account_inputs(
+    db: Session, account: VenueAccount, *, valued_from: datetime | None = None
+) -> ValuationInputs | None:
+    """The anchor vector (account_anchor), every ledger leg after it, and every
+    perp fill after it as a signed PerpFillIn (buy +, sell -). None when the
+    account was never anchored.
+
+    valued_from (w3-perf, for paper_signals): the caller values the account
+    only at instants >= valued_from, with LedgerSweep's holdings_before /
+    perp_positions_before / equity_before. Then the legs before midnight UTC
+    of valued_from's day are summed in SQL into one ADJUSTMENT leg per
+    (asset, decimals), dated a microsecond before that midnight; later legs
+    come one by one. Those answers are unchanged, to the atom: holdings are
+    sums, every (asset, decimals) pair keeps a leg (zero sums too) so each
+    asset's scale is the same max, and equity_before counts a flow only on
+    the instant's own UTC day, which no folded leg falls on. Perp fills are
+    all kept (the perp book depends on their order). NOT for daily series
+    or anything that reads a leg's kind or time before that midnight."""
+    anchored = account_anchor(db, account)
+    if anchored is None:
+        return None
+    anchor, anchor_at = anchored
+    cut = None
+    if valued_from is not None:
+        cut = datetime.combine(aware(valued_from).astimezone(UTC).date(), time(0), tzinfo=UTC)
+    legs = _legs_after(db, account, anchor_at, fold_before=cut)
     fills = db.execute(
-        select(AssetFill, Instrument)
+        select(
+            AssetFill.action,
+            AssetFill.qty_atoms,
+            AssetFill.qty_decimals,
+            AssetFill.price,
+            AssetFill.filled_at,
+            Instrument.base_asset,
+        )
         .join(Instrument, Instrument.id == AssetFill.instrument_id)
         .where(AssetFill.venue_account_id == account.id, Instrument.type == InstrumentType.PERP)
         .order_by(AssetFill.filled_at, AssetFill.id)
     ).all()
     perp_fills = tuple(
         PerpFillIn(
-            asset=inst.base_asset,
-            occurred_at=aware(fill.filled_at),
-            qty_delta_atoms=fill.qty_atoms if fill.action == "buy" else -fill.qty_atoms,
-            decimals=fill.qty_decimals,
-            price=fill.price,
+            asset=row.base_asset,
+            occurred_at=aware(row.filled_at),
+            qty_delta_atoms=row.qty_atoms if row.action == "buy" else -row.qty_atoms,
+            decimals=row.qty_decimals,
+            price=row.price,
         )
-        for fill, inst in fills
-        if aware(fill.filled_at) > anchor_at
+        for row in fills
+        if aware(row.filled_at) > anchor_at
     )
     return ValuationInputs(anchor, anchor_at, legs, perp_fills)
+
+
+def _legs_after(
+    db: Session, account: VenueAccount, after: datetime, *, fold_before: datetime | None = None
+) -> tuple[LegIn, ...]:
+    """ingest.account_entries(db, account.id, after=after) as LegIn, in the same
+    (ingestion, id) order: the columns valuation needs, not ORM rows, with the
+    time filter in SQL and re-checked aware (SQLite stores naive values).
+    fold_before: see account_inputs(valued_from=...)."""
+    after = aware(after)
+    folded: list[LegIn] = []
+    query = select(
+        LedgerEntry.asset,
+        LedgerEntry.delta_atoms,
+        LedgerEntry.decimals,
+        LedgerEntry.kind,
+        LedgerEntry.occurred_at,
+    ).where(LedgerEntry.venue_account_id == account.id, LedgerEntry.occurred_at > after)
+    if fold_before is not None and fold_before > after:
+        sums = db.execute(
+            select(LedgerEntry.asset, LedgerEntry.decimals, func.sum(LedgerEntry.delta_atoms))
+            .where(
+                LedgerEntry.venue_account_id == account.id,
+                LedgerEntry.occurred_at > after,
+                LedgerEntry.occurred_at < fold_before,
+            )
+            .group_by(LedgerEntry.asset, LedgerEntry.decimals)
+            .order_by(LedgerEntry.asset, LedgerEntry.decimals)
+        ).all()
+        at = fold_before - timedelta(microseconds=1)
+        # SUM(bigint) is NUMERIC on Postgres (an exact Decimal): int() is exact.
+        folded = [
+            LegIn(asset, int(total), decimals, LegKind.ADJUSTMENT, at)
+            for asset, decimals, total in sums
+        ]
+        query = query.where(LedgerEntry.occurred_at >= fold_before)
+    rows = db.execute(query.order_by(LedgerEntry.id)).all()
+    return (
+        *folded,
+        *(
+            LegIn(
+                asset=asset,
+                delta_atoms=delta,
+                decimals=decimals,
+                kind=LegKind(kind),
+                occurred_at=aware(occurred),
+            )
+            for asset, delta, decimals, kind, occurred in rows
+            if aware(occurred) > after
+        ),
+    )
 
 
 def price_inputs(

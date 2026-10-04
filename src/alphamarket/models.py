@@ -1012,6 +1012,17 @@ class MirrorLedgerEntry(Base):
         ),
         _decimals_check("decimals", "mirror_ledger_entries"),
         Index("ix_mirror_ledger_entries_alloc_asset", "allocation_id", "asset"),
+        # w3-perf (migration 0016): checkpoint deltas and counts, the book's
+        # newest event, and the per-perp funding watermark / booked refs.
+        Index("ix_mirror_ledger_entries_alloc_id", "allocation_id", "id"),
+        Index("ix_mirror_ledger_entries_alloc_at", "allocation_id", "occurred_at"),
+        Index(
+            "ix_mirror_ledger_entries_alloc_inst_kind_at",
+            "allocation_id",
+            "instrument_id",
+            "kind",
+            "occurred_at",
+        ),
     )
 
     id: Mapped[int] = mapped_column(_BigId, primary_key=True)
@@ -1210,4 +1221,39 @@ class MarketDataCoverage(Base):
     covered_from: Mapped[date | None] = mapped_column(Date, default=None)
     covered_through: Mapped[date | None] = mapped_column(Date, default=None)
     fetched_on: Mapped[date] = mapped_column(Date)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ---- w3-perf ----
+# Migration 0016.
+
+
+class PaperBookCheckpoint(Base):
+    """A CACHE, not a ledger fact, and deliberately NOT append-only: the end
+    state of one paper allocation's book (cash, holdings, perp book with
+    entries) folded from its mirror_ledger_entries with id <= through_entry_id
+    and its perp mirror_asset_fills with id <= through_fill_id, so a pass
+    folds only the rows after them (paper_book.book_state). Derived entirely
+    from those append-only tables: it can be deleted at any time and is
+    rebuilt by the next mirror pass. Used only after entry_count / fill_count
+    match a fresh count of the rows at or below the through ids (a row that
+    committed late is caught there); any mismatch falls back to a full replay
+    and is logged. Written only by paper.process_asset_allocation, which runs
+    under the allocation's row lock in the worker. `state` is
+    valuation.LedgerFold.to_state(): integers and fractions as strings."""
+
+    __tablename__ = "paper_book_checkpoints"
+
+    allocation_id: Mapped[int] = mapped_column(ForeignKey("allocations.id"), primary_key=True)
+    through_entry_id: Mapped[int] = mapped_column(BigInteger)
+    entry_count: Mapped[int] = mapped_column(BigInteger)
+    # max occurred_at of the folded entries / filled_at of the folded fills:
+    # a book asked for at an earlier instant cannot start from this state.
+    entries_through_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    through_fill_id: Mapped[int] = mapped_column(BigInteger)
+    fill_count: Mapped[int] = mapped_column(BigInteger)
+    fills_through_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    state: Mapped[dict] = mapped_column(JSON)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

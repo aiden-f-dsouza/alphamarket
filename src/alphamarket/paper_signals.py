@@ -43,6 +43,10 @@ Implementation notes (methodology "Signals v2 and copy lag"):
   instant by instant in filled_at order; at each instant it answers exactly
   what holdings_at / perp_positions_at / equity_before would, so a pass over
   K instants and N legs costs O(N + K), not O(N x K).
+- w3-perf: a pass with no unsignalled fill returns before reading the
+  ledger. Otherwise the legs before the first pending fill's UTC day reach
+  the sweep pre-summed in SQL (valuation_db.account_inputs valued_from=),
+  which leaves every number above unchanged.
 - creator_equity_micros is 0 (unknown) when the valuation is not positive;
   unpriced assets are excluded, exactly as in the daily equity series.
 - notional_micros = qty x price, truncated to the micro, only when the
@@ -157,16 +161,22 @@ def emit_asset_signals(db: Session, strategy: Strategy, *, limiter=None) -> int:
     account = db.get(VenueAccount, strategy.venue_account_id)
     if account is None:
         return 0
-    inputs = valuation_db.account_inputs(db, account)
-    if inputs is None:  # never anchored: nothing is part of the verified record yet
+    anchored = valuation_db.account_anchor(db, account)
+    if anchored is None:  # never anchored: nothing is part of the verified record yet
         return 0
-    pending = _unsignalled_fills(db, account.id, inputs.anchor_at)
-    if not pending:
+    pending = _unsignalled_fills(db, account.id, anchored[1])
+    if not pending:  # the common pass: the ledger is not read at all
+        return 0
+    # Valued only at instants from the first pending fill on (the walk below),
+    # so the ledger before that day is summed in SQL (account_inputs docstring).
+    first = aware(pending[0][0].filled_at)
+    inputs = valuation_db.account_inputs(db, account, valued_from=first)
+    if inputs is None:
         return 0
     # Fills that already have a signal still move the running position of a
     # later fill at the SAME instant (one order whose fills arrived in two
     # syncs), so every fill from the first pending instant on is walked.
-    walk = _fills_from(db, account.id, aware(pending[0][0].filled_at))
+    walk = _fills_from(db, account.id, first)
     pending_ids = {f.id for f, _ in pending}
 
     max_lag = timedelta(seconds=get_profile(account.venue).max_copy_lag_seconds)

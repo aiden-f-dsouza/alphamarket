@@ -179,6 +179,7 @@ def test_housekeeping_deletes_exactly_the_stale_rows(session_factory):
             "asset_quotes": 1,
             "pending_accounts": 0,
             "jobs": 2,
+            "book_checkpoints": 0,
         }
         left = surviving(db, seeded)
         for table, kinds in left.items():

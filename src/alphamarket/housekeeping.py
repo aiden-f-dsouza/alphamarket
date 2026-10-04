@@ -5,8 +5,12 @@ Contract: run(ctx) -> dict[str, int]
     settings.session_retention_days ago; auth_tokens expired or used more
     than settings.token_retention_days ago; asset_quotes older than
     settings.quote_retention_days; pending.abandon_stale; and
-    jobs.prune_finished (the scaffold moved it out of worker.tick_nightly).
-    Returns counts per category. Never touches an append-only table.
+    jobs.prune_finished (the scaffold moved it out of worker.tick_nightly);
+    w3-perf: paper_book.drop_bad_checkpoints over a random sample of
+    CHECKPOINT_SAMPLE paper book checkpoints (a cache: one that disagrees
+    with a full replay of the ledger is deleted, logged, and rebuilt by the
+    next mirror pass). Returns counts per category. Never touches an
+    append-only table.
 
 Every table pruned here is coordination or convenience state, not evidence:
 - rate_limit_counters: windows that have ended.
@@ -21,6 +25,8 @@ Every table pruned here is coordination or convenience state, not evidence:
 - asset_quotes: signals copy the quote they used, so no evidence lives only
   in this table; marks older than `quote_retention_days` are long stale.
 - jobs: finished rows (jobs.prune_finished: done 7 d, dead 30 d).
+- paper_book_checkpoints: derived state, verified against the ledger; only
+  a checkpoint that disagrees is deleted.
 Each category is deleted and committed on its own, so a failure in one
 leaves the others done.
 """
@@ -30,9 +36,11 @@ from datetime import timedelta
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
-from alphamarket import pending, ratelimit, sessions
+from alphamarket import paper_book, pending, ratelimit, sessions
 from alphamarket.jobs import prune_finished
 from alphamarket.models import AssetQuote, AuthToken, UserSession
+
+CHECKPOINT_SAMPLE = 50  # full replays per night; every checkpoint is also count-checked on use
 
 
 def prune_sessions(db: Session, now, retention: timedelta) -> int:
@@ -87,4 +95,5 @@ def run(ctx) -> dict[str, int]:
     counts["pending_accounts"] = pending.abandon_stale(db, now, getattr(ctx, "limiter", None))
     db.commit()
     counts["jobs"] = prune_finished(db, now=now)
+    counts["book_checkpoints"] = paper_book.drop_bad_checkpoints(db, sample=CHECKPOINT_SAMPLE)
     return counts

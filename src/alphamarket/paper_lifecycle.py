@@ -48,6 +48,10 @@ corporate actions"; tests/test_paper_lifecycle.py pins every number):
   or a quote can arrive later), never guessed, and given up once it leaves
   the window. The quote is used only when within quote_max_age of `at`;
   the close is the last complete UTC daily close before `at`'s day.
+  (w3-perf: a window whose rows are all booked is checked on the rows'
+  times alone; the positions at the unbooked rows come from one forward
+  pass over the perp fills, _PositionsAt; the book itself from
+  paper_book.book_state, which equals load_book.)
 - Each stage (funding, corporate actions, liquidation) runs in its own
   savepoint: a stage that raises is rolled back and logged, and the next
   stage still runs, so a funding bug never stops the liquidation check.
@@ -101,7 +105,7 @@ from alphamarket.models import (
     MirrorLedgerEntry,
 )
 from alphamarket.paper_book import CASH_ASSET, CASH_DECIMALS, LegSpec
-from alphamarket.valuation import PERP_SUFFIX, PerpPosition, parse_price, perp_positions_at
+from alphamarket.valuation import PERP_SUFFIX, LedgerFold, PerpPosition, parse_price
 
 logger = logging.getLogger(__name__)
 
@@ -305,30 +309,63 @@ def _funding_window(
     return (since, until) if since <= until else None
 
 
+class _PositionsAt:
+    """The open perp positions at each instant of a non-decreasing series, in
+    one forward pass over the fills (valuation.LedgerFold): position.qty.units
+    and the open/flat answer equal perp_positions_at(anchor, fills, t)'s. The
+    Qty scale can be coarser before a finer fill arrives (perp_positions_at
+    uses the max over every fill given); funding reads only the units."""
+
+    def __init__(self, anchor, fills: Sequence) -> None:
+        self._fold = LedgerFold(anchor)
+        self._fills = fills  # in (filled_at, id) order: paper_book.load_perp_fills
+        self._next = 0
+
+    def at(self, t: datetime) -> dict[str, PerpPosition]:
+        while self._next < len(self._fills) and self._fills[self._next].occurred_at <= t:
+            self._fold.add_fill(self._fills[self._next])
+            self._next += 1
+        return self._fold.perp_positions()
+
+
 def apply_funding(db: Session, allocation: Allocation, now: datetime) -> int:
     applied = 0
     instruments = _perp_instruments(db, allocation)
     if not instruments:
         return 0
-    book = paper_book.load_book(db, allocation)
+    book = paper_book.book_state(db, allocation)
+    anchor = paper_book.anchor_for(allocation)
+    perp_fills: tuple | None = None  # loaded on the first row that is not booked yet
     for inst in instruments:
         window = _funding_window(db, allocation, inst, book, now)
         if window is None:
             continue
         since, until = window
         booked = _booked_funding_refs(db, allocation, inst, since)
-        query = select(FundingRateRow).where(
-            FundingRateRow.instrument_id == inst.id,
-            FundingRateRow.at >= since,
-            FundingRateRow.at <= until,
+        window_rows = (
+            select(FundingRateRow)
+            .where(
+                FundingRateRow.instrument_id == inst.id,
+                FundingRateRow.at >= since,
+                FundingRateRow.at <= until,
+            )
+            .order_by(FundingRateRow.at, FundingRateRow.id)
         )
+        # w3-perf: most passes find every row of the window booked; check that
+        # on the timestamps alone before loading the rows.
+        times = db.scalars(window_rows.with_only_columns(FundingRateRow.at)).all()
+        if all(f"fund:{inst.id}:{_epoch(aware(t))}" in booked for t in times):
+            continue
         unpriced: list[datetime] = []
-        for row in db.scalars(query.order_by(FundingRateRow.at, FundingRateRow.id)).all():
+        if perp_fills is None:
+            perp_fills = paper_book.load_perp_fills(db, allocation)
+        positions = _PositionsAt(anchor, perp_fills)
+        for row in db.scalars(window_rows).all():
             at = aware(row.at)
             ref = f"fund:{inst.id}:{_epoch(at)}"
             if ref in booked:
                 continue
-            position = perp_positions_at(book.anchor, book.perp_fills, at).get(inst.base_asset)
+            position = positions.at(at).get(inst.base_asset)
             if position is None:
                 continue
             try:
@@ -434,7 +471,7 @@ def margin_check(cash_micros: int, positions: Sequence[tuple]) -> MarginCheck | 
 
 
 def check_liquidation(db: Session, allocation: Allocation, now: datetime) -> int:
-    book = paper_book.load_book(db, allocation, at=now)
+    book = paper_book.book_state(db, allocation, at=now)
     if not book.perps:
         return 0
     by_asset: dict[str, Instrument] = {}
@@ -604,9 +641,7 @@ def _apply_action(
     if row.kind == CorporateActionKind.SPLIT:
         if now < ex_at or not row.ratio_new or not row.ratio_old:
             return False
-        held = paper_book.load_book(db, allocation, at=ex_at - _EPSILON).holdings.get(
-            inst.base_asset
-        )
+        held = paper_book.holding_at(db, allocation, inst.base_asset, ex_at - _EPSILON)
         if held is None or held.atoms <= 0:
             return False
         delta = split_delta_atoms(held.atoms, row.ratio_new, row.ratio_old)
@@ -623,9 +658,7 @@ def _apply_action(
         except (ArithmeticError, TypeError, ValueError):
             logger.warning("corporate action %s: bad cash_per_share; skipped", row.id)
             return False
-        held = paper_book.load_book(db, allocation, at=ex_at - _EPSILON).holdings.get(
-            inst.base_asset
-        )
+        held = paper_book.holding_at(db, allocation, inst.base_asset, ex_at - _EPSILON)
         if held is None or held.atoms <= 0 or per_share <= 0:
             return False
         amount = dividend_micros(held.units, per_share)
