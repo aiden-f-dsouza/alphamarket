@@ -18,3 +18,29 @@ def test_worst_periods_are_runs_below_the_peak_deepest_first():
     ]
     assert worst_periods(list(zip(d, dd, strict=True)))[1] == (d[4], d[5], 0.1, d[6])
     assert worst_periods([(d[0], 0.0), (d[1], 0.0)]) == []
+
+
+def test_no_stats_yet_has_no_worst_periods(client, session_factory):
+    """A strategy connected today has no stats row until the nightly run; its
+    public page renders (it used to 500 in _worst_periods)."""
+    from datetime import UTC, datetime
+
+    from alphamarket.models import Strategy, User, VenueAccount
+
+    with session_factory() as db:
+        user = User(email="new@example.com", password_hash="x", display_name="New")
+        db.add(user)
+        db.flush()
+        account = VenueAccount(
+            user_id=user.id,
+            venue="kalshi",
+            venue_env="prod",
+            key_id="k-new",
+            claimed_at=datetime.now(UTC),
+        )
+        db.add(account)
+        db.flush()
+        db.add(Strategy(user_id=user.id, venue_account_id=account.id, name="New", slug="new-1"))
+        db.commit()
+    resp = client.get("/s/new-1")
+    assert resp.status_code == 200 and "first run is pending" in resp.text

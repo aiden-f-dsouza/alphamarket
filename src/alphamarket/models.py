@@ -23,6 +23,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
@@ -30,6 +31,7 @@ from sqlalchemy import (
     UniqueConstraint,
     event,
     false,
+    text,
 )
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
@@ -57,6 +59,13 @@ class User(Base):
     # demo user owns is public only while DEMO_MODE is on, always under the
     # "Sample data" banner; preflight refuses a database that has one.
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # Migration 0017. A house user is Koine itself, otherwise a normal user
+    # (verified email, TOTP, step-up to connect; read-only keys only): its
+    # strategies carry the "Run by Koine" badge and get no ranking advantage.
+    is_house: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # The one user that owns shared watch accounts (watchlist.system_user).
+    # Its password hash is unusable and auth refuses it: it never logs in.
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 class VenueAccountStatus(StrEnum):
@@ -71,6 +80,17 @@ class VenueAccountStatus(StrEnum):
 
 class VenueAccount(Base):
     __tablename__ = "venue_accounts"
+    # Two watchers of one address share one account and one ingestion.
+    __table_args__ = (
+        Index(
+            "uq_venue_accounts_watch_address",
+            "venue",
+            "key_id",
+            unique=True,
+            postgresql_where=text("is_watch"),
+            sqlite_where=text("is_watch"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
@@ -112,6 +132,9 @@ class VenueAccount(Base):
     # key was CONFIRMED read-only". The key itself lives in venue_credentials;
     # `encrypted_private_key` above is read for one release, never written.
     scope_evidence: Mapped[dict | None] = mapped_column(JSON, default=None)
+    # Migration 0017: a public address on the watchlist, owned by the system
+    # user, never claimed, no credential (watchlist.py).
+    is_watch: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     @property
     def claimed(self) -> bool:
@@ -123,6 +146,13 @@ class StrategyStatus(StrEnum):
     LIVE = "live"
     QUARANTINED = "quarantined"  # reconciliation divergence (M2) or fraud flag (M3)
     DELISTED = "delisted"
+
+
+class StrategyKind(StrEnum):
+    CREATOR = "creator"  # a Koine user's own account
+    # A public address on someone's private watchlist: never public, whoever
+    # asks (invariant 4); reached only through a Watch row (watchlist.py).
+    WATCH = "watch"
 
 
 class Strategy(Base):
@@ -145,6 +175,9 @@ class Strategy(Base):
     status: Mapped[str] = mapped_column(String(20), default=StrategyStatus.INCUBATING)
     listed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    kind: Mapped[str] = mapped_column(
+        String(10), default=StrategyKind.CREATOR, server_default=StrategyKind.CREATOR.value
+    )
 
 
 class Fill(Base):
@@ -1269,3 +1302,47 @@ class PaperBookCheckpoint(Base):
     fills_through_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     state: Mapped[dict] = mapped_column(JSON)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ---- watchlist (migration 0017) ----
+
+
+class Watch(Base):
+    """A user's private watch of a public address's strategy. Mutable: removing
+    the watch deletes the row. `label` is the user's own nickname for the
+    address, shown to nobody else."""
+
+    __tablename__ = "watches"
+    __table_args__ = (UniqueConstraint("user_id", "strategy_id", name="uq_watches_user_strategy"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    strategy_id: Mapped[int] = mapped_column(ForeignKey("strategies.id"), index=True)
+    label: Mapped[str] = mapped_column(String(60), default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WatchOptout(Base):
+    """APPEND-ONLY. The owner of an address proved it and asked not to be
+    tracked: adding it to a watchlist is refused and existing watches stop."""
+
+    __tablename__ = "watch_optouts"
+    __table_args__ = (UniqueConstraint("venue", "address", name="uq_watch_optouts_venue_address"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    venue: Mapped[str] = mapped_column(String(40))
+    address: Mapped[str] = mapped_column(String(120))  # lowercased
+    proved_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+@event.listens_for(Session, "before_flush")
+def _enforce_append_only_watch(session: Session, flush_context, instances) -> None:
+    """Same guard as _enforce_append_only for watch_optouts; the Postgres
+    trigger (migration 0017) backs it for raw SQL."""
+    for obj in session.dirty:
+        if isinstance(obj, WatchOptout) and session.is_modified(obj):
+            raise AppendOnlyViolation("WatchOptout rows are append-only; cannot update")
+    for obj in session.deleted:
+        if isinstance(obj, WatchOptout):
+            raise AppendOnlyViolation("WatchOptout rows are append-only; cannot delete")

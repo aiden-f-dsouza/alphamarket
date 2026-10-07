@@ -22,9 +22,10 @@
 {% endblock %}
 {% block content %}
 <div class="cols">
-  {% if t.real %}<form method="post" action="/s/{{ s.slug }}/tail" class="stack" style="gap:32px">{% else %}<div class="stack" style="gap:32px">{% endif %}
+  {% set base = t.base or "/s/" ~ s.slug %}{% if t.real %}<form method="post" action="{{ base }}/tail" class="stack" style="gap:32px">{% else %}<div class="stack" style="gap:32px">{% endif %}
     <div class="stack">
       <span class="label">Paper tail · {{ s.name }} · by {{ s.display_name }}</span>
+      {% if s.operator == "koine" %}<div>{{ m.operator_badge(s.operator) }}</div>{% endif %}
       <h1 style="font-size:40px">Follow it with paper money first.</h1>
       <p class="text2">Set a paper allocation and a drawdown limit. From the creator's next trade, Koine copies every trade into your paper allocation, sized to it, at prices you could actually have got and after the venue's fees. You see exactly what following would have made before you risk anything. No order is placed anywhere.</p>
     </div>
@@ -80,7 +81,7 @@
       {% if t.real %}
       <span style="font-size:16px;line-height:1.5">Koine will copy {{ s.display_name }}'s next trades into your paper allocation. <span class="text2">No order is placed in any account, Koine asks for no key that can trade, and no money moves.</span></span>
       <label style="display:flex;align-items:flex-start;gap:12px;font-size:14px;line-height:1.5" class="text2"><input type="checkbox" name="confirm" required {{ "checked" if t.confirmed }} style="width:18px;height:18px;margin:2px 0 0;padding:0;flex-shrink:0;accent-color:var(--surface)">I understand this is a paper simulation of a strategy with a {% if st %}{{ st.track_days }}-day{% else %}new{% endif %} record. Paper results are modelled: they assume the quoted price was available in my size, and a real account could do worse.</label>
-      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">{% if t.active or t.own %}<button class="btn light lg" type="submit" disabled>Start paper tail</button><span class="small text2">{{ "Already tailing this strategy." if t.active else "You cannot tail your own strategy." }}</span>{% else %}<button class="btn light lg" type="submit">Start paper tail</button><a class="small text2" href="/s/{{ s.slug }}" style="text-decoration:underline">Cancel</a>{% endif %}</div>
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">{% if t.active or t.own %}<button class="btn light lg" type="submit" disabled>Start paper tail</button><span class="small text2">{{ "Already tailing this strategy." if t.active else "You cannot tail your own strategy." }}</span>{% else %}<button class="btn light lg" type="submit">Start paper tail</button><a class="small text2" href="{{ base }}" style="text-decoration:underline">Cancel</a>{% endif %}</div>
       {% else %}
       <span style="font-size:16px;line-height:1.5">Koine will copy {{ s.display_name }}'s next trades into a paper allocation of {{ m.usd(t.allocation, 0) }}. <span class="text2">No order is placed in any account, Koine asks for no key that can trade, and no money moves.</span></span>
       <label style="display:flex;align-items:flex-start;gap:12px;font-size:14px;line-height:1.5" class="text2"><input type="checkbox" style="width:18px;height:18px;margin:2px 0 0;padding:0;flex-shrink:0;accent-color:var(--surface)">I understand this is a paper simulation of a strategy with a {{ st.track_days }}-day record. Paper results are modelled: they assume the quoted price was available in my size, and a real account could do worse.</label>

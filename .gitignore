@@ -28,3 +28,4 @@ graphify-out/
 
 # agent worktrees (Claude Code parallel builds)
 .claude/worktrees/
+.vercel

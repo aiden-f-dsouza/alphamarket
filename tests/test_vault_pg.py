@@ -106,7 +106,9 @@ def test_migration_copies_v1_keys_and_downgrades(scratch_db):
             {"u": uid, "blob": v1_blob},
         ).scalar()
 
-    command.upgrade(cfg, "0012")
+    # Head, not 0012: the ORM below maps every current column (0017 added
+    # venue_accounts.is_watch), and the downgrade then runs through all of them.
+    command.upgrade(cfg, "head")
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with factory() as db:
         kind, version, wrapped = db.execute(
@@ -136,5 +138,5 @@ def test_migration_copies_v1_keys_and_downgrades(scratch_db):
     assert bytes(rows[second_id]).startswith(b"kv2.")
     assert vault.decrypt_secret(bytes(rows[second_id])) == "v2-pem"
 
-    command.upgrade(cfg, "0012")  # and back up again cleanly
+    command.upgrade(cfg, "head")  # and back up again cleanly
     engine.dispose()

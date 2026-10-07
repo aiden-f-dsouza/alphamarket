@@ -458,3 +458,13 @@ as phases P0-P8 (hygiene/CI, Ledger v2, jobs + outbound rate limits, security
 streaming), compares hosting options, and lists outside setup. Scope confirmed:
 paper copying only; crypto = Kraken, Hyperliquid, Coinbase, Binance.US;
 equities long-only via Alpaca, IBKR Flex, SnapTrade. M12/M13 deferred.
+
+Next features (2026-10-07): `docs/copy_strategies_plan.md` plans Koine-run
+strategies (agent portfolios trading real Koine-owned accounts, connected
+read-only like any creator, labelled "Run by Koine"; the trading agent lives
+outside this repo) and a private watchlist (paper-tail public Hyperliquid and
+Polymarket addresses, never shown publicly, invariant 4). Disclosure-based
+portfolios and live copying are parked there as offshoot ideas.
+Steps 0-3 built on `copy-strategies` (2026-10-07): migration 0017, "Run by
+Koine" badge and filter, the private watchlist (Hyperliquid only until
+counsel clears Polymarket); status in docs/copy_strategies_implementation.md.

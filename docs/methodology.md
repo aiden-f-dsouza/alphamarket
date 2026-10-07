@@ -123,6 +123,38 @@ strategy is in:
 - Qualitative strategy descriptions are written by the trader and are labeled
   as unverified wherever they appear.
 
+<a id="run-by-koine"></a>
+
+## Run by Koine
+
+Some strategies on the marketplace carry a **Run by Koine** badge. Koine runs
+them itself, in trading accounts Koine owns. What that changes, and what it
+does not:
+
+- **Verified the same way.** A Koine-run account connects to Koine with a
+  read-only key through the same connect flow as any creator: verified email,
+  TOTP and a fresh step-up first. Its fills, balances, track record and
+  statistics are computed from venue data by the same code, and reconciled
+  nightly, exactly as for a creator. There is no special path for Koine's own
+  accounts.
+- **Koine never holds the trading key.** The agent that places the orders is
+  a separate service with its own infrastructure and secrets; it holds the
+  venue's trading key. Koine's platform only ever sees the read-only key for
+  the same account. The nightly read-only proof applies to these accounts too:
+  a key that has become writable is erased and the account suspended.
+- **The description is Koine's own words.** The text that explains what a
+  Koine-run strategy does is written by Koine and is **unverified**, like any
+  creator's description, and is labeled as such on the page.
+- **No ranking advantage.** The marketplace sorts a Koine-run strategy by the
+  same measure as every other strategy and does not boost it. It goes through
+  the same 90-day incubation and is hidden by default until then. You can
+  show only Koine-run strategies, or hide them, with the Operator filter on the
+  marketplace.
+- **Featured slots.** If a featured slot is ever given to a Koine-run
+  strategy, it carries the badge and this page says how featured strategies
+  are chosen. Today the landing page shows the top row of the marketplace by
+  the same sort as everyone else.
+
 ## Equity curve and statistics
 
 `equity(t) = cash(t) + open_cost(t)`, where `open_cost` is the cost basis of

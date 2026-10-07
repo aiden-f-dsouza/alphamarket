@@ -27,12 +27,13 @@ switch.
    telling users they can restrict a key to it -- an unpublished IP is not
    a feature anyone can use. Allocate this before the first venue key is
    connected in prod, not after.
-3. **AWS KMS** (a later phase, with vault v2 / P3 -- not needed for the
-   current Fernet-only vault): one KMS key in `us-east-1`, IAM credentials
-   scoped to `Encrypt`/`Decrypt`/`GenerateDataKey` on that key only. The
-   vault wraps its Fernet data key with it (`KeyWrapper` protocol,
-   implementation_plan.md P3 item 7); until then `VAULT_KEY` alone is the
-   master key, as today.
+3. **AWS KMS** (required; preflight refuses `KEY_WRAPPER=local` in prod):
+   one symmetric KMS key in `us-east-1` (alias `koine-vault`) and an IAM
+   user whose only policy allows `kms:GenerateDataKey`, `kms:Decrypt`,
+   `kms:ReEncrypt*` and `kms:DescribeKey` on that key ARN (not the alias
+   ARN). Set `KEY_WRAPPER=aws_kms`, `KMS_KEY_ID=<key ARN>`,
+   `AWS_REGION=us-east-1`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`.
+   The vault wraps each record's data key with it (`vault.AwsKmsKeyWrapper`).
 
 ## First deploy
 

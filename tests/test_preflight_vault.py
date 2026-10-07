@@ -45,4 +45,4 @@ def test_unknown_wrapper_refused(settings):
 
 def test_audit_trigger_is_expected():
     assert "audit_log_append_only" in preflight.EXPECTED_APPEND_ONLY_TRIGGERS
-    assert len(preflight.EXPECTED_APPEND_ONLY_TRIGGERS) == 14  # wave2 added 5 (0013)
+    assert len(preflight.EXPECTED_APPEND_ONLY_TRIGGERS) == 15  # wave2 added 5 (0013), 0017 one

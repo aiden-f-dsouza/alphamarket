@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Koine{% endblock %}</title>
+{% if noindex %}<meta name="robots" content="noindex, nofollow">{% endif %}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
@@ -60,6 +61,7 @@
   .subnav a { font-size:14px; font-weight:500; padding:10px 0; margin-bottom:-1px; color:var(--muted); border-bottom:1.5px solid transparent; white-space:nowrap; }
   .subnav a.on { color:var(--text); border-bottom-color:var(--brand); }
   :focus-visible { outline:2px solid var(--brand2); outline-offset:2px; }
+  .private-strip { display:flex; align-items:center; justify-content:center; gap:10px; padding:8px 24px; background:var(--chip); color:var(--text2); font:12px var(--mono); letter-spacing:.04em; border-bottom:1px solid var(--line); text-align:center; }
   .demo-strip { display:flex; align-items:center; justify-content:center; gap:10px; padding:8px 24px; background:var(--warnbg); color:var(--warn); font:12px var(--mono); letter-spacing:.04em; border-bottom:1px solid #e9dcc0; }
   .footer { display:grid; grid-template-columns:1.4fr repeat(4, minmax(0, 1fr)); gap:48px; padding:48px 120px 40px; border-top:1px solid var(--line); margin-top:auto; }
   .footer .col { display:flex; flex-direction:column; gap:10px; }
@@ -176,7 +178,7 @@
   @media (max-width:600px) {
     main, .section { padding-left:16px; padding-right:16px; } main { padding-top:32px; }
     .nav { padding-left:16px; padding-right:16px; gap:12px; } .nav-right { gap:12px; }
-    .footer { padding:32px 16px; gap:28px; } .demo-strip { padding:8px 16px; }
+    .footer { padding:32px 16px; gap:28px; } .demo-strip, .private-strip { padding:8px 16px; }
     .card > .body, .body { padding-left:16px; padding-right:16px; } .stat { padding:14px 16px; }
     .spread { flex-wrap:wrap; }
     .hero-card > .row:first-child { flex-direction:column; gap:12px; }
@@ -207,6 +209,7 @@
   <div class="nav-right">
     {% if user %}
       {% if settings.demo_mode or user %}<a href="/portfolio" class="{{ 'active' if nav == 'portfolio' }}">Portfolio</a>{% endif %}
+      <a href="/watch" class="{{ 'active' if nav == 'watch' }}">Watchlist</a>
       <a href="/dashboard" class="{{ 'active' if nav == 'dashboard' }}">Dashboard</a>
       <details class="menu account">
         <summary class="avatar" title="Account menu" aria-label="Account menu">{{ user.display_name[:2]|upper }}</summary>
@@ -236,6 +239,7 @@
         <hr>
         {% if user %}
           {% if settings.demo_mode or user %}<a href="/portfolio">Portfolio</a>{% endif %}
+          <a href="/watch" class="{{ 'on' if nav == 'watch' }}">Watchlist</a>
           <a href="/dashboard">Dashboard</a>
           <a href="/dashboard/security">Security</a>
           <form method="post" action="/logout-form"><button type="submit">Log out</button></form>
@@ -246,6 +250,7 @@
     </details>
   </div>
 </nav>
+{% if private_watch %}<div class="private-strip">{{ m.icon("lock", 14, "currentColor") }}Public address, not a Koine member. We do not know who this is. Only you can see this page.</div>{% endif %}
 {% if demo %}<div class="demo-strip">{{ m.icon("eye", 14, "currentColor") }}Sample data · this is a demo build. Names, handles, markets and every number on this page are illustrative.</div>{% endif %}
 {% block body %}<main>{% block content %}{% endblock %}</main>{% endblock %}
 <footer class="footer">

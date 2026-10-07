@@ -19,7 +19,12 @@ from alphamarket.db import get_db
 from alphamarket.jobs import aware
 from alphamarket.models import Allocation, Follow, Settlement, Signal, Strategy, User
 from alphamarket.money import format_atoms
-from alphamarket.public import instrument_labels, publicly_visible, visible_strategy_or_404
+from alphamarket.public import (
+    instrument_labels,
+    operator_of,
+    publicly_visible,
+    visible_strategy_or_404,
+)
 from alphamarket.ratelimit import rate_limit
 from alphamarket.stats import micros_to_float
 from alphamarket.valuation import parse_price
@@ -202,8 +207,15 @@ def feed_items(db: Session, strategies: list[Strategy], limit: int = FEED_LIMIT)
         .limit(limit)
     ).all()
     labels = instrument_labels(db, signals)
-    items = [signal_item(by_id[s.strategy_id], s, labels) for s in signals]
-    items += [settlement_item(by_id[s.strategy_id], s) for s in settlements]
+    operators = {sid: operator_of(db.get(User, s.user_id)) for sid, s in by_id.items()}
+    items = [
+        {**signal_item(by_id[s.strategy_id], s, labels), "operator": operators[s.strategy_id]}
+        for s in signals
+    ]
+    items += [
+        {**settlement_item(by_id[s.strategy_id], s), "operator": operators[s.strategy_id]}
+        for s in settlements
+    ]
     items.sort(key=lambda i: i["at"], reverse=True)
     return items[:limit]
 

@@ -103,8 +103,9 @@ def optional_user(request: Request, db: Session) -> User | None:
     if sess is None:
         return None
     user = db.get(User, sess.user_id)
-    if user is not None:
-        sessions.touch(db, sess)
+    if user is None or user.is_system:  # belt and braces: no session works for it
+        return None
+    sessions.touch(db, sess)
     return user
 
 
@@ -162,6 +163,8 @@ def login(payload: LoginIn, request: Request, db: Session = Depends(get_db)) -> 
     ratelimit.check(request, "login_ip", ratelimit.client_ip(request))
     ratelimit.check(request, "login_email", email)
     user = db.scalar(select(User).where(User.email == email))
+    if user is not None and user.is_system:
+        user = None  # the watchlist's system user never logs in: same path as unknown
     ok = verify_password(payload.password, user.password_hash if user else _dummy_hash())
     # Same error for unknown email and wrong password: do not leak which one it was.
     if user is None or not ok:

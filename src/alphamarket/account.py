@@ -136,7 +136,7 @@ def request_password_reset(request: Request, db: Session, email: str) -> None:
     if not ratelimit.hit_quietly(request, "reset_email", email):
         return
     user = db.scalar(select(User).where(User.email == email))
-    if user is None:
+    if user is None or user.is_system:  # the watchlist's system user never logs in
         return
     token = _new_token(db, user, AuthTokenKind.PASSWORD_RESET, RESET_TTL)
     send_email(
