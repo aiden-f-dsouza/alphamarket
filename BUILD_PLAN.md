@@ -465,3 +465,6 @@ read-only like any creator, labelled "Run by Koine"; the trading agent lives
 outside this repo) and a private watchlist (paper-tail public Hyperliquid and
 Polymarket addresses, never shown publicly, invariant 4). Disclosure-based
 portfolios and live copying are parked there as offshoot ideas.
+Steps 0-3 built on `copy-strategies` (2026-10-07): migration 0017, "Run by
+Koine" badge and filter, the private watchlist (Hyperliquid only until
+counsel clears Polymarket); status in docs/copy_strategies_implementation.md.

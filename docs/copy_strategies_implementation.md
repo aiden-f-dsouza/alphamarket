@@ -230,3 +230,42 @@ different templates except `_macros.html`, where A only adds a macro).
 6. Address already connected by a Koine creator but unclaimed: separate shared
    watch account (default, not re-asked).
 7. This session builds steps 0-3; steps 4-7 follow.
+
+## 7. Status (2026-10-07, branch `copy-strategies`)
+
+Done: steps 0-3.
+
+- Step 0: `docs/venues/polymarket.md` (draft, needs counsel) and the
+  Hyperliquid watchlist section. The Polymarket terms' data clause (section 4.2,
+  "Capital Market Clients" such as fintechs) may cover Koine, so Polymarket
+  watches are off by default: `watch_venues = "hyperliquid"`.
+- Step 1: migration 0017, models, `is_visible` refuses `kind = "watch"`,
+  transparency counts only creator strategies, the system user cannot log in
+  or reset a password (`tests/test_watch_visibility.py`).
+- Step 2: "Run by Koine" badge on cards, table, landing featured card,
+  strategy page byline, tail page, portfolio row and feed posts; `operator`
+  in the JSON API, feed and portfolio JSON; `?operator=` marketplace filter;
+  methodology and security sections; `scripts/create_house_user.py`
+  (`tests/test_house.py`).
+- Step 3: `watchlist.py` (rules + `/api/watch`), `watch_pages.py`, templates
+  `watch.html`, `watch_strategy.html`, the shared `_strategy_body.html`; tails
+  accept the user's own watches; portfolio rows name a watch by its label
+  (`tests/test_watchlist.py`).
+
+Changed from the plan:
+
+- Decision 4 (watched signals in the watcher's feed) is deferred: `/feed` is
+  still demo-only, so there is no real feed to put them in.
+- No `/watch/{id}` "how this trader trades" section yet (step 6).
+
+Found along the way:
+
+- Polymarket retires Data API v1 on 2026-10-24; `connectors/polymarket.py`
+  calls `/activity` and `/positions` (v1). Needs a port to `/v2/...` and
+  re-recorded fixtures before then, independent of this feature.
+- `/s/{slug}` returned a 500 for a public strategy with no stats yet
+  (`_worst_periods(None)`); fixed and pinned in `tests/test_worst_periods.py`.
+
+Next: step 4 (slower cadence for untailed watches, dormant accounts skipped,
+creators outrank watches for stream slots), step 5 (opt-out), step 6
+(`trader_profile.py`).

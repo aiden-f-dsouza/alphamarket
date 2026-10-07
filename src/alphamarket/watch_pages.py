@@ -186,6 +186,11 @@ def _watch_page(db: Session, user: User, w: Watched) -> dict:
         watch_id=w.strategy.id,
         description_unverified="",
     )
+    # The venue profile's proof line speaks of a claimed owner; nobody claimed this.
+    page["verification"] = {
+        **(page["verification"] or {}),
+        "proof": "Public address, no key held; trades read from the venue's public history",
+    }
     page["worst_periods"] = _worst_periods(page["stats"])
     card = tailing_card(w.account.venue, 0)
     card.pop("paper_tails")

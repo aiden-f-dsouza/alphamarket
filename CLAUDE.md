@@ -82,6 +82,10 @@ deliberately out of scope).
   liquidation, splits, dividends), `execution.py` (Executor; paper only,
   live raises), `portfolio.py` (allocation valuation, drawdown stop,
   snapshots), `tails.py` (allocations API + `/api/portfolio`),
+  `watchlist.py` + `watch_pages.py` (private watchlist: public Hyperliquid
+  addresses, one shared system-owned `is_watch` account per address, its
+  strategy of kind "watch" never public; `/watch`, `/api/watch`; plan in
+  docs/copy_strategies_*.md),
   `consent.py` + `connect_pages.py` + `pending.py` (consent screens,
   Hyperliquid signed claim, SnapTrade portal and PENDING accounts),
   `rotate.py` (replace a key on an existing account), `oauth_jobs.py`
@@ -127,7 +131,8 @@ deliberately out of scope).
   0010 jobs, 0011 auth, 0012 vault/audit, 0013 wave 2: signals v2, paper
   asset book, market data, consent, activity flags; 0014 market data
   coverage, 0015 `users.is_demo`, 0016 paper book checkpoints (a cache,
-  not append-only) and mirror ledger indexes)
+  not append-only) and mirror ledger indexes; 0017 `users.is_house` /
+  `is_system`, `strategies.kind`, `watches`, `watch_optouts`)
 - `docs/methodology.md` — public methodology page source; every ledger/stats
   formula lands here alongside its unit test. `docs/security.md` (served at
   /security), `docs/launch.md` (M5 outreach), `docs/deploy.md` + `Dockerfile`
@@ -158,8 +163,8 @@ deliberately out of scope).
    Corrections are new rows. Idempotency comes from unique venue ids.
    `signals`, `mirror_fills`, `mirror_settlements`, `ledger_entries`,
    `asset_fills`, `ledger_quarantines`, `audit_log`, `mirror_asset_fills`,
-   `mirror_ledger_entries`, `venue_activity_flags`, `consent_texts` and
-   `venue_consents` share the rule (ORM guard + Postgres
+   `mirror_ledger_entries`, `venue_activity_flags`, `consent_texts`,
+   `venue_consents` and `watch_optouts` share the rule (ORM guard + Postgres
    `<table>_append_only` triggers; preflight checks the set).
 4. Venue credentials (keys, OAuth grants, report tokens) must be read-only
    and are never logged, never committed, never returned by any API. They

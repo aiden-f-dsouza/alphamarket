@@ -144,7 +144,7 @@
       </div>
     </div></div>
     <div class="card tint"><div class="body" style="gap:6px;padding:20px 24px">
-      <div style="display:flex;align-items:center;gap:8px">{{ m.icon("shield", 16, "var(--good)") }}<span class="small" style="font-weight:600">How this record is verified</span></div>
+      <div style="display:flex;align-items:center;gap:8px">{{ m.icon("shield", 16, "var(--good)") }}<span class="small" style="font-weight:600">{{ "Where these numbers come from" if watch else "How this record is verified" }}</span></div>
       <div class="stack" style="gap:0">
         <div style="display:flex;gap:10px;padding:9px 0;font-size:14px;color:var(--text2)">{{ m.icon("check", 16, "var(--good)", 2) }}<span>{{ page.verification.proof if page.verification else "Read-only key, scope re-checked every sync" }}</span></div>
         {% if v2 %}<div style="display:flex;gap:10px;padding:9px 0;font-size:14px;color:var(--text2)">{{ m.icon("check", 16, "var(--good)", 2) }}<span>{{ "{:,}".format(st.n_fills) }} fills from {{ page.venue_label }}, valued at daily closes</span></div>

@@ -124,6 +124,7 @@ def test_add_creates_a_private_shared_account(client, session_factory, info):
     assert page.status_code == 200
     assert BANNER in page.text and "Big perp guy" in page.text and ADDRESS in page.text
     assert 'name="robots" content="noindex' in page.text
+    assert "ownership proven" not in page.text  # nobody claimed the address
     assert page.headers["cache-control"] == "private, no-store"
     listing = client.get("/watch")
     assert "Big perp guy" in listing.text and f'href="/watch/{sid}"' in listing.text
