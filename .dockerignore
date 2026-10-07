@@ -9,3 +9,8 @@ __pycache__
 .ruff_cache
 tests/
 design/
+.claude/
+.vercel/
+graphify-out/
+api/
+frontend-design-plan.md

@@ -24,7 +24,7 @@
 # This assigns a static IPv4 (and IPv6) that every machine in that region
 # shares as its outbound source address; see implementation_plan.md 2.3 for
 # how many wallets/keys one IP can poll before it becomes a limiter.
-app = "alphamarket"
+app = "koine"
 primary_region = "iad"
 
 [build]
