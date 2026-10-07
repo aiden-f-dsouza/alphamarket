@@ -38,6 +38,7 @@ from alphamarket.models import (
     Instrument,
     Settlement,
     Strategy,
+    StrategyKind,
     StrategyStatus,
     User,
     VenueAccount,
@@ -64,7 +65,11 @@ router = APIRouter(prefix="/api/strategies", tags=["public"])
 def is_visible(strategy: Strategy, account: VenueAccount | None = None) -> bool:
     """Public when the creator wants it, it is not quarantined or delisted,
     and ownership of the venue account is proven (M7: address-keyed venues
-    need a profile-code claim; an unclaimed account could be anyone's)."""
+    need a profile-code claim; an unclaimed account could be anyone's). A
+    watched address (kind "watch") is never public, whatever its other fields
+    say: it is reached only through the watcher's own Watch row."""
+    if strategy.kind == StrategyKind.WATCH:
+        return False
     if not strategy.public or strategy.status in (
         StrategyStatus.QUARANTINED,
         StrategyStatus.DELISTED,

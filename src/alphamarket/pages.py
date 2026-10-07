@@ -51,6 +51,7 @@ from alphamarket.models import (
     MirrorFill,
     MirrorSettlement,
     Strategy,
+    StrategyKind,
     StrategyStatus,
     User,
     VenueAccount,
@@ -1259,21 +1260,14 @@ def _transparency(db: Session) -> dict:
     if _demo() and not _seeded(db):
         return demo.transparency()
     rows = list_visible(db, include_incubating=True)
-    removed = db.scalar(
-        select(Strategy.id)
-        .where(Strategy.status.in_([StrategyStatus.QUARANTINED, StrategyStatus.DELISTED]))
-        .limit(1)
-    )
-    n_removed = (
-        len(
-            db.scalars(
-                select(Strategy).where(
-                    Strategy.status.in_([StrategyStatus.QUARANTINED, StrategyStatus.DELISTED])
-                )
-            ).all()
-        )
-        if removed
-        else 0
+    # Watched addresses were never listed, so they never count as removed.
+    n_removed = len(
+        db.scalars(
+            select(Strategy.id).where(
+                Strategy.status.in_([StrategyStatus.QUARANTINED, StrategyStatus.DELISTED]),
+                Strategy.kind == StrategyKind.CREATOR,
+            )
+        ).all()
     )
     return {
         "demo": any(r.get("demo") for r in rows),
