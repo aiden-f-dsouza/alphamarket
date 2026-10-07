@@ -23,7 +23,16 @@ from sqlalchemy.orm import sessionmaker
 
 from alphamarket.analytics import latest_stats
 from alphamarket.config import get_settings
-from alphamarket.models import Allocation, EquitySnapshot, MirrorAssetFill, Strategy, User
+from alphamarket.models import (
+    Allocation,
+    AllocationStatus,
+    EquitySnapshot,
+    MirrorAssetFill,
+    Strategy,
+    StrategyKind,
+    User,
+    Watch,
+)
 from alphamarket.portfolio import portfolio_summary
 from alphamarket.public import list_visible, visible_strategy_or_404
 from conftest import PG_ADMIN_URL
@@ -80,12 +89,18 @@ def test_small_seed_through_the_real_pipeline(demo_db, demo_on):
     with sf() as db:
         strategies = db.scalars(select(Strategy)).all()
         assert len(strategies) == len(seed_demo.CREATORS)
-        venues = {s.slug: s for s in strategies}
+        watched = [s for s in strategies if s.kind == StrategyKind.WATCH]
+        venues = {s.slug: s for s in strategies if s.kind != StrategyKind.WATCH}
         # Seeded slugs are the clean names, without the id suffix of a real connect.
-        assert {seed_demo.slugify(c.strategy) for c in seed_demo.CREATORS} == set(venues)
+        creators = [c for c in seed_demo.CREATORS if not c.watch]
+        assert {seed_demo.slugify(c.strategy) for c in creators} == set(venues)
+        assert len(watched) == 1 and watched[0].slug == f"watch-{watched[0].id}"
         assert "perp-momentum-btc-eth-sol" in venues
         listed = {r["slug"]: r for r in list_visible(db, include_incubating=True)}
-        assert set(listed) == set(venues)  # every seeded strategy is public in DEMO_MODE
+        assert set(listed) == set(venues)  # every seeded creator strategy is public in DEMO_MODE
+        assert watched[0].slug not in listed  # a watched address is never public
+        assert listed[seed_demo.slugify("Systematic BTC/ETH trend filter")]["operator"] == "koine"
+        assert {r["operator"] for r in listed.values()} == {"koine", "creator"}
         assert all(r["demo"] for r in listed.values())  # ... as sample data
         assert {r["venue"] for r in listed.values()} >= {
             "kraken",
@@ -111,6 +126,25 @@ def test_small_seed_through_the_real_pipeline(demo_db, demo_on):
 
         investor = db.scalar(select(User).where(User.email == f"investor@{seed_demo.EMAIL_DOMAIN}"))
         assert investor.is_demo
+
+        # The seeded watch: owned by a demo system user, stats from the real
+        # pipeline, on the investor's watchlist with an active paper tail.
+        owner = db.get(User, watched[0].user_id)
+        assert owner.is_system and owner.is_demo
+        assert latest_stats(db, watched[0].id) is not None
+        my_watch = db.scalar(
+            select(Watch).where(Watch.user_id == investor.id, Watch.strategy_id == watched[0].id)
+        )
+        assert my_watch is not None and my_watch.label == "Funding-aware perp whale"
+        my_tail = db.scalar(
+            select(Allocation).where(
+                Allocation.user_id == investor.id, Allocation.strategy_id == watched[0].id
+            )
+        )
+        assert my_tail is not None and my_tail.status == AllocationStatus.ACTIVE
+        assert db.scalars(
+            select(MirrorAssetFill).where(MirrorAssetFill.allocation_id == my_tail.id)
+        ).all()
         summary_p = portfolio_summary(db, investor)
         assert summary_p["value"] > 0 and len(summary_p["allocations"]) >= 4
         assert all(len(v["curve"]) >= 2 for v in summary_p["allocations"])  # nightly snapshots
@@ -125,7 +159,7 @@ def test_small_seed_through_the_real_pipeline(demo_db, demo_on):
         get_settings().demo_mode = False
         assert list_visible(db, include_incubating=True) == []
         with pytest.raises(HTTPException):
-            visible_strategy_or_404(db, strategies[0].slug)
+            visible_strategy_or_404(db, next(iter(venues)))
         get_settings().demo_mode = True
 
     engine = create_engine(url)
