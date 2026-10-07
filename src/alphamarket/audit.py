@@ -47,6 +47,9 @@ class AuditAction(StrEnum):
     # suspension or abandoned connect; details.outcome is deleted | already_gone |
     # retry_queued | gave_up (aggregator_jobs.py).
     AGGREGATOR_USER_DELETE = "aggregator.user_delete"
+    # ---- watchlist (watchlist.py) ----
+    WATCH_ADD = "watch.add"  # target: the watched strategy; no address in details
+    WATCH_REMOVE = "watch.remove"
 
 
 @dataclass(frozen=True)

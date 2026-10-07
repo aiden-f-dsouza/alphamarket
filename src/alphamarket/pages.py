@@ -12,6 +12,7 @@ banner; those routes 404 when demo mode is off, and preflight refuses to
 launch with it on.
 """
 
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
 from statistics import median
@@ -19,7 +20,7 @@ from urllib.parse import quote
 
 import markdown
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -102,6 +103,7 @@ from alphamarket.venues import (
     import_now,
     venue_closed_reason,
 )
+from alphamarket.watchlist import watch_labels
 
 router = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -609,8 +611,9 @@ def _charts(stats: dict | None, benchmarks: list | None = None) -> dict | None:
 
 def _worst_periods(st: dict) -> list[tuple[str, float, str, str]]:
     """The page's dated worst periods (stats.worst_periods over the drawdown
-    curve the chart draws), once the record is past incubation."""
-    if (st.get("track_days") or 0) < INCUBATION_DAYS:
+    curve the chart draws), once the record is past incubation. None before
+    the first nightly stats run."""
+    if not st or (st.get("track_days") or 0) < INCUBATION_DAYS:
         return []
     curve = [(date.fromisoformat(d), dd) for d, dd in st.get("drawdown_curve") or []]
     rows = []
@@ -719,7 +722,16 @@ def _tail_ctx(
 
 
 def _render_tail(request: Request, t: dict, user: User, status_code: int = 200) -> HTMLResponse:
-    resp = _render(request, "tail.html", user=user, t=t, demo=t["strategy"]["sample_data"])
+    watch = bool(t.get("watch"))  # a private watch (watch_pages): its banner, no indexing
+    resp = _render(
+        request,
+        "tail.html",
+        user=user,
+        t=t,
+        demo=t["strategy"]["sample_data"],
+        private_watch=watch,
+        noindex=watch,
+    )
     resp.status_code = status_code
     return resp
 
@@ -759,6 +771,24 @@ def tail_form(
     user = _user(request, db)
     if user is None:
         return RedirectResponse(login_url(f"/s/{strategy.slug}/tail"), status_code=303)
+    return start_tail_form(
+        request, db, user, strategy, allocation, drawdown_limit_bps, confirm, _tail_ctx
+    )
+
+
+def start_tail_form(
+    request: Request,
+    db: Session,
+    user: User,
+    strategy: Strategy,
+    allocation: str,
+    drawdown_limit_bps: str,
+    confirm: str | None,
+    tail_ctx: Callable[..., dict],
+) -> Response:
+    """The tail form's POST for a strategy the caller has already resolved
+    (public here, a private watch in watch_pages): the paper-only box, then
+    tails.create_allocation. `tail_ctx` re-renders the form on an error."""
     amount = allocation.strip().replace(",", "").removeprefix("$").strip()
     try:
         bps = int(drawdown_limit_bps)
@@ -783,7 +813,7 @@ def tail_form(
     if error is not None:
         if bps not in DRAWDOWN_CHOICES_BPS:
             bps = DEFAULT_DRAWDOWN_BPS
-        t = _tail_ctx(db, strategy, user, amount, bps, confirm == "on", error)
+        t = tail_ctx(db, strategy, user, amount, bps, confirm == "on", error)
         return _render_tail(request, t, user, code)
     return RedirectResponse("/portfolio?notice=started", status_code=303)
 
@@ -929,10 +959,17 @@ def _position_rows(view: dict) -> list[dict]:
     return rows
 
 
-def portfolio_view(summary: dict, handles: dict[str, str], now: datetime | None = None) -> dict:
+def portfolio_view(
+    summary: dict,
+    handles: dict[str, str],
+    now: datetime | None = None,
+    watched: dict[str, tuple[str, str | None]] | None = None,
+) -> dict:
     """The /portfolio template's `p` for a real user, from portfolio_summary
     (paper.asset_view_extras documents the v2 position keys). Pure: handles
-    maps strategy slug -> creator display name."""
+    maps strategy slug -> creator display name; watched maps the slug of a
+    private watch -> (the user's label, its /watch page or None if removed)."""
+    watched = watched or {}
     now = now or datetime.now(UTC)
     views = summary["allocations"]
     allocated = summary["allocated"]
@@ -959,11 +996,16 @@ def portfolio_view(summary: dict, handles: dict[str, str], now: datetime | None 
             lag_all.append(v["copy_lag_median_seconds"])
         for r in rows:
             positions.append({**r, "allocation": v["strategy_name"], "slug": v["strategy_slug"]})
+        name, href = watched.get(
+            v["strategy_slug"], (v["strategy_name"], f"/s/{v['strategy_slug']}")
+        )
         allocations.append(
             {
                 "id": v.get("id"),
                 "slug": v["strategy_slug"],
-                "name": v["strategy_name"],
+                "name": name,
+                "href": href,
+                "watch": v["strategy_slug"] in watched,
                 "handle": handles.get(v["strategy_slug"], ""),
                 "days": max(0, (now - _utc(v["started_at"])).days),
                 "allocated": v["allocation"],
@@ -1071,12 +1113,22 @@ def portfolio(request: Request, notice: str = "", db: Session = Depends(get_db))
         ids = [
             a.id for a in db.scalars(select(Allocation).where(Allocation.user_id == user.id)).all()
         ]
-        handles = {}
+        handles, watched = {}, {}
+        labels = watch_labels(db, user.id)
         for v in summary["allocations"]:
             strategy = db.scalar(select(Strategy).where(Strategy.slug == v["strategy_slug"]))
+            if strategy is not None and strategy.kind == StrategyKind.WATCH:
+                # A private watch: the user's own label, its private page (none
+                # once the watch is removed), never the system owner's name.
+                handles[v["strategy_slug"]] = "Private watch"
+                watched[v["strategy_slug"]] = (
+                    labels.get(strategy.id, strategy.name),
+                    f"/watch/{strategy.id}" if strategy.id in labels else None,
+                )
+                continue
             owner = db.get(User, strategy.user_id) if strategy else None
             handles[v["strategy_slug"]] = owner.display_name if owner else ""
-        p = portfolio_view(summary, handles)
+        p = portfolio_view(summary, handles, watched=watched)
         p["activity"] = _portfolio_activity(db, ids)
         # w3-seed: a seeded demo investor's paper book is sample data (invariant 7).
         return _render(

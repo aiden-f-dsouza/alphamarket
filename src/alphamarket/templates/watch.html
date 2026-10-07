@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Watchlist · Koine{% endblock %}
+{% block nav_active %}watch{% endblock %}
+{% block style %}
+  .wl-head { display:grid; grid-template-columns:minmax(0,1fr) 380px; gap:48px; align-items:start; }
+  .wrow2 { display:grid; grid-template-columns:minmax(0,1fr) 120px 90px 90px 110px; gap:16px; align-items:center; padding:14px 20px; border-bottom:1px solid var(--line); }
+  .wrow2:last-child { border-bottom:0; }
+  .wrow2.head { padding-top:10px; padding-bottom:10px; }
+  .wrow2 .r { text-align:right; }
+  @media (max-width:1000px) { .wl-head { grid-template-columns:minmax(0,1fr); gap:24px; } .wrow2 { grid-template-columns:minmax(0,1fr) 80px; } .wrow2 .hide { display:none; } }
+{% endblock %}
+{% block content %}
+{% if notice %}<div class="notice" role="status" style="border-color:var(--brand);color:var(--text)">{{ notice }}</div>{% endif %}
+
+<div class="wl-head">
+  <div class="stack" style="gap:14px">
+    <span class="label">Private watchlist · {{ rows|length }} of {{ limit }} addresses</span>
+    <h1 style="font-size:44px">Watch a public trader</h1>
+    <p class="text2" style="font-size:16px;line-height:1.6;max-width:640px">Paste a public {% for v, label in venues %}{{ label }}{{ " or " if not loop.last }}{% endfor %} address. Koine reads its public trades, computes the same statistics it computes for verified creators, and lets you paper-tail it. <strong>Only you see it.</strong> It never appears on the marketplace, on any public page or in the API, and Koine never tries to find out who is behind an address.</p>
+    <span class="small muted" style="display:inline-flex;align-items:center;gap:6px">{{ m.icon("lock", 12, "var(--muted)") }}Not a verified Koine record: the trader has not connected or claimed the address.</span>
+  </div>
+  <div class="card"><div class="body" style="padding:20px 24px;gap:14px">
+    <span class="label">Add an address</span>
+    {% if error %}<div class="error" role="alert">{{ error }}{% if listed_slug %} <a href="/s/{{ listed_slug }}" style="text-decoration:underline;color:inherit">Open its page</a>.{% endif %}</div>{% endif %}
+    {% if not venues %}
+    <span class="small muted">The watchlist is not open for any venue right now.</span>
+    {% elif not verified %}
+    <span class="small text2">Verify your email address first. <a href="/dashboard/security" style="text-decoration:underline">Account security</a></span>
+    {% elif rows|length >= limit %}
+    <span class="small text2">You are watching {{ limit }} addresses, the most for now. Remove one to add another.</span>
+    {% else %}
+    <form method="post" action="/watch" class="stack" style="gap:14px">
+      {% if venues|length > 1 %}
+      <label class="field"><span class="label">Venue</span><select name="venue">{% for v, label in venues %}<option value="{{ v }}" {{ "selected" if form.venue == v }}>{{ label }}</option>{% endfor %}</select></label>
+      {% else %}<input type="hidden" name="venue" value="{{ venues[0][0] }}">{% endif %}
+      <label class="field"><span class="label">{{ venues[0][1] if venues|length == 1 else "Public" }} address</span><input class="mono" name="address" required pattern="0[xX][0-9a-fA-F]{40}" maxlength="42" autocomplete="off" spellcheck="false" placeholder="0x…" value="{{ form.address }}"></label>
+      <label class="field"><span class="label">Label (optional)</span><input name="label" maxlength="60" placeholder="Only you see this" value="{{ form.label }}"></label>
+      <button class="btn" type="submit">{{ m.icon("plus", 14) }}Add to watchlist</button>
+    </form>
+    {% endif %}
+  </div></div>
+</div>
+
+{% if rows %}
+<div class="card">
+  <div class="wrow2 head"><span class="label">Address</span><span class="label hide">60 days</span><span class="label r">Return</span><span class="label r hide">Worst DD</span><span class="label r hide">Paper tail</span></div>
+  {% for r in rows %}
+  <div class="wrow2">
+    <div class="stack" style="gap:4px;min-width:0"><a href="/watch/{{ r.id }}" style="font-size:16px;font-weight:500;overflow-wrap:anywhere">{{ r.name }}</a><span class="mono small muted">{{ r.venue_label }}{% if r.label %} · {{ r.short_address }}{% endif %}{% if r.stats %} · {{ r.stats.track_days }}d observed{% endif %}</span></div>
+    {% if r.stats %}
+    <div class="hide">{{ m.sparkline(r.stats.spark, r.stats.total_return >= 0) }}</div>
+    <span class="mono r {{ 'good' if r.stats.total_return >= 0 else 'bad' }}" style="font-size:16px">{{ m.pct(r.stats.total_return) }}</span>
+    <span class="mono r bad hide" style="font-size:14px">{{ m.pct(-r.stats.max_drawdown) }}</span>
+    {% else %}
+    <span class="hide"></span><span class="mono small muted r">importing</span><span class="hide"></span>
+    {% endif %}
+    <span class="mono small r hide">{% if r.tailing %}<a href="/portfolio" class="text2">tailing</a>{% else %}<span class="muted">not tailed</span>{% endif %}</span>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card plain"><div class="body"><span class="muted">Nothing on your watchlist yet. Leaderboard addresses are a good place to start: paste one above.</span></div></div>
+{% endif %}
+
+<p class="mono small muted" style="line-height:1.6">Numbers come from the venue's public data for the address, computed the way <a href="/verification" class="text2" style="text-decoration:underline">verified records</a> are, from the moment you first add it plus the history the venue returns.</p>
+{% endblock %}

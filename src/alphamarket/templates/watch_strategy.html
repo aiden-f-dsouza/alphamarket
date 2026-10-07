@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}{{ page.display_name }} · Watchlist · Koine{% endblock %}
+{% block nav_active %}watch{% endblock %}
+{% block style %}
+  .crumbs { display:flex; align-items:center; gap:8px; font:12px var(--mono); color:var(--muted); }
+  .head { display:grid; grid-template-columns:1fr 360px; gap:48px; align-items:start; }
+  .cols { display:grid; grid-template-columns:1fr 340px; gap:32px; align-items:start; }
+  .srow { display:grid; grid-template-columns:minmax(0,1fr) 48px 84px; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--line); }
+  .srow .tk { overflow-wrap:anywhere; }
+  .side { font:11px var(--mono); letter-spacing:.08em; text-align:center; padding:4px 0; border-radius:var(--r); border:1px solid; }
+  .wrow { display:grid; grid-template-columns:150px 80px 110px minmax(0,1fr); gap:16px; align-items:baseline; padding:12px 0; border-bottom:1px solid var(--line); }
+  .months th, .months td { padding-left:4px; padding-right:4px; }
+  .tailcard .kv > * > :first-child { white-space:nowrap; } .tailcard .kv > * > :last-child { text-align:right; font-size:13px; }
+  .addr { font:13px var(--mono); color:var(--text2); overflow-wrap:anywhere; }
+  .manage { display:flex; gap:10px; align-items:end; flex-wrap:wrap; }
+  .manage input { max-width:260px; padding:8px 12px; font-size:14px; }
+  @media (max-width:1000px) { .head, .cols { grid-template-columns:minmax(0,1fr); gap:24px; } .head h1 { font-size:36px !important; } .wrow { grid-template-columns:minmax(0,1fr) 70px 90px; } .wrow > :nth-child(4) { grid-column:1 / -1; } }
+{% endblock %}
+{% block content %}
+{% set st = page.stats %}
+{% if notice %}<div class="notice" role="status" style="border-color:var(--brand);color:var(--text)">{{ notice }}</div>{% endif %}
+<div class="crumbs"><a href="/watch" class="muted">Watchlist</a>{{ m.icon("chev", 12, "var(--muted)") }}<span class="text2">{{ page.display_name }}</span></div>
+
+<div class="head">
+  <div class="stack" style="gap:14px">
+    <div class="badges">
+      <span class="badge">{{ m.icon("lock", 12, "currentColor") }}private watch · not a Koine member</span>
+      {% if st %}<span class="badge">{{ st.track_days }} days observed</span>{% endif %}
+      {% if page.verification_tier == "fills_only" %}<span class="badge">fills from public data · balance not reconciled</span>{% elif page.reconciled is not none %}<span class="badge {{ 'good' if page.reconciled else 'bad' }}">{% if page.reconciled %}balance matched last night{% else %}{{ m.icon("x", 12, "currentColor", 2) }}reconciliation diverged{% endif %}</span>{% endif %}
+    </div>
+    <h1 style="font-size:44px;overflow-wrap:anywhere">{{ page.display_name }}</h1>
+    <div class="stack" style="gap:6px">
+      <span class="addr">{{ page.venue_label }} · {{ page.address }}</span>
+      <span class="small muted">Unclaimed public address. Koine does not know who trades it and does not try to find out.</span>
+    </div>
+    <div class="manage">
+      <form method="post" action="/watch/{{ page.watch_id }}/label" class="manage">
+        <label class="field" style="gap:4px"><span class="label">Your label</span><input name="label" maxlength="60" value="{{ page.label }}" placeholder="Only you see this"></label>
+        <button class="btn secondary sm" type="submit">Save</button>
+      </form>
+      <form method="post" action="/watch/{{ page.watch_id }}/remove"><button class="btn danger sm" type="submit" title="Also stops your paper tail of it">Remove from watchlist</button></form>
+    </div>
+  </div>
+  {% if page.tailing %}
+  <div class="card tailcard"><div class="body" style="padding:20px 24px">
+    <div class="spread" style="align-items:baseline"><span class="label">Paper-tail this address</span><span class="mono small muted">paper money only</span></div>
+    <p class="small text2">See what you would have made copying this address from now on, at prices you could actually have got, before you risk anything.</p>
+    <div class="kv" style="font-size:14px">
+      <div><span>Fill price</span><span>{{ page.tailing.fill }}</span></div>
+      <div><span>Trading costs</span><span>{{ page.tailing.costs }}</span></div>
+      <div><span>Koine pricing</span><span>{{ page.tailing.pricing }}</span></div>
+    </div>
+    {% if page.tailing.state == "active" %}
+    <span class="small text2">You are paper-tailing this address. Its positions and copy lag are on your portfolio.</span>
+    <a class="btn lg secondary" href="/portfolio">View in your portfolio</a>
+    {% else %}
+    <a class="btn lg" href="{{ page.tailing.href }}">Start a paper tail</a>
+    {% endif %}
+    <span class="small muted" style="display:inline-flex;align-items:center;gap:6px">{{ m.icon("lock", 12, "var(--muted)") }}Paper only. Koine never places an order or touches your money.</span>
+  </div></div>
+  {% endif %}
+</div>
+
+{% include "_strategy_body.html" %}
+{% endblock %}

@@ -82,6 +82,8 @@ RULES: dict[str, Rule] = {
         # a second broker); 30 per 10 minutes is generous for that and caps one
         # user at ~6 SnapTrade calls a minute (2.4% of the pool).
         Rule("snaptrade_picker_user", 30, 600),
+        # watchlist: each add of a new address is a venue call and an import
+        Rule("watch_user", 20, 3600),
     )
 }
 

@@ -27,8 +27,8 @@ from alphamarket.portfolio import (
     snapshot_allocation,
     stop_allocation,
 )
-from alphamarket.public import visible_strategy_or_404
 from alphamarket.ratelimit import rate_limit
+from alphamarket.watchlist import tailable_strategy_or_404
 
 router = APIRouter(tags=["tails"])
 
@@ -78,7 +78,8 @@ def create_allocation(db: Session, user: User, payload: AllocationIn) -> Allocat
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only paper tailing is available. Live mirroring requires a licensed party.",
         )
-    strategy = visible_strategy_or_404(db, payload.strategy_slug)
+    # A public strategy, or a watched address on the user's own watchlist.
+    strategy = tailable_strategy_or_404(db, user, payload.strategy_slug)
     if strategy.user_id == user.id:
         raise HTTPException(status_code=422, detail="You cannot tail your own strategy")
     try:

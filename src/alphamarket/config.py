@@ -196,6 +196,15 @@ class Settings(BaseSettings):
     session_retention_days: int = 30  # dead sessions kept this long, then deleted
     token_retention_days: int = 7  # expired/used email tokens kept this long
     quote_retention_days: int = 30  # asset_quotes kept this long
+    # ---- private watchlist (watchlist.py) ----
+    watch_max_per_user: int = 10
+    # Venues whose public addresses can be watched (comma-separated, from
+    # watchlist.WATCHABLE_VENUES). Polymarket stays off until counsel answers
+    # the data clause in its terms (docs/venues/polymarket.md).
+    watch_venues: str = "hyperliquid"
+    # Addresses tracked across all users: protects the venues' outbound budget
+    # (Hyperliquid's weight limits and 10 websocket users per IP) for creators.
+    watch_max_tracked: int = 500
 
 
 @lru_cache
