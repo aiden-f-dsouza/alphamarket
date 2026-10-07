@@ -199,6 +199,7 @@
     <div class="nav-links">
       <a href="/marketplace" class="{{ 'active' if nav == 'marketplace' }}">Marketplace</a>
       {% if settings.demo_mode %}<a href="/feed" class="{{ 'active' if nav == 'feed' }}">Feed</a>{% endif %}
+      {% if settings.demo_mode and not user %}<a href="/watch" class="{{ 'active' if nav == 'watch' }}">Watchlist</a>{% endif %}
       <details class="menu {{ 'active' if in_learn }}">
         <summary>Learn {{ m.icon("chevd", 12, "currentColor", 2) }}</summary>
         <div class="drop left">{% for key, href, label, hint in learn %}<a href="{{ href }}" class="{{ 'on' if nav == key }}">{{ label }}<small>{{ hint }}</small></a>{% endfor %}</div>
@@ -233,6 +234,7 @@
       <div class="drop">
         <a href="/marketplace" class="{{ 'on' if nav == 'marketplace' }}">Marketplace</a>
         {% if settings.demo_mode %}<a href="/feed" class="{{ 'on' if nav == 'feed' }}">Feed</a>{% endif %}
+        {% if settings.demo_mode and not user %}<a href="/watch" class="{{ 'on' if nav == 'watch' }}">Watchlist</a>{% endif %}
         <a href="/creators" class="{{ 'on' if nav == 'creators' }}">For creators</a>
         <hr>
         {% for key, href, label, hint in learn %}<a href="{{ href }}" class="{{ 'on' if nav == key }}">{{ label }}</a>{% endfor %}

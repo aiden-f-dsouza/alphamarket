@@ -1172,3 +1172,105 @@ def transparency() -> dict:
             ),
         ],
     }
+
+
+# ---- demo: watchlist sample ----
+# The static demo's private watchlist (watch_pages.py serves it to a visitor
+# when DEMO_MODE is on and nobody is logged in). The addresses are invented:
+# well-formed, obviously fake, never anyone's real address. Only the first has
+# a full page (/watch/sample-1, built from the Hyperliquid sample record); the
+# rest are list rows. Adding an address is off in the demo.
+WATCH_BASE_SLUG = "funding-aware-btc-perps"
+_WATCH_SAMPLES = [
+    dict(n=1, address="0x5a3c000000000000000000000000000000c0ffee", label="Funding-carry desk"),
+    dict(
+        n=2,
+        address="0x7be1000000000000000000000000000000d15ea5",
+        label="Leaderboard BTC swing",
+        seed=61,
+        days=71,
+        total_return=0.094,
+        drift=0.0011,
+        vol=0.02,
+    ),
+    dict(
+        n=3,
+        address="0x9d04000000000000000000000000000000facade",
+        label="",
+        seed=62,
+        days=38,
+        total_return=-0.031,
+        drift=-0.0004,
+        vol=0.024,
+    ),
+]
+
+
+def _watch_short(address: str) -> str:
+    return f"{address[:6]}…{address[-4:]}"
+
+
+def watch_list() -> list[dict]:
+    """The sample /watch rows, same keys as `watch_pages.watch_row`."""
+    rows = []
+    for w in _WATCH_SAMPLES:
+        address = w["address"]
+        if w["n"] == 1:
+            base = _row(_by_slug(WATCH_BASE_SLUG))
+            stats = {
+                k: base[k] for k in ("track_days", "incubating", "total_return", "max_drawdown")
+            }
+            stats.update(spark=base["spark"], spark_dd=base["spark_dd"])
+        else:
+            curve = _walk(w["seed"], w["days"], w["drift"], w["vol"], start=100.0)
+            k = (1 + w["total_return"]) * 100.0 / curve[-1]
+            n = len(curve)
+            curve = [100.0 + (v - 100.0) * ((k - 1) * i / (n - 1) + 1) for i, v in enumerate(curve)]
+            window = curve[-_STRIP_SPARK:]
+            stats = {
+                "track_days": w["days"],
+                "incubating": w["days"] < 90,
+                "total_return": w["total_return"],
+                "max_drawdown": max(_drawdown(curve)),
+                "spark": polyline(window, 120, 32),
+                "spark_dd": window_x(window, 120),
+            }
+        rows.append(
+            {
+                "id": "sample-1" if w["n"] == 1 else None,  # only the first has a page
+                "name": w["label"] or _watch_short(address),
+                "label": w["label"],
+                "address": address,
+                "short_address": _watch_short(address),
+                "venue_label": _venue_label("hyperliquid"),
+                "tailing": w["n"] == 1,
+                "stats": stats,
+            }
+        )
+    return rows
+
+
+def watch_sample_page(sample_id: str) -> dict | None:
+    """The one full sample watch page, the shape `watch_pages._watch_page`
+    returns. Its tail card says "active": the sample is being paper-tailed."""
+    if sample_id != "sample-1":
+        return None
+    w = _WATCH_SAMPLES[0]
+    page = strategy_page(WATCH_BASE_SLUG)
+    page.update(
+        display_name=w["label"],
+        label=w["label"],
+        address=w["address"],
+        short_address=_watch_short(w["address"]),
+        watch_id=sample_id,
+        sample=True,
+        description_unverified="",
+        discussion=[],
+        creator=None,
+    )
+    page["verification"] = {
+        **(page["verification"] or {}),
+        "proof": "Public address, no key held; trades read from the venue's public history",
+    }
+    page["tailing"] = {**page["tailing"], "state": "active", "href": "/portfolio"}
+    return page
