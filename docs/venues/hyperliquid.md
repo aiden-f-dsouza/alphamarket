@@ -199,6 +199,111 @@ allocations) first; everyone else is polled (docs/worker.md "Streaming").
 [VERIFY] the exact error text when the cap is hit (the parser treats any
 error frame mentioning "users" as the cap and backs off for the cool-off).
 
+## Watchlist (third-party addresses)
+
+New use, proposed in docs/copy_strategies_plan.md section 2 (not live). A
+logged-in Koine user pastes a public Hyperliquid address that is **not a Koine
+user**; Koine reads that address's public history through the same connector
+and shows the pasting user the usual statistics, and lets them paper-tail it.
+Read 2026-10-07 for this section; the rest of the doc keeps its 2026-09-26
+check.
+
+What is read. Exactly what the creator flow reads, nothing more: the public
+`info` endpoint (`POST https://api.hyperliquid.xyz/info`: `userFillsByTime`,
+`userFunding`, `userNonFundingLedgerUpdates`, `clearinghouseState`,
+`spotClearinghouseState`, `userRole`, metadata) with an address and no
+credential. Unlike the creator flow, no ownership proof is requested and no
+signature exists, so `claimed = false` for these accounts; they are owned by a
+system user, never listed, and covered by the same visibility guard as any
+unclaimed account (invariant 4).
+
+Position:
+
+- **Private only.** The account's page is `/watch/{id}`, visible to the user
+  who added the address and nobody else (404 otherwise). It is absent from the
+  marketplace, feed, landing page, JSON API, sitemaps, `/u/{handle}` and the
+  shelved ticker. If the address's owner later connects and claims it through
+  the normal flow, it can be listed through the normal path, with their
+  consent text.
+- **No identity linking.** No ENS or other name lookups, no social handles, no
+  matching of an address to a Polymarket address or to any venue account or
+  person. The page says "Public address, not a Koine member. We do not know
+  who this is." Koine stores the address and the venue data only.
+- **Opt-out.** The owner can stop Koine tracking an address by proving it with
+  the existing EIP-191 claim (`claim_message(address, code)` above, where the
+  signer is the address itself, the `master` of a sub-account or the `leader`
+  of a vault). Koine records the address in `watch_optouts`, refuses new
+  watches of it, ends existing watches and allocations on it, and stops
+  polling. Rows already imported stay (append-only, invariant 3).
+- **Paper only.** No order, no key, no builder-code or referral link, and the
+  watching user is never sent to Hyperliquid (invariants 8 and 9). The US
+  notice from point 3 above appears on watched pages too.
+- Smart-contract wallets cannot sign the opt-out message (EIP-1271 gap noted
+  under "Ownership proof"), so their owners need a manual route [open
+  question 2].
+
+Terms re-check (2026-10-07). The Terms of Use bundle served at
+https://app.hyperliquid.xyz/terms still reads "Last updated on June 15,
+2026". Searching it for API, scraping, automated, data and commercial
+language finds only: §3.1.8 (bots or scripts "to interact with the Interface
+in ways that exceed reasonable usage, bypass rate limits, cause
+denial-of-service conditions"), §4.2 ("Any content, information, or data made
+available through the Interface may be incomplete, outdated, or subject to
+other inaccuracies"), and §12.5 (notices). There is **no clause on API use,
+third-party reading of account data, data licensing, redistribution or
+commercial use of public chain data**, and none that mentions the info
+endpoint. Conclusion unchanged: the Terms govern the Interface; reading
+public chain state through the documented API is not addressed, so the
+position is **ok but unconfirmed for the new use**. [VERIFY with counsel: that
+silence is enough for collecting third-party addresses at scale, and whether a
+US company doing so is "using" Hyperliquid in the sense of §1.6.] The API
+documentation (https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api)
+carries no separate terms either [VERIFY; page read for limits only].
+
+What is different from the creator flow, and why it matters:
+
+1. **The owner has not agreed to anything.** A creator consents to
+   publication (the consent text); a watched address owner did not. The
+   mitigations are privacy by default (nothing public), no identity linking,
+   the opt-out, and the cap on watched addresses per user and globally.
+2. **Privacy law.** An address plus a full trading history may be personal
+   data; Koine stores and scores it for third parties. [VERIFY with counsel;
+   open question 3.]
+3. **Volume.** The creator flow polls a handful of consenting accounts; the
+   watchlist can add many. Every account polled draws from the same per-IP
+   budgets below.
+
+Rate limits and streaming (docs "Rate limits and user limits", read
+2026-10-07): REST shares **1,200 weight per minute per IP** with every other
+Koine account (weights unchanged from "Rate limits" above), so watch accounts
+are polled on a slower cadence than tailed ones and in total are capped
+(settings; plan section 2 "Scheduling and limits"). Websocket user
+subscriptions are limited to **10 unique users per IP** (the page also lists
+10 connections, 30 new connections per minute, 1,000 subscriptions and 2,000
+messages per minute). Koine's slot leases (`stream.py`, per `EGRESS_IP`) are
+ordered so that **claimed creator accounts always outrank watch accounts; a
+watch account streams only when a slot is spare** (planned change to
+`streamable_accounts`: "is watch" becomes the first sort key). Everything
+not streamed is polled. If slots are short, watch accounts lose first. The page also states address-based limits
+("1 request per 1 USDC traded cumulatively since address inception"), but
+those govern the exchange (order) endpoint and an address Koine only reads is
+unaffected [VERIFY].
+
+Open questions for counsel (watchlist):
+
+1. Is collecting, storing and scoring a non-user's public Hyperliquid history
+   for private display to Koine users acceptable on the Terms' silence, for a
+   US company (§1.6 excludes US persons from the Interface; §3.1.5 forbids
+   circumvention)?
+2. Is the signed-message opt-out an adequate answer to "you are tracking me",
+   including for smart-contract wallets that cannot sign it?
+3. Does a wallet address with its trading history count as personal data under
+   GDPR/UK GDPR/CCPA for this use, and what notice or deletion path (beyond
+   the opt-out and no-identity-linking rule) is required?
+4. Does anything change for the leaderboard discover page (Hyperliquid
+   publishes a leaderboard [VERIFY endpoint, terms and rate limits; not read
+   for this draft])?
+
 ## Known gaps
 
 - Only the latest 10,000 fills are verifiable individually.
