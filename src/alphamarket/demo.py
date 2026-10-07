@@ -568,6 +568,11 @@ def _worst_periods(s: dict) -> list[tuple]:
     return [first]
 
 
+def _operator(s: dict) -> str:
+    """Who runs the sample: "creator" unless the sample says "koine"."""
+    return s.get("operator", "creator")
+
+
 def _venue(s: dict) -> str:
     return s.get("venue", "kalshi")
 
@@ -601,6 +606,7 @@ def _row(s: dict) -> dict:
         "paper_tails": s["paper_tails"],
         "score": s["score"],
         "demo": True,
+        "operator": _operator(s),
     }
 
 
@@ -783,11 +789,12 @@ def strategy_page(slug: str) -> dict | None:
     benchmark = (
         ("Bitcoin, buy and hold", bench, "Bitcoin") if crypto else ("S&P 500", spx, "S&P 500")
     )
-    c = _CREATORS[s["handle"]]
+    c = _CREATORS.get(s["handle"], {"followers": 0})  # Koine-run samples have no profile
     mine = [x for x in _STRATEGIES if x["handle"] == s["handle"]]
     curve_rows = [[d.isoformat(), v] for d, v in zip(dates, curve, strict=True)]
     page = {
         "demo": True,
+        "operator": _operator(s),
         "slug": s["slug"],
         "name": s["name"],
         "display_name": s["handle"],
@@ -1172,6 +1179,54 @@ def transparency() -> dict:
             ),
         ],
     }
+
+
+# ---- demo: Run by Koine sample (copy strategies) ----
+# One sample house strategy: Koine's own account, so the page says "Run by
+# Koine" and never links to a creator profile (there is none: `_CREATORS` has
+# no entry, so /u/koine-lab is a 404). The description is Koine's own text,
+# labelled unverified like every other description. Invented numbers (invariant 7).
+_STRATEGIES.append(
+    dict(
+        slug="koine-lab-funding-carry",
+        name="Koine Lab \u00b7 Funding carry",
+        handle="Koine Lab",
+        operator="koine",
+        venue="hyperliquid",
+        tags=["crypto", "perps"],
+        seed=29,
+        drift=0.0013,
+        vol=0.011,
+        days=97,
+        start=20000.0,
+        total_return=0.083,
+        max_drawdown=0.052,
+        sharpe=1.58,
+        sortino=2.02,
+        risk_score=4,
+        n_fills=412,
+        paper_tails=22,
+        score=6.8,
+        description="Koine runs this one in a Koine-owned account. Hold BTC spot-equivalent exposure and short the perp when funding is positive, so the position earns funding rather than price moves. Gross leverage stays under 1.5x.",
+        worst_periods=[
+            (
+                "Jul 14 to Jul 22",
+                -0.052,
+                "10 days",
+                "Funding flipped negative for a week while the hedge was still on.",
+            ),
+        ],
+        holdings=[
+            ("USDC", "cash", 1.0, None, None),
+            ("BTC-PERP", "perp", -0.55, 63405.0, "62,310.0"),
+        ],
+        signals=[
+            ("BTC-PERP", "2026-08-31T00:00:14", "sell", "0.060", "63,371.0", 0.12),
+            ("BTC-PERP", "2026-08-25T08:00:09", "buy", "0.030", "62,880.5", 0.06),
+            ("BTC-PERP", "2026-08-19T00:00:21", "sell", "0.045", "61,455.0", 0.09),
+        ],
+    )
+)
 
 
 # ---- demo: watchlist sample ----

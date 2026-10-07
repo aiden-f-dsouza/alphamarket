@@ -209,7 +209,7 @@ def _marketplace_rows(
                 continue
             if tag and tag not in r["tags"]:
                 continue
-            if operator == "koine":  # sample rows are creators', never Koine-run
+            if operator and operator != r.get("operator", "creator"):
                 continue
             if r["incubating"] and not include_incubating:
                 continue
