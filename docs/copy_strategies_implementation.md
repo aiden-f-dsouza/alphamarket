@@ -251,6 +251,11 @@ Done: steps 0-3.
   `watch.html`, `watch_strategy.html`, the shared `_strategy_body.html`; tails
   accept the user's own watches; portfolio rows name a watch by its label
   (`tests/test_watchlist.py`).
+- Seeded demo (`scripts/seed_demo.py`, `docs/demo.md`): a Koine-run creator
+  (`koinelab`, `is_house`), a demo system user owning one synthetic watched
+  Hyperliquid address, and the investor's and analyst's watches plus the
+  investor's paper tail of it (`tests/test_seed_demo_watch.py`, pg twin in
+  `tests/test_seed_demo_pg.py`).
 
 Changed from the plan:
 
