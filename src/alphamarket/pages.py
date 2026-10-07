@@ -185,13 +185,19 @@ def _marketplace_rows(
     tag: str | None,
     venue: str | None = None,
     asset: str | None = None,
+    operator: str | None = None,
 ) -> list[dict]:
     """Real rows first (sorted by return, as `list_visible` does), then sample
     rows in demo mode. A row's `demo` key drives the sample banner. Sample
     rows are Kalshi-style prediction markets, so a venue or asset filter for
     anything else leaves them out."""
     rows = list_visible(
-        db, include_incubating=include_incubating, tag=tag, venue=venue, asset=asset
+        db,
+        include_incubating=include_incubating,
+        tag=tag,
+        venue=venue,
+        asset=asset,
+        operator=operator,
     )
     if _demo() and not _seeded(db):  # w3-seed: seeded rows replace the static padding
         for r in demo.marketplace_rows():
@@ -200,6 +206,8 @@ def _marketplace_rows(
             if asset and asset not in r["asset_classes"]:
                 continue
             if tag and tag not in r["tags"]:
+                continue
+            if operator == "koine":  # sample rows are creators', never Koine-run
                 continue
             if r["incubating"] and not include_incubating:
                 continue
@@ -255,19 +263,24 @@ def marketplace(
     view: str = "cards",
     venue: str | None = None,
     asset: str | None = None,
+    operator: str | None = None,
     db: Session = Depends(get_db),
 ):
     """`view=cards` (default) is for browsing; `view=table` is the comparison
     table with every column. Same rows, same order, either way. `venue=` keeps
     one venue's strategies and `asset=` (prediction | equities | crypto) one
-    asset class; the tabs set `asset`, the venue chips set `venue`."""
+    asset class; the tabs set `asset`, the venue chips set `venue`. `operator=`
+    koine | creator keeps only Koine-run strategies or drops them (no sort
+    effect); anything else shows all."""
     venue, asset = (venue or "").strip(), (asset or "").strip()
+    operator = operator if operator in ("koine", "creator") else ""
     rows = _marketplace_rows(
         db,
         include_incubating=incubating == "1",
         tag=tag or None,
         venue=venue or None,
         asset=asset or None,
+        operator=operator or None,
     )
     q = (q or "").strip()
     if q:
@@ -282,13 +295,25 @@ def marketplace(
         rows=rows,
         tags=all_tags(
             _marketplace_rows(
-                db, include_incubating=True, tag=None, venue=venue or None, asset=asset or None
+                db,
+                include_incubating=True,
+                tag=None,
+                venue=venue or None,
+                asset=asset or None,
+                operator=operator or None,
             )
         ),
         venues=venues_in(
-            _marketplace_rows(db, include_incubating=True, tag=None, asset=asset or None)
+            _marketplace_rows(
+                db,
+                include_incubating=True,
+                tag=None,
+                asset=asset or None,
+                operator=operator or None,
+            )
         ),
         tag=tag or "",
+        operator=operator,
         venue=venue,
         asset=asset,
         asset_tabs=[(key, ASSET_CLASS_LABELS[key]) for key in ASSET_CLASS_ORDER],
@@ -965,6 +990,7 @@ def portfolio_view(summary: dict, handles: dict[str, str], now: datetime | None 
                 "slug": v["strategy_slug"],
                 "name": v["strategy_name"],
                 "handle": handles.get(v["strategy_slug"], ""),
+                "operator": v.get("operator", "creator"),
                 "days": max(0, (now - _utc(v["started_at"])).days),
                 "allocated": v["allocation"],
                 "value": v["equity"],
@@ -1188,6 +1214,7 @@ def _feed_posts(db: Session, user: User, limit: int = 12) -> list[dict]:
         posts.append(
             {
                 "handle": row["display_name"] if row else item["strategy_name"],
+                "operator": item.get("operator", "creator"),
                 "when": _ago(item["at"], now),
                 "likes": 0,
                 "replies": 0,

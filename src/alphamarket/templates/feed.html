@@ -30,7 +30,7 @@
     <div class="card" style="flex-direction:row;align-items:center;gap:12px;padding:14px 18px"><span class="avatar"></span><span class="muted" style="flex-grow:1">Post an update. Your verified numbers travel with it.</span><button class="btn sm" type="button" disabled title="Posting is not live in the sample build">Post</button></div>
     {% for p in f.posts %}
     <div class="card post">
-      <div style="display:flex;align-items:center;gap:10px"><span class="avatar"></span>{% if p.context %}<a href="/u/{{ p.handle }}" class="small" style="font-weight:500">{{ p.handle }}</a>{% else %}<span class="small" style="font-weight:500">{{ p.handle }}</span>{% endif %}<span class="mono small muted">{{ p.when }}</span>
+      <div style="display:flex;align-items:center;gap:10px"><span class="avatar"></span>{% if p.context %}<a href="/u/{{ p.handle }}" class="small" style="font-weight:500">{{ p.handle }}</a>{% else %}<span class="small" style="font-weight:500">{{ p.handle }}</span>{% endif %}<span class="mono small muted">{{ p.when }}</span>{{ m.operator_badge(p.operator) }}
         {% if p.context %}<span class="ctx">{{ m.icon("shield", 12, "var(--good)", 2) }}{{ p.context }}</span>{% else %}<span class="ctx none">no verified record</span>{% endif %}</div>
       <p>{{ p.body }}</p>
       {% if p.strategy_row %}{% set r = p.strategy_row %}

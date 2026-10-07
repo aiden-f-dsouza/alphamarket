@@ -68,6 +68,15 @@
 {%- endmacro %}
 
 {# Lateral navigation between the four Learn pages; the same strip on every one of them. #}
+{# "Run by Koine": a strategy in a Koine-owned account (operator == "koine"),
+   verified like any other. Navy outline, never green (green means verified).
+   A span, not a link: cards are anchors themselves. #}
+{% macro operator_badge(op) -%}
+{%- if op == "koine" -%}
+<span class="operator-badge" style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap;font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;padding:4px 8px;border-radius:var(--r);color:var(--brand);border:1px solid var(--brand);background:transparent">{{ logo(12) }}Run by Koine</span>
+{%- endif -%}
+{%- endmacro %}
+
 {% macro learn_tabs(active) -%}
 <nav class="subnav" aria-label="Learn">{% for key, href, label in [("verification", "/verification", "Verification"), ("transparency", "/transparency", "Transparency"), ("research", "/research", "Research"), ("security", "/security", "Security & privacy")] %}<a href="{{ href }}" class="{{ 'on' if key == active }}"{% if key == active %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</nav>
 {%- endmacro %}
@@ -108,7 +117,7 @@
       {{ sigil(f.slug, 44) }}
       <div class="stack" style="gap:5px;min-width:0">
         <a href="/s/{{ f.slug }}" style="font-size:18px;font-weight:600;letter-spacing:-0.01em">{{ f.name }}</a>
-        <span class="small text2" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">{{ f.display_name }} · {{ f.venue_label or (f.venue or "kalshi")|capitalize }}{% for t in f.tags[:2] %}{{ cat(t) }}{% endfor %}</span>
+        <span class="small text2" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">{{ f.display_name }} · {{ f.venue_label or (f.venue or "kalshi")|capitalize }}{{ operator_badge(f.operator) }}{% for t in f.tags[:2] %}{{ cat(t) }}{% endfor %}</span>
       </div>
     </div>
     {% if f.incubating %}<span class="badge warn" style="white-space:nowrap">incubating · {{ f.track_days }}d</span>{% else %}<span style="white-space:nowrap">{{ verified("Verified", f.track_days) }}</span>{% endif %}

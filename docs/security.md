@@ -157,6 +157,14 @@ evidence from the last check on the connection.
   event is recorded in the audit log, and you are notified. Your track
   record is untouched. To resume, create a new read-only key and connect it.
 
+### Koine's own accounts
+
+Strategies marked "Run by Koine" are held to the same rule. Koine's own trading
+keys never touch the platform: those accounts connect read-only like anyone
+else's, the agent that trades holds its key in a separate service outside
+Koine's platform, and the nightly check above suspends any account, Koine's
+own included, whose key becomes writable.
+
 ## Account security
 
 Holding even read-only keys means your Koine account itself must be hard to

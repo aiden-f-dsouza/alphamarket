@@ -25,6 +25,7 @@
   {% if t.real %}<form method="post" action="/s/{{ s.slug }}/tail" class="stack" style="gap:32px">{% else %}<div class="stack" style="gap:32px">{% endif %}
     <div class="stack">
       <span class="label">Paper tail · {{ s.name }} · by {{ s.display_name }}</span>
+      {% if s.operator == "koine" %}<div>{{ m.operator_badge(s.operator) }}</div>{% endif %}
       <h1 style="font-size:40px">Follow it with paper money first.</h1>
       <p class="text2">Set a paper allocation and a drawdown limit. From the creator's next trade, Koine copies every trade into your paper allocation, sized to it, at prices you could actually have got and after the venue's fees. You see exactly what following would have made before you risk anything. No order is placed anywhere.</p>
     </div>
