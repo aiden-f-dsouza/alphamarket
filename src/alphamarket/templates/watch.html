@@ -23,7 +23,10 @@
   <div class="card"><div class="body" style="padding:20px 24px;gap:14px">
     <span class="label">Add an address</span>
     {% if error %}<div class="error" role="alert">{{ error }}{% if listed_slug %} <a href="/s/{{ listed_slug }}" style="text-decoration:underline;color:inherit">Open its page</a>.{% endif %}</div>{% endif %}
-    {% if not venues %}
+    {% if sample %}
+    <span class="small text2">Adding addresses is off in the demo. The rows below are invented.</span>
+    <button class="btn" type="button" disabled>Add to watchlist</button>
+    {% elif not venues %}
     <span class="small muted">The watchlist is not open for any venue right now.</span>
     {% elif not verified %}
     <span class="small text2">Verify your email address first. <a href="/dashboard/security" style="text-decoration:underline">Account security</a></span>
@@ -47,7 +50,7 @@
   <div class="wrow2 head"><span class="label">Address</span><span class="label hide">60 days</span><span class="label r">Return</span><span class="label r hide">Worst DD</span><span class="label r hide">Paper tail</span></div>
   {% for r in rows %}
   <div class="wrow2">
-    <div class="stack" style="gap:4px;min-width:0"><a href="/watch/{{ r.id }}" style="font-size:16px;font-weight:500;overflow-wrap:anywhere">{{ r.name }}</a><span class="mono small muted">{{ r.venue_label }}{% if r.label %} · {{ r.short_address }}{% endif %}{% if r.stats %} · {{ r.stats.track_days }}d observed{% endif %}</span></div>
+    <div class="stack" style="gap:4px;min-width:0">{% if r.id %}<a href="/watch/{{ r.id }}" style="font-size:16px;font-weight:500;overflow-wrap:anywhere">{{ r.name }}</a>{% else %}<span style="font-size:16px;font-weight:500;overflow-wrap:anywhere">{{ r.name }}</span>{% endif %}<span class="mono small muted">{{ r.venue_label }}{% if r.label %} · {{ r.short_address }}{% endif %}{% if r.stats %} · {{ r.stats.track_days }}d observed{% endif %}</span></div>
     {% if r.stats %}
     <div class="hide">{{ m.sparkline(r.stats.spark, r.stats.total_return >= 0) }}</div>
     <span class="mono r {{ 'good' if r.stats.total_return >= 0 else 'bad' }}" style="font-size:16px">{{ m.pct(r.stats.total_return) }}</span>
