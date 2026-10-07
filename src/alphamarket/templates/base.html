@@ -150,13 +150,16 @@
   .ticker .it .side { font-size:10px; letter-spacing:.08em; text-transform:uppercase; padding:2px 6px; border-radius:var(--r); border:1px solid currentColor; }
   @keyframes ticker { to { transform:translateX(-50%); } }
   /* equity charts: area fill, drawdown shading, draw-in and the crosshair */
-  .draw { transition:stroke-dashoffset 1.4s ease-out; }
-  .draw[pathLength] { stroke-dasharray:1; stroke-dashoffset:1; }
-  .draw.done { stroke-dashoffset:0; }
+  /* draw-in is a left-to-right clip, not a stroke dash: pathLength is measured
+     in viewBox units but non-scaling-stroke dashes in screen pixels, so under
+     preserveAspectRatio="none" a dash only covered part of the line. The
+     negative end inset keeps round caps and the stroke from being clipped. */
+  .draw { clip-path:inset(0 100% 0 0); transition:clip-path 1.4s ease-out; }
+  .draw.done { clip-path:inset(-10px); }
   .chart-wrap { position:relative; }
   .chart-tip { position:absolute; top:0; left:0; pointer-events:none; transform:translate(-50%, -100%); background:var(--text); color:var(--bg); font:12px var(--mono); padding:5px 8px; border-radius:var(--r); white-space:nowrap; opacity:0; transition:opacity .1s; }
   .chart-tip.on { opacity:1; }
-  @media (prefers-reduced-motion: reduce) { .ticker .track { animation:none; } .ticker { overflow-x:auto; -webkit-mask-image:none; mask-image:none; } .pulse i { animation:none; } .draw, .draw[pathLength] { stroke-dasharray:none; stroke-dashoffset:0; transition:none; } }
+  @media (prefers-reduced-motion: reduce) { .ticker .track { animation:none; } .ticker { overflow-x:auto; -webkit-mask-image:none; mask-image:none; } .pulse i { animation:none; } .draw { clip-path:none; transition:none; } }
   /* marketplace cards */
   .cards { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:16px; }
   .scard { color:inherit; transition:transform .15s, box-shadow .15s; }

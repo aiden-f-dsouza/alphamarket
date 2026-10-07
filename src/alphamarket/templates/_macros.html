@@ -84,9 +84,11 @@
 {% macro area(points, w, h, good=True, dd=None, draw=False) -%}
 {#- an equity spark: outcome-coloured area under the line, the worst drawdown window shaded, endpoint dot -#}
 {% set c = "var(--good)" if good else "var(--bad)" %}
+{% if draw %}<g class="draw">{% endif %}
 <polygon points="{{ points }} {{ w }},{{ h }} 0,{{ h }}" fill="{{ c }}" fill-opacity="0.10"/>
 {% if dd and dd[1] > dd[0] %}<rect x="{{ dd[0] }}" y="0" width="{{ dd[1] - dd[0] }}" height="{{ h }}" fill="var(--bad)" fill-opacity="0.05"/><line x1="{{ dd[0] }}" y1="{{ h }}" x2="{{ dd[1] }}" y2="{{ h }}" stroke="var(--bad)" stroke-width="2" vector-effect="non-scaling-stroke"/>{% endif %}
-<polyline points="{{ points }}" fill="none" stroke="{{ c }}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" {% if draw %}class="draw" pathLength="1"{% endif %}/>
+<polyline points="{{ points }}" fill="none" stroke="{{ c }}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+{% if draw %}</g>{% endif %}
 {%- endmacro %}
 
 {% macro ticker(items) -%}

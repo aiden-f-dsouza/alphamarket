@@ -151,12 +151,17 @@ def test_copy_is_paper_only_with_flat_pricing(client, demo_on):
 
 def test_landing_marks_and_chart(client, demo_on):
     """Identity marks and the drawn curve come from the same rows the marketplace
-    shows: sample ones under the banner, nothing else."""
+    shows: sample ones under the banner, nothing else. The draw-in is a clip on
+    a group, never pathLength dashes: those are measured in viewBox units but
+    drawn in screen pixels under non-scaling-stroke, so a stretched chart only
+    showed part of its line."""
     html = client.get("/").text
     assert html.count('<svg class="sigil"') >= 4  # featured card + top three
-    assert 'class="draw"' in html and "shaded: worst drawdown" in html
+    assert '<g class="draw">' in html and "shaded: worst drawdown" in html
+    assert "pathLength=" not in html
     html = client.get("/s/weather-cpi-mean-reversion").text
-    assert "data-series=" in html and 'class="draw"' in html  # crosshair series + draw-in
+    assert "data-series=" in html and '<g class="draw">' in html  # crosshair series + draw-in
+    assert "pathLength=" not in html
 
 
 def test_navigation_is_consistent(client, demo_on):
