@@ -85,6 +85,13 @@ def is_demo_owned(db: Session, strategy: Strategy) -> bool:
     return bool(owner is not None and owner.is_demo)
 
 
+def operator_of(owner: User | None) -> str:
+    """Who runs the strategy: "koine" for a house user's account (a Koine-owned
+    account connected read-only like any other), else "creator". A label only:
+    it never changes visibility, ranking or incubation."""
+    return "koine" if owner is not None and owner.is_house else "creator"
+
+
 def publicly_visible(db: Session, strategy: Strategy, account: VenueAccount | None = None) -> bool:
     """is_visible, and invariant 7: a demo user's strategy is public only while
     DEMO_MODE is on (and is then shown under the "Sample data" banner). Every
@@ -375,6 +382,7 @@ def page_data(db: Session, strategy: Strategy) -> dict:
         "slug": strategy.slug,
         "name": strategy.name,
         "display_name": owner.display_name if owner else "",
+        "operator": operator_of(owner),
         # invariant 7: a seeded demo record; the page shows the sample banner.
         "sample_data": bool(owner is not None and owner.is_demo),
         "venue": venue,
@@ -501,12 +509,15 @@ def list_visible(
     tag: str | None = None,
     venue: str | None = None,
     asset: str | None = None,
+    operator: str | None = None,
 ) -> list:
     """Rows for the explore page: every visible strategy that has stats, newest
     stats row each, sorted by total return. Incubating strategies (< 90 verified
     days) are hidden unless asked for; quarantined/delisted/unlisted never show.
     `venue` keeps one venue's strategies, `asset` one asset class
-    ("prediction" | "crypto" | "equities", from the venue profile)."""
+    ("prediction" | "crypto" | "equities", from the venue profile). `operator`
+    "koine" keeps only Koine-run strategies, "creator" drops them, anything
+    else keeps all; the sort never looks at it (no ranking advantage)."""
     rows = []
     for strategy in db.scalars(select(Strategy).order_by(Strategy.id)).all():
         account = db.get(VenueAccount, strategy.venue_account_id)
@@ -527,6 +538,9 @@ def list_visible(
         if incubating and not include_incubating:
             continue
         owner = db.get(User, strategy.user_id)
+        op = operator_of(owner)
+        if operator in ("koine", "creator") and op != operator:
+            continue
         last_recon = db.scalar(
             select(EquitySnapshot)
             .where(EquitySnapshot.strategy_id == strategy.id)
@@ -543,6 +557,7 @@ def list_visible(
                 "slug": strategy.slug,
                 "name": strategy.name,
                 "display_name": owner.display_name if owner else "",
+                "operator": op,
                 # invariant 7: the row's `demo` key drives the sample banner.
                 "demo": bool(owner is not None and owner.is_demo),
                 "tags": tags,

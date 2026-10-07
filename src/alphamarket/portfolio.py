@@ -31,6 +31,7 @@ from alphamarket.models import (
     VenueAccount,
     utcnow,
 )
+from alphamarket.public import operator_of
 from alphamarket.stats import OpenPosition, mark_positions, micros_to_float
 
 logger = logging.getLogger(__name__)
@@ -144,6 +145,7 @@ def allocation_view(db: Session, allocation: Allocation) -> dict:
         "id": allocation.id,
         "strategy_slug": strategy.slug,
         "strategy_name": strategy.name,
+        "operator": operator_of(db.get(User, strategy.user_id)),
         "mode": allocation.mode,
         "status": allocation.status,
         "stop_reason": allocation.stop_reason,

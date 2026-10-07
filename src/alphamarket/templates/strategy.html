@@ -22,6 +22,7 @@
 <div class="head">
   <div class="stack" style="gap:14px">
     <div class="badges">
+      {{ m.operator_badge(page.operator) }}
       {% if page.verified_since %}{% if st and page.incubating %}<span class="badge warn">incubating · {{ st.track_days }}/90 days</span>{% else %}{{ m.verified("Verified from venue data", st.track_days if st else None) }}{% endif %}{% endif %}
       {% if page.verification_tier == "fills_only" %}<span class="badge">fills verified · balance not reconciled</span>{% elif page.reconciled is not none %}<span class="badge {{ 'good pulse' if page.reconciled else 'bad' }}">{% if page.reconciled %}<i></i>reconciled last night{% else %}{{ m.icon("x", 12, "currentColor", 2) }}reconciliation diverged{% endif %}</span>{% endif %}
       {% if page.verification_tier == "daily_verified" %}<span class="badge">daily verified · end-of-day data</span>{% endif %}
@@ -32,6 +33,7 @@
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       {{ sigil(page.slug, 36) }}
       {% if page.demo %}<a href="/u/{{ page.display_name }}" style="font-weight:500">by {{ page.display_name }}</a><span class="small muted">· {{ page.venue_label or "Kalshi" }} · {{ page.creator.strategies }} verified strateg{{ "y" if page.creator.strategies == 1 else "ies" }} · {{ page.creator.followers }} followers</span>
+      {% elif page.operator == "koine" %}<a href="/verification#run-by-koine" style="font-weight:500">Run by Koine</a><span class="small muted">· {{ page.venue_label if page.is_asset else page.venue }}{% if page.follow %} · {{ page.follow.count }} follower{{ "s" if page.follow.count != 1 }}{% endif %}</span>
       {% else %}<span style="font-weight:500">by {{ page.display_name }}</span><span class="small muted">· {{ page.venue_label if page.is_asset else page.venue }}{% if page.follow %} · {{ page.follow.count }} follower{{ "s" if page.follow.count != 1 }}{% endif %}</span>{% endif %}
       <span style="display:flex;gap:6px;margin-left:6px">{% for t in page.style_tags %}{{ m.cat(t) }}{% endfor %}</span>
       {% if page.follow and not page.follow.own %}

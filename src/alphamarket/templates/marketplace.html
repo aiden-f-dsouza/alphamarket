@@ -29,32 +29,37 @@
 </div>
 
 <div class="tabs">
-  {% set tabkeep = ('&incubating=1' if incubating) ~ ('&q=' ~ q|urlencode if q) ~ ('&view=table' if view == 'table') %}
+  {% set tabkeep = ('&incubating=1' if incubating) ~ ('&q=' ~ q|urlencode if q) ~ ('&view=table' if view == 'table') ~ ('&operator=' ~ operator if operator) %}
   <div><a class="{{ 'on' if not asset }}" href="/marketplace{{ '?' ~ tabkeep[1:] if tabkeep }}" {% if not asset %}aria-current="page"{% endif %}>All</a>{% for key, label in asset_tabs %}<a class="{{ 'on' if key == asset }}" href="/marketplace?asset={{ key }}{{ tabkeep }}" {% if key == asset %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</div>
   <form method="get" action="/marketplace" class="search" role="search">
-    {% if tag %}<input type="hidden" name="tag" value="{{ tag }}">{% endif %}{% if incubating %}<input type="hidden" name="incubating" value="1">{% endif %}{% if venue %}<input type="hidden" name="venue" value="{{ venue }}">{% endif %}{% if asset %}<input type="hidden" name="asset" value="{{ asset }}">{% endif %}{% if view == "table" %}<input type="hidden" name="view" value="table">{% endif %}
+    {% if tag %}<input type="hidden" name="tag" value="{{ tag }}">{% endif %}{% if incubating %}<input type="hidden" name="incubating" value="1">{% endif %}{% if venue %}<input type="hidden" name="venue" value="{{ venue }}">{% endif %}{% if asset %}<input type="hidden" name="asset" value="{{ asset }}">{% endif %}{% if view == "table" %}<input type="hidden" name="view" value="table">{% endif %}{% if operator %}<input type="hidden" name="operator" value="{{ operator }}">{% endif %}
     {{ m.icon("search", 14, "var(--muted)") }}<input type="search" name="q" value="{{ q }}" placeholder="Search strategies or creators" aria-label="Search strategies or creators">
   </form>
 </div>
 
 <div class="filters">
   <div style="display:flex;gap:8px;flex-wrap:wrap">
-    {% set keep = ('&incubating=1' if incubating) ~ ('&q=' ~ q|urlencode if q) ~ ('&view=table' if view == 'table') ~ ('&venue=' ~ venue|urlencode if venue) ~ ('&asset=' ~ asset|urlencode if asset) %}
+    {% set keep = ('&incubating=1' if incubating) ~ ('&q=' ~ q|urlencode if q) ~ ('&view=table' if view == 'table') ~ ('&venue=' ~ venue|urlencode if venue) ~ ('&asset=' ~ asset|urlencode if asset) ~ ('&operator=' ~ operator if operator) %}
     <a class="chip {{ 'on' if not tag }}" href="/marketplace{{ '?' ~ keep[1:] if keep }}">All</a>
     {% for t in tags %}<a class="chip {{ 'on' if t == tag }}" href="/marketplace?tag={{ t|urlencode }}{{ keep }}">{{ t }}</a>{% endfor %}
     {% if venues|length > 1 or venue %}
-    {% set vkeep = ('&incubating=1' if incubating) ~ ('&q=' ~ q|urlencode if q) ~ ('&view=table' if view == 'table') ~ ('&asset=' ~ asset|urlencode if asset) ~ ('&tag=' ~ tag|urlencode if tag) %}
+    {% set vkeep = ('&incubating=1' if incubating) ~ ('&q=' ~ q|urlencode if q) ~ ('&view=table' if view == 'table') ~ ('&asset=' ~ asset|urlencode if asset) ~ ('&tag=' ~ tag|urlencode if tag) ~ ('&operator=' ~ operator if operator) %}
     <span class="mono small muted" style="align-self:center;margin-left:8px">Venue</span>
     <a class="chip {{ 'on' if not venue }}" href="/marketplace{{ '?' ~ vkeep[1:] if vkeep }}">Any</a>
     {% for v, label in venues %}<a class="chip {{ 'on' if v == venue }}" href="/marketplace?venue={{ v|urlencode }}{{ vkeep }}">{{ label }}</a>{% endfor %}
     {% endif %}
+    {% set okeep = ('&incubating=1' if incubating) ~ ('&q=' ~ q|urlencode if q) ~ ('&view=table' if view == 'table') ~ ('&venue=' ~ venue|urlencode if venue) ~ ('&asset=' ~ asset|urlencode if asset) ~ ('&tag=' ~ tag|urlencode if tag) %}
+    <span class="mono small muted" style="align-self:center;margin-left:8px">Operator</span>
+    <a class="chip {{ 'on' if not operator }}" href="/marketplace{{ '?' ~ okeep[1:] if okeep }}">All</a>
+    <a class="chip {{ 'on' if operator == 'koine' }}" href="/marketplace?operator=koine{{ okeep }}">Only Koine</a>
+    <a class="chip {{ 'on' if operator == 'creator' }}" href="/marketplace?operator=creator{{ okeep }}">Exclude Koine</a>
   </div>
   <div style="display:flex;align-items:center;gap:20px">
     <form method="get" action="/marketplace" class="toggle mono small text2">
-      {% if tag %}<input type="hidden" name="tag" value="{{ tag }}">{% endif %}{% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}{% if view == "table" %}<input type="hidden" name="view" value="table">{% endif %}{% if venue %}<input type="hidden" name="venue" value="{{ venue }}">{% endif %}{% if asset %}<input type="hidden" name="asset" value="{{ asset }}">{% endif %}
+      {% if tag %}<input type="hidden" name="tag" value="{{ tag }}">{% endif %}{% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}{% if view == "table" %}<input type="hidden" name="view" value="table">{% endif %}{% if venue %}<input type="hidden" name="venue" value="{{ venue }}">{% endif %}{% if asset %}<input type="hidden" name="asset" value="{{ asset }}">{% endif %}{% if operator %}<input type="hidden" name="operator" value="{{ operator }}">{% endif %}
       <input type="checkbox" name="incubating" value="1" {% if incubating %}checked{% endif %} data-autosubmit> Show incubating
     </form>
-    {% set base = '/marketplace?' ~ ('tag=' ~ tag|urlencode ~ '&' if tag) ~ ('incubating=1&' if incubating) ~ ('q=' ~ q|urlencode ~ '&' if q) ~ ('venue=' ~ venue|urlencode ~ '&' if venue) ~ ('asset=' ~ asset|urlencode ~ '&' if asset) %}
+    {% set base = '/marketplace?' ~ ('tag=' ~ tag|urlencode ~ '&' if tag) ~ ('incubating=1&' if incubating) ~ ('q=' ~ q|urlencode ~ '&' if q) ~ ('venue=' ~ venue|urlencode ~ '&' if venue) ~ ('asset=' ~ asset|urlencode ~ '&' if asset) ~ ('operator=' ~ operator ~ '&' if operator) %}
     <div class="seg" role="group" aria-label="View"><a class="{{ 'on' if view == 'cards' }}" href="{{ base }}view=cards" {% if view == 'cards' %}aria-current="true"{% endif %}>Browse</a><a class="{{ 'on' if view == 'table' }}" href="{{ base }}view=table" {% if view == 'table' %}aria-current="true"{% endif %}>Compare</a></div>
   </div>
 </div>
@@ -63,7 +68,7 @@
 <div class="cards">
   {% for r in rows %}
   <a class="card scard" href="/s/{{ r.slug }}">
-    <div class="head">{{ sigil(r.slug, 40) }}<div class="name"><b>{{ r.name }}</b><span class="who">{{ r.display_name }}{% if r.venue_label %} · {{ r.venue_label }}{% endif %}{% for t in r.tags[:2] %}{{ m.cat(t) }}{% endfor %}</span></div></div>
+    <div class="head">{{ sigil(r.slug, 40) }}<div class="name"><b>{{ r.name }}</b><span class="who">{{ r.display_name }}{% if r.venue_label %} · {{ r.venue_label }}{% endif %}{{ m.operator_badge(r.operator) }}{% for t in r.tags[:2] %}{{ m.cat(t) }}{% endfor %}</span></div></div>
     <div class="mid">
       <span class="ret {{ 'good' if r.total_return >= 0 else 'bad' }}">{{ m.pct(r.total_return) }}</span>
       <span class="small muted">net of fees · worst drawdown <span class="mono bad">{{ m.pct(-r.max_drawdown) }}</span></span>
@@ -87,7 +92,7 @@
   <div class="lrow">
     {{ sigil(r.slug, 36) }}
     <div class="stack" style="gap:6px"><a href="/s/{{ r.slug }}" style="font-size:16px;font-weight:500">{{ r.name }}</a>
-      <div class="badges"><span class="mono small muted">{{ r.display_name }}{% if r.venue_label %} · {{ r.venue_label }}{% endif %}</span>{% for t in r.tags %}<span class="tag">{{ t }}</span>{% endfor %}{% if r.incubating %}<span class="badge warn">incubating · {{ r.track_days }}d</span>{% else %}{{ m.verified(r.track_days ~ "d") }}{% endif %}</div></div>
+      <div class="badges"><span class="mono small muted">{{ r.display_name }}{% if r.venue_label %} · {{ r.venue_label }}{% endif %}</span>{{ m.operator_badge(r.operator) }}{% for t in r.tags %}<span class="tag">{{ t }}</span>{% endfor %}{% if r.incubating %}<span class="badge warn">incubating · {{ r.track_days }}d</span>{% else %}{{ m.verified(r.track_days ~ "d") }}{% endif %}</div></div>
     <div class="hide">{{ m.sparkline(r.spark, r.total_return >= 0) }}</div>
     <span class="mono r {{ 'good' if r.total_return >= 0 else 'bad' }}" style="font-size:16px">{{ m.pct(r.total_return) }}</span>
     <span class="mono r bad hide" style="font-size:14px">{{ m.pct(-r.max_drawdown) }}</span>
