@@ -10,10 +10,11 @@
 <div class="auth stack" style="gap:24px">
   <div class="stack" style="gap:8px">
     <h1 style="font-size:36px">{{ "Welcome back." if login else "Create your account." }}</h1>
-    <p class="text2">{% if login %}Log in to your dashboard.{% else %}Investors browse and follow. Creators connect a read-only key from the dashboard. Free either way.{% endif %}</p>
+    <p class="text2">{% if login %}Log in to your dashboard.{% else %}Followers browse and paper-tail. Creators connect a read-only account from the dashboard. Free either way.{% endif %}</p>
   </div>
   {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
   <form method="post" action="{{ '/login-form' if login else '/signup-form' }}" class="card">
+    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
     <div class="body" style="padding:28px;gap:18px">
       {% if not login %}<label class="field"><span class="label">Display name (shown publicly)</span><input name="display_name" required minlength="2" maxlength="80" autocomplete="nickname" autofocus></label>{% endif %}
       <label class="field"><span class="label">Email{{ "" if login else " (never shown)" }}</span><input name="email" type="email" required autocomplete="email" {{ "autofocus" if login }}></label>
@@ -22,6 +23,6 @@
     </div>
   </form>
   {% if login %}<p class="small text2" style="text-align:center"><a href="/forgot-password" style="text-decoration:underline">Forgot your password?</a></p>{% endif %}
-  <p class="small text2" style="text-align:center">{% if login %}New to Koine? <a href="/signup" style="text-decoration:underline">Create an account</a>.{% else %}Already have an account? <a href="/login" style="text-decoration:underline">Log in</a>.{% endif %}</p>
+  <p class="small text2" style="text-align:center">{% if login %}New to Koine? <a href="/signup{{ ('?next=' ~ next|urlencode) if next }}" style="text-decoration:underline">Create an account</a>.{% else %}Already have an account? <a href="/login{{ ('?next=' ~ next|urlencode) if next }}" style="text-decoration:underline">Log in</a>.{% endif %}</p>
 </div>
 {% endblock %}

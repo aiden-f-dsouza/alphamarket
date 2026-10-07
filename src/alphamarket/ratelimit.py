@@ -73,6 +73,15 @@ RULES: dict[str, Rule] = {
         Rule("api_ip", 60, 60),
         Rule("follow_user", 60, 3600),  # follow and allocate
         Rule("verify_resend_user", 3, 3600),
+        Rule("email_change_user", 5, 3600),  # wave2: each request sends two emails
+        # wave2: GET /dashboard/connect/snaptrade/{id} calls SnapTrade twice per
+        # load (account list + a fresh portal link) and audits a credential
+        # decrypt, so reloading it must not spend the venues_user budget the
+        # start/finish POSTs need, nor hammer the shared 250/min SnapTrade pool.
+        # A real connect is a handful of views (open the portal, come back, link
+        # a second broker); 30 per 10 minutes is generous for that and caps one
+        # user at ~6 SnapTrade calls a minute (2.4% of the pool).
+        Rule("snaptrade_picker_user", 30, 600),
     )
 }
 

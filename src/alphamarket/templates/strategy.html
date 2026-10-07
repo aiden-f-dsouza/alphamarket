@@ -6,41 +6,66 @@
   .crumbs { display:flex; align-items:center; gap:8px; font:12px var(--mono); color:var(--muted); }
   .head { display:grid; grid-template-columns:1fr 360px; gap:48px; align-items:start; }
   .cols { display:grid; grid-template-columns:1fr 340px; gap:32px; align-items:start; }
-  .srow { display:grid; grid-template-columns:1fr 56px 64px 96px; align-items:center; gap:16px; padding:12px 0; border-bottom:1px solid var(--line); }
+  .srow { display:grid; grid-template-columns:minmax(0,1fr) 48px 84px; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--line); }
+  .srow .tk { overflow-wrap:anywhere; }
   .side { font:11px var(--mono); letter-spacing:.08em; text-align:center; padding:4px 0; border-radius:var(--r); border:1px solid; }
-  .wrow { display:grid; grid-template-columns:150px 80px 90px 1fr; gap:16px; align-items:baseline; padding:12px 0; border-bottom:1px solid var(--line); }
-  @media (max-width:1000px) { .head, .cols { grid-template-columns:1fr; } .wrow { grid-template-columns:1fr 80px; } .wrow > :nth-child(n+3) { display:none; } }
+  .wrow { display:grid; grid-template-columns:150px 80px 110px minmax(0,1fr); gap:16px; align-items:baseline; padding:12px 0; border-bottom:1px solid var(--line); }
+  .months th, .months td { padding-left:4px; padding-right:4px; }
+  .tailcard .kv > * > :first-child { white-space:nowrap; } .tailcard .kv > * > :last-child { text-align:right; font-size:13px; }
+  @media (max-width:1000px) { .head, .cols { grid-template-columns:minmax(0,1fr); gap:24px; } .head h1 { font-size:36px !important; } .wrow { grid-template-columns:minmax(0,1fr) 70px 90px; } .wrow > :nth-child(4) { grid-column:1 / -1; } }
 {% endblock %}
 {% block content %}
 {% set st = page.stats %}
-<div class="crumbs"><a href="/marketplace" class="muted">Marketplace</a>{{ m.icon("chev", 12, "var(--muted)") }}<span>Prediction markets</span>{{ m.icon("chev", 12, "var(--muted)") }}<span class="text2">{{ page.name }}</span></div>
+{% set v2 = st and st.valuation == "v2" %}
+<div class="crumbs"><a href="/marketplace" class="muted">Marketplace</a>{{ m.icon("chev", 12, "var(--muted)") }}<span>{{ page.asset_class_label or "Prediction markets" }}</span>{{ m.icon("chev", 12, "var(--muted)") }}<span class="text2">{{ page.name }}</span></div>
 
 <div class="head">
   <div class="stack" style="gap:14px">
     <div class="badges">
       {% if page.verified_since %}{% if st and page.incubating %}<span class="badge warn">incubating · {{ st.track_days }}/90 days</span>{% else %}{{ m.verified("Verified from venue data", st.track_days if st else None) }}{% endif %}{% endif %}
       {% if page.verification_tier == "fills_only" %}<span class="badge">fills verified · balance not reconciled</span>{% elif page.reconciled is not none %}<span class="badge {{ 'good pulse' if page.reconciled else 'bad' }}">{% if page.reconciled %}<i></i>reconciled last night{% else %}{{ m.icon("x", 12, "currentColor", 2) }}reconciliation diverged{% endif %}</span>{% endif %}
-      {% if page.venue_env != "prod" %}<span class="badge warn">{{ page.venue_env }} environment</span>{% endif %}
+      {% if page.verification_tier == "daily_verified" %}<span class="badge">daily verified · end-of-day data</span>{% endif %}
+      {% if page.activity_flags and page.activity_flags.count %}<a class="badge warn" href="/verification">{{ m.icon("x", 12, "currentColor", 2) }}unsupported activity · {{ page.activity_flags.count }} skipped</a>{% endif %}
+      {% if page.venue_env not in ("prod", "live") %}<span class="badge warn">{{ page.venue_env }} environment</span>{% endif %}
     </div>
     <h1 style="font-size:48px">{{ page.name }}</h1>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       {{ sigil(page.slug, 36) }}
-      {% if page.demo %}<a href="/u/{{ page.display_name }}" style="font-weight:500">by {{ page.display_name }}</a><span class="small muted">· Kalshi · {{ page.creator.strategies }} verified strateg{{ "y" if page.creator.strategies == 1 else "ies" }} · {{ page.creator.followers }} followers</span>
-      {% else %}<span style="font-weight:500">by {{ page.display_name }}</span><span class="small muted">· {{ page.venue }}</span>{% endif %}
+      {% if page.demo %}<a href="/u/{{ page.display_name }}" style="font-weight:500">by {{ page.display_name }}</a><span class="small muted">· {{ page.venue_label or "Kalshi" }} · {{ page.creator.strategies }} verified strateg{{ "y" if page.creator.strategies == 1 else "ies" }} · {{ page.creator.followers }} followers</span>
+      {% else %}<span style="font-weight:500">by {{ page.display_name }}</span><span class="small muted">· {{ page.venue_label if page.is_asset else page.venue }}{% if page.follow %} · {{ page.follow.count }} follower{{ "s" if page.follow.count != 1 }}{% endif %}</span>{% endif %}
       <span style="display:flex;gap:6px;margin-left:6px">{% for t in page.style_tags %}{{ m.cat(t) }}{% endfor %}</span>
+      {% if page.follow and not page.follow.own %}
+      {% if page.follow.following %}<form class="inline" method="post" action="/s/{{ page.slug }}/unfollow"><button class="btn secondary sm" type="submit" title="Stop seeing this strategy's trades in your feed">{{ m.icon("check", 14) }}Following · unfollow</button></form>
+      {% elif user %}<form class="inline" method="post" action="/s/{{ page.slug }}/follow"><button class="btn secondary sm" type="submit" title="See this strategy's trades in your feed">{{ m.icon("plus", 14) }}Follow</button></form>
+      {% else %}<a class="btn secondary sm" href="{{ page.follow.login }}" title="Log in to follow">{{ m.icon("plus", 14) }}Follow</a>{% endif %}
+      {% endif %}
     </div>
     <span class="mono small muted">platform-verified since {{ page.verified_since[:10] if page.verified_since else "first reconciliation pending" }}</span>
   </div>
-  {% if page.capacity %}
-  <div class="card"><div class="body" style="padding:20px 24px">
-    <div class="spread" style="align-items:baseline"><span class="label">Tail this strategy</span><span class="mono small muted">min ${{ page.capacity.min_usd }}</span></div>
+  {% if page.tailing %}
+  <div class="card tailcard"><div class="body" style="padding:20px 24px">
+    <div class="spread" style="align-items:baseline"><span class="label">Paper-tail this strategy</span><span class="mono small muted">paper money only</span></div>
+    <p class="small text2">See exactly what you would have made following {{ page.display_name }}, at prices you could actually have got, before you risk anything.</p>
     <div class="kv" style="font-size:14px">
-      <div><span>Performance fee</span><span>{{ page.capacity.fee }}</span></div>
-      <div><span>Capacity left</span><span>~${{ page.capacity.left_k }}k</span></div>
-      <div><span>Currently tailing</span><span>${{ "%.1f"|format(page.capacity.tailing_k) }}k · {{ page.capacity.investors }} investors</span></div>
+      <div><span>Paper tails</span><span>{{ page.tailing.paper_tails }} following</span></div>
+      <div><span>Fill price</span><span>{{ page.tailing.fill }}</span></div>
+      <div><span>Trading costs</span><span>{{ page.tailing.costs }}</span></div>
+      <div><span>Koine pricing</span><span>{{ page.tailing.pricing }}</span></div>
     </div>
-    <a class="btn lg" href="/s/{{ page.slug }}/tail">Tail from my account</a>
-    <span class="small muted" style="display:inline-flex;align-items:center;gap:6px">{{ m.icon("lock", 12, "var(--muted)") }}Koine cannot withdraw from your account.</span>
+    {% set ts = page.tailing.state %}
+    {% if ts == "active" %}
+    <span class="small text2">You are paper-tailing this strategy. Its positions and copy lag are on your portfolio.</span>
+    <a class="btn lg secondary" href="/portfolio">View in your portfolio</a>
+    {% elif ts == "own" %}
+    <button class="btn lg" type="button" disabled>Start a paper tail</button>
+    <span class="small muted">This is your strategy. Creators cannot paper-tail their own record.</span>
+    {% elif ts == "anon" %}
+    <a class="btn lg" href="{{ page.tailing.href }}">Start a paper tail</a>
+    <span class="small muted">Log in or create a free account first; you come straight back here.</span>
+    {% else %}
+    <a class="btn lg" href="/s/{{ page.slug }}/tail">Start a paper tail</a>
+    {% endif %}
+    <span class="small muted" style="display:inline-flex;align-items:center;gap:6px">{{ m.icon("lock", 12, "var(--muted)") }}Paper only. Koine never places an order or touches your money.</span>
   </div></div>
   {% endif %}
 </div>
@@ -49,22 +74,24 @@
 <div class="card plain"><div class="body"><span class="muted">Statistics are computed nightly; this strategy's first run is pending.</span></div></div>
 {% else %}
 <div class="card"><div class="stats six">
-  {% if st.total_return is none and st.return_on_peak_invested is not none %}<div class="stat"><span class="label">Return on peak invested</span><span class="v {{ 'good' if st.return_on_peak_invested >= 0 else 'bad' }}">{{ m.pct(st.return_on_peak_invested) }}<small>{{ st.track_days }}d</small></span></div>
+  {% if v2 %}<div class="stat"><span class="label">Return, time-weighted, net of fees</span><span class="v {{ 'good' if (st.total_return or 0) >= 0 else 'bad' }}">{{ m.pct(st.total_return) }}<small>{{ st.track_days }}d</small></span></div>
+  {% elif st.total_return is none and st.return_on_peak_invested is not none %}<div class="stat"><span class="label">Return on peak invested</span><span class="v {{ 'good' if st.return_on_peak_invested >= 0 else 'bad' }}">{{ m.pct(st.return_on_peak_invested) }}<small>{{ st.track_days }}d</small></span></div>
   {% else %}<div class="stat"><span class="label">Return, net of fees</span><span class="v {{ 'good' if (st.total_return or 0) >= 0 else 'bad' }}">{{ m.pct(st.total_return) }}<small>{{ st.track_days }}d</small></span></div>{% endif %}
   <div class="stat"><span class="label">Worst drawdown</span><span class="v bad">{{ m.pct(-st.max_drawdown) }}</span></div>
   <div class="stat"><span class="label">Sharpe</span><span class="v">{{ m.num(st.sharpe) }}</span></div>
   <div class="stat"><span class="label">Risk score</span><span class="v">{{ st.risk_score }}<small>/10</small></span></div>
-  {% if page.vs_benchmark is defined %}<div class="stat"><span class="label">vs. S&amp;P 500</span><span class="v {{ 'good' if page.vs_benchmark >= 0 else 'bad' }}">{{ m.pct(page.vs_benchmark) }}<small>pts</small></span></div>
-  <div class="stat"><span class="label">Capacity</span><span class="v">${{ page.capacity.capacity_k }}k<small>est.</small></span></div>
-  {% else %}<div class="stat"><span class="label">Realized P&amp;L</span><span class="v {{ 'good' if st.realized_pnl >= 0 else 'bad' }}">{{ m.usd(st.realized_pnl) }}</span></div>
-  <div class="stat"><span class="label">Settled trades</span><span class="v">{{ st.n_settlements }}</span></div>{% endif %}
+  {% if page.vs_benchmark is defined %}<div class="stat"><span class="label">vs. {{ page.benchmark_label or "S&P 500" }}</span><span class="v {{ 'good' if page.vs_benchmark >= 0 else 'bad' }}">{{ m.pct(page.vs_benchmark) }}<small>pts</small></span></div>
+  {% elif st.net_pnl is defined and st.net_pnl is not none %}<div class="stat"><span class="label">P&amp;L, net of deposits</span><span class="v {{ 'good' if st.net_pnl >= 0 else 'bad' }}">{{ m.usd(st.net_pnl) }}</span></div>
+  {% else %}<div class="stat"><span class="label">Realized P&amp;L</span><span class="v {{ 'good' if st.realized_pnl >= 0 else 'bad' }}">{{ m.usd(st.realized_pnl) }}</span></div>{% endif %}
+  {% if v2 %}<div class="stat"><span class="label">Open positions</span><span class="v">{{ st.n_open_positions if st.n_open_positions is not none else "—" }}</span></div>
+  {% else %}<div class="stat"><span class="label">Settled trades</span><span class="v">{{ st.n_settlements }}</span></div>{% endif %}
 </div></div>
 
 <div class="cols">
   <div class="stack" style="gap:24px">
     {% if charts %}
     <div class="card"><div class="body" style="gap:14px">
-      <div class="spread" style="align-items:center"><span class="label">Growth of {{ m.usd(st.equity_curve[0][1], 0) }} · net of venue fees · open positions at cost</span><span class="mono small muted">all {{ st.track_days }} verified days · shaded: worst drawdown</span></div>
+      <div class="spread" style="align-items:center"><span class="label">Growth of {{ m.usd((st.chart_curve or st.equity_curve)[0][1], 0) }} · {% if v2 %}net of fees · deposits and withdrawals removed · marked to daily closes{% else %}net of venue fees · open positions at cost{% endif %}</span><span class="mono small muted">all {{ st.track_days }} verified days · shaded: worst drawdown</span></div>
       {% if charts.benchmarks %}<div class="legend"><span><i style="border-color:{{ 'var(--good)' if charts.up else 'var(--bad)' }}"></i>This strategy</span>{% for label, pts, dashed in charts.benchmarks %}<span><i style="border-color:var(--gray);{{ 'border-top-style:dashed' if dashed }}"></i>{{ label }}</span>{% endfor %}</div>{% endif %}
       <div class="chart">
         <div class="y" style="padding-bottom:26px">{% for t in charts.equity_ticks %}<span>{{ m.usd(t, 0) }}</span>{% endfor %}</div>
@@ -74,8 +101,8 @@
             {% if charts.dd_x[1] > charts.dd_x[0] %}<rect x="{{ charts.dd_x[0] }}" y="0" width="{{ charts.dd_x[1] - charts.dd_x[0] }}" height="{{ charts.equity_h }}" fill="var(--bad)" fill-opacity="0.07"/>{% endif %}
             {% for label, pts, dashed in charts.benchmarks or [] %}<polyline points="{{ pts }}" fill="none" stroke="var(--gray)" stroke-width="1.5" {% if dashed %}stroke-dasharray="4 4"{% endif %} stroke-linejoin="round" vector-effect="non-scaling-stroke"/>{% endfor %}
             {% set c = "var(--good)" if charts.up else "var(--bad)" %}
-            <polygon points="{{ charts.equity }} {{ charts.w }},{{ charts.equity_h }} 0,{{ charts.equity_h }}" fill="{{ c }}" fill-opacity="0.10"/>
-            <polyline points="{{ charts.equity }}" fill="none" stroke="{{ c }}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" class="draw" pathLength="1"/>
+            <g class="draw"><polygon points="{{ charts.equity }} {{ charts.w }},{{ charts.equity_h }} 0,{{ charts.equity_h }}" fill="{{ c }}" fill-opacity="0.10"/>
+            <polyline points="{{ charts.equity }}" fill="none" stroke="{{ c }}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/></g>
           </svg></div>
           <div class="x">{% for d in charts.x_labels %}<span>{{ d }}</span>{% endfor %}</div>
         </div>
@@ -94,12 +121,39 @@
     </div></div>
     {% endif %}
 
-    <div class="grid2">
-      <div class="card"><div class="body">
+    {% if v2 %}
+    <div class="card" id="holdings"><div class="body" style="gap:14px">
+      <div class="spread" style="align-items:baseline"><span class="label">Holdings and exposure</span><span class="mono small muted">{% if st.exposure %}as of {{ st.exposure.day }} close{% endif %}</span></div>
+      {% if st.holdings %}
+      <div style="overflow-x:auto"><table>
+        <tr><th>Asset</th><th>Type</th><th class="num">Quantity</th><th class="num">Price</th><th class="num">Value</th><th class="num">Share</th></tr>
+        {% for h in st.holdings %}
+        <tr><td class="mono">{{ h.asset }}</td><td class="text2">{{ h.kind }}</td><td class="num">{{ m.qty(h.qty, h.kind) }}</td>
+          <td class="num">{% if h.kind == "perp" %}<span class="muted">entry {{ m.price(h.entry) if h.entry else "unknown" }}</span>{% else %}{{ h.price_label if h.price_label else "—" }}{% endif %}</td>
+          <td class="num {{ 'bad' if h.value < 0 else '' }}">{% if h.kind == "perp" %}<span title="Unrealized P&amp;L; notional {{ h.notional_label }}">{{ h.value_label }} <span class="muted">unrealized</span></span>{% else %}{{ h.value_label }}{% endif %}</td>
+          <td class="num">{{ m.pct(h.weight, 0) if h.weight is not none else "·" }}</td></tr>
+        {% endfor %}
+      </table></div>
+      {% else %}<span class="muted small">No positions at the last close.</span>{% endif %}
+      {% if st.exposure and st.exposure.by_underlying %}
+      <div class="kv" style="font-size:14px">
+        <div><span>Gross exposure</span><span>{{ st.exposure.gross_label }}</span></div>
+        <div><span>Largest exposure</span><span>{{ st.exposure.top_asset }} · {{ "%.0f"|format((st.exposure.top_share or 0) * 100) }}%</span></div>
+        {% if st.exposure.perp_leverage %}<div><span>Perp leverage (gross)</span><span>{{ "%.2f"|format(st.exposure.perp_leverage) }}×</span></div>{% endif %}
+        {% for e in st.exposure.by_underlying %}<div><span class="muted">{{ e.asset }}</span><span class="muted">{{ "%.0f"|format(e.share * 100) }}% · {{ e.label }}</span></div>{% endfor %}
+      </div>
+      {% endif %}
+      {% if st.unpriced or st.perp_entry_unknown or st.carried_forward_days %}
+      <span class="mono muted" style="font-size:11px;line-height:1.5">{% if st.unpriced %}Not valued (no price available): {{ st.unpriced|join(", ") }}. {% endif %}{% if st.perp_entry_unknown %}Entry price unknown, not valued: {{ st.perp_entry_unknown|join(", ") }}. {% endif %}{% if st.carried_forward_days %}{% if page.asset_class == "equities" %}{{ st.carried_forward_days }} day{{ "s" if st.carried_forward_days != 1 }} without a close (weekends and market holidays, mostly) valued at the previous close.{% else %}{{ st.carried_forward_days }} day{{ "s" if st.carried_forward_days != 1 }} valued at the last available close.{% endif %}{% endif %}</span>
+      {% endif %}
+    </div></div>
+    {% endif %}
+
+    <div class="card"><div class="body">
         <span class="label">Monthly returns</span>
         {% set months = st.monthly_returns %}
         {% if months %}
-        <div style="overflow-x:auto"><table>
+        <div style="overflow-x:auto"><table class="months">
           <tr><th>Year</th>{% for mo in ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"] %}<th class="num">{{ mo }}</th>{% endfor %}</tr>
           {% for y in months|map(attribute=0)|unique|list %}
           <tr><td class="text2">{{ y }}</td>
@@ -118,11 +172,10 @@
         <span class="small text2" style="padding:8px 0">Worst drawdown so far: <span class="mono bad">{{ m.pct(-st.max_drawdown) }}</span>. Dated worst periods and recovery times are listed once a strategy has 90 verified days.</span>
         {% endfor %}
       </div></div>
-    </div>
 
     <div class="card plain"><div class="body" style="flex-direction:row;align-items:center;gap:12px;padding:16px 20px">
       {% if st.flags %}{{ m.icon("x", 16, "var(--warn)", 2) }}<span class="small text2"><span class="warn">Behavioural flags: {{ st.flags|join(", ") }}.</span> <a href="/verification" style="text-decoration:underline">What these mean.</a></span>
-      {% else %}{{ m.icon("check", 16, "var(--good)", 2) }}<span class="small text2"><span style="color:var(--text)">No behavioural flags.</span> Martingale sizing, stake spikes and single-series concentration are checked nightly.</span>{% endif %}
+      {% else %}{{ m.icon("check", 16, "var(--good)", 2) }}<span class="small text2"><span style="color:var(--text)">No behavioural flags.</span> {% if v2 %}Behavioural flags are checked nightly.{% else %}Martingale sizing, stake spikes and single-series concentration are checked nightly.{% endif %}</span>{% endif %}
     </div></div>
 
     <div class="card"><div class="body">
@@ -137,6 +190,13 @@
       <span class="label" style="padding-bottom:6px">Risk</span>
       <div class="kv">
         {% if page.risk_rows %}{% for a, b in page.risk_rows %}<div><span>{{ a }}</span><span>{{ b }}</span></div>{% endfor %}
+        {% elif v2 %}
+        <div><span>Sharpe (annualised)</span><span>{{ m.num(st.sharpe) }}</span></div>
+        <div><span>Sortino</span><span>{{ m.num(st.sortino) }}</span></div>
+        <div><span>Largest exposure</span><span>{% if st.exposure and st.exposure.top_asset %}{{ st.exposure.top_asset }} · {{ "%.0f"|format((st.exposure.top_share or 0) * 100) }}%{% else %}—{% endif %}</span></div>
+        {% if st.exposure and st.exposure.perp_leverage %}<div><span>Perp leverage (gross)</span><span>{{ "%.2f"|format(st.exposure.perp_leverage) }}×</span></div>{% endif %}
+        <div><span>Open positions</span><span>{{ st.n_open_positions if st.n_open_positions is not none else "—" }}</span></div>
+        <div><span>Fills</span><span>{{ st.n_fills }}</span></div>
         {% else %}
         <div><span>Sharpe (annualised)</span><span>{{ m.num(st.sharpe) }}</span></div>
         <div><span>Sortino</span><span>{{ m.num(st.sortino) }}</span></div>
@@ -150,9 +210,13 @@
     <div class="card tint"><div class="body" style="gap:6px;padding:20px 24px">
       <div style="display:flex;align-items:center;gap:8px">{{ m.icon("shield", 16, "var(--good)") }}<span class="small" style="font-weight:600">How this record is verified</span></div>
       <div class="stack" style="gap:0">
-        <div style="display:flex;gap:10px;padding:9px 0;font-size:14px;color:var(--text2)">{{ m.icon("check", 16, "var(--good)", 2) }}<span>Read-only key, scope re-checked every sync</span></div>
-        <div style="display:flex;gap:10px;padding:9px 0;font-size:14px;color:var(--text2)">{{ m.icon("check", 16, "var(--good)", 2) }}<span>{{ "{:,}".format(st.n_fills) }} fills and {{ "{:,}".format(st.n_settlements) }} settlements from {{ page.venue|capitalize }}</span></div>
-        <div style="display:flex;gap:10px;padding:9px 0;font-size:14px;color:var(--text2)">{{ m.icon("check" if page.reconciled else "minus", 16, "var(--good)" if page.reconciled else "var(--warn)", 2) }}<span>{% if page.reconciled %}Balance reconciled last night: {{ m.usd(st.equity) }} = {{ m.usd(st.equity) }}{% elif page.reconciled is none %}First balance reconciliation runs tonight{% else %}Last reconciliation diverged; page under review{% endif %}</span></div>
+        <div style="display:flex;gap:10px;padding:9px 0;font-size:14px;color:var(--text2)">{{ m.icon("check", 16, "var(--good)", 2) }}<span>{{ page.verification.proof if page.verification else "Read-only key, scope re-checked every sync" }}</span></div>
+        {% if v2 %}<div style="display:flex;gap:10px;padding:9px 0;font-size:14px;color:var(--text2)">{{ m.icon("check", 16, "var(--good)", 2) }}<span>{{ "{:,}".format(st.n_fills) }} fills from {{ page.venue_label }}, valued at daily closes</span></div>
+        {% else %}<div style="display:flex;gap:10px;padding:9px 0;font-size:14px;color:var(--text2)">{{ m.icon("check", 16, "var(--good)", 2) }}<span>{{ "{:,}".format(st.n_fills) }} fills and {{ "{:,}".format(st.n_settlements) }} settlements from {{ page.venue|capitalize }}</span></div>{% endif %}
+        <div style="display:flex;gap:10px;padding:9px 0;font-size:14px;color:var(--text2)">{{ m.icon("check" if page.reconciled else "minus", 16, "var(--good)" if page.reconciled else "var(--warn)", 2) }}<span>{% if page.reconciled and v2 and page.verification_tier == "daily_verified" %}Cash and holdings matched the latest end-of-day statement{% elif page.reconciled and v2 %}Balances reconciled last night{% elif page.reconciled %}Balance reconciled last night: {{ m.usd(st.equity) }} = {{ m.usd(st.equity) }}{% elif page.reconciled is none %}First balance reconciliation runs tonight{% else %}Last reconciliation diverged; page under review{% endif %}</span></div>
+        {% if v2 and st.broker_equity %}<div style="display:flex;gap:10px;padding:9px 0;font-size:14px;color:var(--text2)">{{ m.icon("check" if st.broker_equity.ok else "minus", 16, "var(--good)" if st.broker_equity.ok else "var(--warn)", 2) }}<span>{% if st.broker_equity.ok %}Broker-reported equity {{ st.broker_equity.venue }} matches the ledger {{ st.broker_equity.computed }}{% else %}Broker-reported equity {{ st.broker_equity.venue }} differs from the ledger {{ st.broker_equity.computed }}{% endif %}</span></div>{% endif %}
+        {% if page.verification and page.verification.note %}<div style="display:flex;gap:10px;padding:9px 0;font-size:14px;color:var(--text2)">{{ m.icon("minus", 16, "var(--warn)", 2) }}<span>{{ page.verification.note }}</span></div>{% endif %}
+        {% if page.activity_flags and page.activity_flags.count %}<div style="display:flex;gap:10px;padding:9px 0;font-size:14px;color:var(--text2)">{{ m.icon("minus", 16, "var(--warn)", 2) }}<span>{{ page.activity_flags.count }} unsupported {{ "activity" if page.activity_flags.count == 1 else "activities" }} skipped, not estimated ({% for label, n in page.activity_flags.by_reason %}{{ n }} {{ label }}{{ ", " if not loop.last }}{% endfor %})</span></div>{% endif %}
         <div style="display:flex;gap:10px;padding:9px 0;font-size:14px;color:var(--text2)">{{ m.icon("check" if not st.flags else "minus", 16, "var(--good)" if not st.flags else "var(--warn)", 2) }}<span>{{ "No behavioural flags" if not st.flags else "Behavioural flags raised" }}</span></div>
         <div style="display:flex;gap:10px;padding:9px 0;font-size:14px;color:var(--text2)">{{ m.icon("minus", 16, "var(--warn)", 2) }}<span>Creator's description is not verified</span></div>
       </div>
@@ -166,21 +230,34 @@
       {% endfor %}
     </div></div>
     {% endif %}
+    {% if v2 %}
+    <div class="stack" style="gap:4px">
+      <div class="spread" style="align-items:baseline;padding-bottom:8px;border-bottom:1px solid var(--line2)"><span class="label">Recent trades</span><span class="mono small muted">{{ page.recent_signals|length }} of {{ st.n_fills }}</span></div>
+      {% for s in page.recent_signals %}
+      <div class="srow">
+        <div class="stack" style="gap:3px;min-width:0"><span class="mono small tk">{{ s.label or s.ticker }} <span class="text2">{{ m.qty(s.qty) if s.qty is not none else "" }}</span></span><span class="mono muted" style="font-size:11px">{{ s.at[:16]|replace("T", " ") }} UTC{% if s.price is not none %} · @ {{ m.price(s.price_str or s.price) }}{% endif %}</span></div>
+        <span class="side {{ 'good' if s.action == 'buy' else 'bad' }}">{{ s.action }}</span>
+        <span class="mono small muted" style="text-align:right">{% if s.stake_fraction is not none %}{{ "%.1f"|format(s.stake_fraction * 100) }}%{% endif %}</span>
+      </div>
+      {% else %}<span class="muted small" style="padding:14px 0">No trades since verification began.</span>{% endfor %}
+      <span class="mono muted" style="font-size:11px;margin-top:10px;line-height:1.5">Size is shown as a share of the creator's equity before the fill, not in dollars.</span>
+    </div>
+    {% else %}
     <div class="stack" style="gap:4px">
       <div class="spread" style="align-items:baseline;padding-bottom:8px;border-bottom:1px solid var(--line2)"><span class="label">Recent settlements</span><span class="mono small muted">{{ page.recent_settlements|length }} of {{ st.n_settlements }}</span></div>
       {% for s in page.recent_settlements %}
       <div class="srow">
-        <div class="stack" style="gap:3px"><span class="mono small">{{ s.ticker }}</span><span class="mono muted" style="font-size:11px">settled {{ s.settled_at }} · result {{ s.result }}</span></div>
+        <div class="stack" style="gap:3px;min-width:0"><span class="mono small tk">{{ s.ticker }}</span><span class="mono muted" style="font-size:11px">×{{ "%g"|format(s.count) }} · settled {{ s.settled_at }} · result {{ s.result }}</span></div>
         <span class="side {{ 'good' if s.side == 'yes' else 'bad' }}">{{ s.side }}</span>
-        <span class="mono small text2" style="text-align:right">×{{ "%g"|format(s.count) }}</span>
         <span class="mono {{ 'good' if s.payout > 0 else 'muted' }}" style="text-align:right;font-size:14px">{{ m.usd(s.payout) }}</span>
       </div>
       {% else %}<span class="muted small" style="padding:14px 0">No settlements yet.</span>{% endfor %}
       <span class="mono muted" style="font-size:11px;margin-top:10px;line-height:1.5">Payout is the venue's settlement revenue; cost basis is in the fills and already reflected in the curve.</span>
     </div>
+    {% endif %}
   </div>
 </div>
 {% endif %}
 
-<p class="mono small muted" style="line-height:1.6">Every number on this page is computed by Koine from venue data pulled with a read-only key. Nothing here was entered by the creator. Past performance is not a guarantee of future results{% if st %}; a {{ st.track_days }}-day record is short{% endif %}. <a href="/verification" class="text2" style="text-decoration:underline">What this page proves and what it does not.</a></p>
+<p class="mono small muted" style="line-height:1.6">Every number on this page is computed by Koine from venue data{% if not page.is_asset %} pulled with a read-only key{% endif %}. Nothing here was entered by the creator. Past performance is not a guarantee of future results{% if st %}; a {{ st.track_days }}-day record is short{% endif %}. <a href="/verification" class="text2" style="text-decoration:underline">What this page proves and what it does not.</a>{% if st and st.price_sources and "coingecko" in st.price_sources %} Some prices are provided by <a href="https://www.coingecko.com/" rel="noopener" class="text2" style="text-decoration:underline">CoinGecko</a>.{% endif %}</p>
 {% endblock %}

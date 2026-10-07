@@ -1,8 +1,19 @@
 # Security and privacy: what we can see, and what we can never do
 
-This is the plain-English version of how Koine handles your Kalshi
-connection. It is deliberately short. If anything here stops being true, this
-page changes first.
+This is the plain-English version of how Koine handles your venue
+connections. The first sections use Kalshi, the first venue, as the example;
+the sections further down say what differs for Kraken, Hyperliquid, Alpaca,
+SnapTrade and the rest. It is deliberately short. If anything here stops being
+true, this page changes first.
+
+## Following a strategy never touches your money
+
+Tailing on Koine is **paper only**. A paper tail copies a creator's new
+trades into a simulated allocation, priced at the venue's quotes and charged
+the venue's fees, so you can see what following would have made. Koine never
+places an order in anyone's account, never asks a follower for any venue
+credential, and refuses any key or grant that can trade. There is no setting
+that turns this into live trading.
 
 ## What you give us
 
@@ -34,13 +45,13 @@ list. We poll these every few minutes and once nightly for reconciliation.
 
 ## How the key is stored
 
-- The private key is encrypted at rest with AES (Fernet) using a server-side
-  master key held only in the server's environment, never in the code
-  repository, never in logs, never in any API response.
-- This is not a hardware security module. A full server compromise that
-  also captured the master key could decrypt stored keys. What an attacker
-  could then do is read your trading history: the same read-only limit
-  applies to them.
+- The key is encrypted at rest with its own data key, and that data key is
+  wrapped by a master key held in a cloud key management service (see
+  "Envelope encryption" below). It is never in the code repository, never
+  in logs, never in any API response.
+- A full compromise that also gained use of the master key could decrypt
+  stored keys. What an attacker could then do is read your trading history:
+  the same read-only limit applies to them.
 - **Disconnecting erases the encrypted key immediately.** Your already-
   ingested fills and settlements remain, because the track record was built
   on them and the ledger is append-only, but nothing can be fetched again.
@@ -49,18 +60,23 @@ list. We poll these every few minutes and once nightly for reconciliation.
 
 - Your **display name** (you choose it), your strategy name, tags, and the
   description you write (labeled *unverified*).
-- Platform-computed statistics and charts derived from your fills and
-  settlements.
-- **Never** your email, your key id, your balance in dollars (only returns
-  and drawdowns as percentages, and realized P&L), or individual fills.
+- Platform-computed statistics and charts derived from your fills,
+  settlements and balances: returns, drawdowns, realized P&L and the equity
+  curve.
+- Your most recent trades and settlements (the latest few on the page, and
+  each new fill as a signal to followers, sized as a share of your equity),
+  your current holdings and exposure on crypto and stock venues, and the
+  balance that last night's reconciliation matched.
+- **Never** your email, your credentials or key id, or your account number.
 
 You can unlist the public page at any time from the dashboard.
 
 ## What "verified" means, exactly
 
-Every number on your page is computed by us from data pulled from Kalshi.
-Nightly we recompute your cash balance from stored fills and settlements and
-compare it with the balance Kalshi reports. If they disagree by more than
+Every number on your page is computed by us from data pulled from the
+venue. Nightly we recompute your balances from stored fills and settlements
+and compare them with the balances the venue reports (venues that report end
+of day only are checked against the latest daily statement). If they disagree by more than
 0.1%, the page is hidden until a human looks. Details: [methodology](/methodology).
 
 ## Reporting a problem
@@ -291,3 +307,113 @@ sent this request: there the permission list Alpaca returns with the grant
 is the proof, and a grant that comes back without one is marked unverified
 rather than read-only. A grant refused at any step is revoked where the
 venue allows it.
+
+<!-- wave2:p8-connect -->
+
+## Consent before every connection
+
+Before any venue is connected, Koine shows a consent screen: what Koine will
+read, that the access is read-only, what can become public on your strategy
+page, and how to revoke. The text is built from the venue's terms position
+(`docs/venues/<venue>.md`) and its profile, and every version is kept.
+
+Accepting it is recorded, not assumed. The connect form sends the SHA-256 of
+the exact text you were shown; the server recomputes the current text and
+refuses the connection (nothing is stored, the venue is never contacted) if
+the hash is missing or does not match, for example because the text changed
+after the page loaded. The same rule applies to the JSON API, to OAuth
+(the hash travels in the signed state and is checked again on return) and to
+SnapTrade (recorded before you are sent to SnapTrade's page). Each acceptance
+is an append-only row naming you, the venue, the account, the text's hash and
+version, the time, your IP address and browser, and it is written in the same
+transaction that creates the account. The texts themselves are stored once
+each, append-only, so any recorded consent can be matched to the words shown.
+
+## Proving a wallet address is yours
+
+Address-based venues need no key, so anyone could type any address. Until
+ownership is proven the strategy page stays hidden. For Hyperliquid you sign
+a short Koine message with the wallet (EIP-191 `personal_sign`): the page can
+ask a browser wallet to sign it, or you can sign it anywhere and paste the
+signature. The message includes a one-time code issued for that account
+only, and the server always rebuilds the message from the code it stored, so
+a signature made for a different code or account is refused. Signing is not a
+transaction and Koine never asks for a seed phrase or private key.
+
+## SnapTrade connections
+
+For brokers reached through SnapTrade, Koine registers a separate SnapTrade
+user for each connection and keeps its user secret encrypted in the same
+vault as every other credential. You link your broker on SnapTrade's own page
+with a read-only connection; Koine never sees your brokerage password. The
+connection is not active until you come back and pick the account; an
+unfinished one is dropped after a day, and disconnecting (or abandoning) it
+erases the secret and deletes the SnapTrade user.
+
+<!-- wave2:account-security -->
+## Replacing a key
+
+You can replace the read-only key on a connection without losing its
+history. Use **Replace key** on the dashboard (or `POST
+/venues/{id}/rotate`). This works for a working connection, one in error,
+and one we **suspended** because its key gained trading permission.
+
+- It needs the same checks as connecting a key: a confirmed email,
+  two-factor, a code confirmed in the last 10 minutes, and the same rate
+  limit (10 per hour, shared with connect and claim).
+- The new key is tested exactly like a new connection's. Koine authenticates
+  with it, then proves it is read-only. A key that can trade or withdraw is
+  refused: the refusal is recorded in the audit log and **nothing changes**.
+  A suspended connection stays suspended.
+- When the new key is accepted, the old key is erased at once. Only the new
+  key's ciphertext is kept. The connection becomes active, a sync starts
+  immediately, and the change is recorded in the audit log (the read-only
+  check, then the replacement). You get an email.
+- Your track record continues from the **same starting balance**: replacing
+  a key never resets it. A one-off balance check runs right after the sync.
+  If the new key belongs to a different account, the balances will not
+  match, and the strategy is held for review instead of quietly starting a
+  new record.
+- Connections that have no pasted key work differently. OAuth (Alpaca),
+  aggregators (SnapTrade) and public addresses are reconnected from the
+  connect page instead.
+
+## Changing your email address
+
+Change it from the security page (or `POST /account/email`). You need your
+current password and a code confirmed in the last 10 minutes.
+
+- We email a confirmation link to the **new** address. It works once and
+  lasts 1 hour, and we store only its hash. The address changes only when
+  the link is opened.
+- Your **current** address is told about the request straight away, with
+  the new address partly masked. If it was not you, change your password
+  and sign out everywhere: a password change or reset, or signing out
+  everywhere, cancels any pending link.
+- The answer is the same whether or not the new address already has a Koine
+  account, so the form cannot be used to find out who has one. An address
+  that is taken gets a short notice instead of a link. When the link is
+  opened, we check again that no one else has taken the address.
+- When the change completes, the new address counts as confirmed, every
+  other session is signed out, and every outstanding link is cancelled
+  (including password resets sent to the old address). The change is
+  recorded in the audit log, and the old address gets one last email saying
+  the change happened.
+- Requests are limited to 5 per hour per account. Mail to any one address
+  is limited to 3 per hour.
+
+## Your activity
+
+The security page lists your last 50 security events, newest first:
+
+- what you did: signing in, two-factor changes, password and email changes,
+  connecting, replacing or disconnecting keys;
+- everything done to your connections, including **every time Koine
+  decrypted one of your keys and why** (sync, reconcile, the nightly
+  read-only re-check, token refresh). Background jobs show as "Koine worker".
+  Syncs decrypt every few minutes, so only the 10 newest decrypts are shown,
+  in time order with everything else; they never push a sign-in or a
+  password change off the list.
+
+Each row shows only the event, its purpose, the venue, the time and the IP
+address. You never see another user's events, and no row shows a secret.

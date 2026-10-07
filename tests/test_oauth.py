@@ -15,7 +15,7 @@ from alphamarket import credentials, oauth
 from alphamarket.config import get_settings
 from alphamarket.models import AnchorBalance, VenueAccount, VenueAccountStatus
 from alphamarket.oauth import OAuthProvider
-from authutil import secure_account
+from authutil import consent, secure_account
 
 PAPER = "https://paper-api.alpaca.markets"
 TOKEN_URL = "https://api.alpaca.markets/oauth/token"
@@ -211,7 +211,11 @@ def test_unknown_or_unconfigured_venue(client, user):
 
 
 def _start(client) -> str:
-    resp = client.get("/oauth/alpaca/start?strategy_name=Dividend%20growth", follow_redirects=False)
+    resp = client.get(
+        "/oauth/alpaca/start",
+        params={"strategy_name": "Dividend growth", "consent_sha256": consent("alpaca")},
+        follow_redirects=False,
+    )
     assert resp.status_code == 302
     q = parse_qs(urlsplit(resp.headers["location"]).query)
     assert q["redirect_uri"] == ["http://testserver/oauth/alpaca/callback"]

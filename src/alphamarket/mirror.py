@@ -368,7 +368,29 @@ def settle_pending(db: Session, allocation: Allocation) -> int:
 
 
 def process_allocation(db: Session, allocation: Allocation) -> tuple[int, int]:
-    """One engine pass: mirror new signals, then settle resolved markets."""
+    """One engine pass: mirror new signals, then settle resolved markets.
+    wave2: allocations of asset strategies go to paper.py."""
+    if is_asset_allocation(db, allocation):
+        from alphamarket.paper import process_asset_allocation
+
+        return process_asset_allocation(db, allocation)
     mirrored = mirror_pending(db, allocation)
     settled = settle_pending(db, allocation)
     return mirrored, settled
+
+
+def venue_of(db: Session, allocation: Allocation) -> tuple[str, str] | None:
+    """(venue, venue_env) of the strategy an allocation tails."""
+    from alphamarket.models import Strategy, VenueAccount
+
+    strategy = db.get(Strategy, allocation.strategy_id)
+    account = db.get(VenueAccount, strategy.venue_account_id) if strategy else None
+    return (account.venue, account.venue_env) if account is not None else None
+
+
+def is_asset_allocation(db: Session, allocation: Allocation) -> bool:
+    """wave2: does this allocation tail an ASSET strategy (paper.py)?"""
+    from alphamarket.ingest import is_asset_venue
+
+    venue = venue_of(db, allocation)
+    return venue is not None and is_asset_venue(venue[0])

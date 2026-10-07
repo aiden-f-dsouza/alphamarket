@@ -28,7 +28,16 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from alphamarket import credentials, email, redaction, scopecheck
+from alphamarket import (
+    aggregator_jobs,
+    credentials,
+    email,
+    housekeeping,
+    oauth_jobs,
+    prices,
+    redaction,
+    scopecheck,
+)
 from alphamarket.analytics import compute_strategy_stats, promote_incubating
 from alphamarket.config import get_settings
 from alphamarket.connectors.base import BudgetExhausted, InstrumentKind, RateLimited
@@ -48,8 +57,8 @@ from alphamarket.jobs import (
     aware,
     enqueue,
     enqueue_due_syncs,
+    enqueue_fresh,
     get_schedule,
-    prune_finished,
     register_handler,
     register_page_runner,
     run_page_streams,
@@ -107,7 +116,11 @@ def handle_sync(ctx: JobContext) -> None:
         db.commit()
     else:
         _sync_binary(ctx)
-    enqueue(db, JobKind.SIGNALS, account_id=account.id, priority=sync_priority(db, account.id))
+    # enqueue_fresh, not enqueue: a signals job already RUNNING (queued by a
+    # streamed fill, P7) may have read the fills before this sync committed;
+    # it gets a follow-up instead of swallowing this sync's new fills.
+    priority = sync_priority(db, account.id)
+    enqueue_fresh(db, JobKind.SIGNALS, account_id=account.id, priority=priority)
     db.commit()
 
 
@@ -134,6 +147,11 @@ def handle_backfill(ctx: JobContext) -> None:
     run_page_streams(ctx, incremental=False)
     sched = get_schedule(ctx.db, account.id)
     sched.backfill_done_at = ctx.clock()
+    # wave2: post-anchor fills imported by the backfill become signals too
+    # (the engine skips stale ones, plan D5).
+    enqueue(
+        ctx.db, JobKind.SIGNALS, account_id=account.id, priority=sync_priority(ctx.db, account.id)
+    )
     ctx.db.commit()
 
 
@@ -143,7 +161,7 @@ def handle_reconcile(ctx: JobContext) -> None:
     assert account is not None
     if not reconcilable(account):
         return  # fills-only tier: nothing to compare against
-    snap = reconcile_account(ctx.db, account)
+    snap = reconcile_account(ctx.db, account, limiter=ctx.limiter)
     logger.info(
         "reconciled account %s: divergence %d micros (tolerance %d) -> %s",
         account.id,
@@ -165,7 +183,7 @@ def handle_signals(ctx: JobContext) -> None:
         strategies = list(db.scalars(select(Strategy)).all())
     for strategy in strategies:
         try:
-            emit_signals(db, strategy)
+            emit_signals(db, strategy, limiter=ctx.limiter)
         except Exception:
             db.rollback()
             logger.exception("signal emission failed for strategy %s", strategy.id)
@@ -248,6 +266,14 @@ def handle_prices(ctx: JobContext) -> None:
         except Exception:
             db.rollback()
             logger.exception("price refresh failed for %s %s", venue, venue_env)
+    # wave2: quotes and funding for instruments in open paper asset books.
+    try:
+        n = prices.refresh_asset_marks(db, limiter)
+        if n:
+            logger.info("refreshed %d asset marks", n)
+    except Exception:
+        db.rollback()
+        logger.exception("asset mark refresh failed")
 
 
 @register_handler(JobKind.STATS)
@@ -256,8 +282,9 @@ def handle_stats(ctx: JobContext) -> None:
     incubation promotion, and one valuation snapshot per allocation."""
     db = ctx.db
     created = aware(ctx.job.created_at)
-    if active_jobs(db, JobKind.RECONCILE) and ctx.clock() - created < STATS_BARRIER_MAX:
-        raise Defer(STATS_BARRIER_POLL_SECONDS, "waiting for tonight's reconcile jobs")
+    waiting = active_jobs(db, JobKind.RECONCILE) or active_jobs(db, JobKind.PRICES_DAILY)
+    if waiting and ctx.clock() - created < STATS_BARRIER_MAX:
+        raise Defer(STATS_BARRIER_POLL_SECONDS, "waiting for tonight's reconciles and closes")
     for strategy in db.scalars(select(Strategy)).all():
         try:
             compute_strategy_stats(db, strategy)
@@ -278,7 +305,7 @@ def handle_scope_recheck(ctx: JobContext) -> None:
     """Nightly (P3): prove every active key is still read-only; a writable one
     is erased and its account suspended (scopecheck.py). Queued ahead of the
     reconciles so a suspended key is never used for them."""
-    logger.info("scope re-check: %s", scopecheck.recheck_all(ctx.db))
+    logger.info("scope re-check: %s", scopecheck.recheck_all(ctx.db, ctx.limiter))
 
 
 @register_handler(JobKind.KEY_ROTATE)
@@ -286,6 +313,52 @@ def handle_key_rotate(ctx: JobContext) -> None:
     """Re-seal credentials under the newest vault key version (P3), in batches."""
     batch = int((ctx.job.payload or {}).get("batch_size", 100))
     logger.info("re-sealed %d credentials", credentials.rotate_all(ctx.db, batch_size=batch))
+
+
+@register_handler(JobKind.PRICES_DAILY)
+def handle_prices_daily(ctx: JobContext) -> None:
+    """Nightly per pricing venue (wave2): daily closes for held assets,
+    perp margin tiers, corporate actions (prices.run_daily)."""
+    prices.run_daily(ctx)
+
+
+@register_handler(JobKind.HOUSEKEEPING)
+def handle_housekeeping(ctx: JobContext) -> None:
+    """Nightly (wave2): prune counters, dead sessions and tokens, old quotes,
+    abandoned pending connects (housekeeping.run)."""
+    logger.info("housekeeping: %s", housekeeping.run(ctx))
+
+
+@register_handler(JobKind.OAUTH_REFRESH)
+def handle_oauth_refresh(ctx: JobContext) -> None:
+    """Refresh one account's OAuth access token before it expires (wave2)."""
+    oauth_jobs.run(ctx)
+
+
+@register_handler(JobKind.AGGREGATOR_DELETE_USER)
+def handle_aggregator_delete_user(ctx: JobContext) -> None:
+    """Retry a failed deleteUser at the aggregator (SnapTrade) for an account
+    that is already disconnected or suspended, until it succeeds ("user not
+    found" counts) or dead-letters (aggregator_jobs.run)."""
+    aggregator_jobs.run(ctx)
+
+
+def pricing_venues_in_use(db: Session) -> list[str]:
+    """wave2: venues whose market data prices at least one active asset
+    account (profile.pricing_venue, else the venue itself)."""
+    venues: set[str] = set()
+    for (venue,) in db.execute(
+        select(VenueAccount.venue)
+        .where(VenueAccount.status.not_in(INACTIVE_ACCOUNT_STATUSES))
+        .distinct()
+    ).all():
+        try:
+            profile = get_profile(venue)
+        except ValueError:  # a venue no longer registered must not abort the tick
+            continue
+        if profile.instrument is not InstrumentKind.BINARY:
+            venues.add(profile.pricing_venue or venue)
+    return sorted(venues)
 
 
 # ---- ticks (enqueue only) ---------------------------------------------------------
@@ -350,10 +423,26 @@ def tick_nightly(session_factory: sessionmaker = SessionLocal) -> None:
                     now=now,
                 )
         enqueue(db, JobKind.PRICES, now=now)
+        for venue in pricing_venues_in_use(db):  # wave2: before stats (barrier)
+            enqueue(
+                db,
+                JobKind.PRICES_DAILY,
+                payload={"venue": venue},
+                dedupe_key=f"prices_daily:{venue}:{day}",
+                once=True,
+                now=now,
+            )
         enqueue(db, JobKind.STATS, dedupe_key=f"stats:{day}", once=True, now=now)
+        enqueue(db, JobKind.HOUSEKEEPING, dedupe_key=f"housekeeping:{day}", once=True, now=now)
         db.commit()
-        pruned = prune_finished(db, now=now)
-    logger.info("nightly jobs queued; pruned %d finished jobs", pruned)
+    logger.info("nightly jobs queued (finished jobs are pruned by housekeeping)")
+
+
+def tick_oauth(session_factory: sessionmaker = SessionLocal) -> None:
+    """wave2: queue OAUTH_REFRESH for tokens about to expire (oauth_jobs.tick)."""
+    n = oauth_jobs.tick(session_factory)
+    if n:
+        logger.info("queued %d oauth refresh jobs", n)
 
 
 def sync_now(db: Session, account: VenueAccount) -> int | None:
@@ -377,6 +466,7 @@ def main() -> None:
         tick_prices, "interval", seconds=settings.price_refresh_interval_seconds, max_instances=1
     )
     scheduler.add_job(tick_nightly, "cron", hour=4, minute=15, max_instances=1)
+    scheduler.add_job(tick_oauth, "interval", minutes=15, max_instances=1)  # wave2
     tick_syncs()  # queue due work immediately at startup
     scheduler.start()
     stopping = False

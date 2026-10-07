@@ -400,6 +400,20 @@ audit trail of your own keys).
 
 ---
 
+## 4b. Decisions made in wave 2 (2026-10-01)
+
+| # | Decision | Why |
+|---|---|---|
+| E8 | Asset signals extend `signals` (nullable binary columns, `asset_fill_id`, CHECK one source) | One cursor, feed and allocation flow for every venue |
+| E9 | The quote is captured once at signal emission and copied onto the signal | Every follower fills at the same re-derivable price |
+| E10 | Fills more than `max_copy_lag_seconds` (6 h; 3 d daily venues) after the fact are not copied | A follower could not have traded near that price |
+| E11 | Creator equity at a fill = holdings before it at the last complete close | No intraday price is assumed; same rule as the daily series |
+| E12 | Followers keep their own leg ledger (`mirror_ledger_entries`) valued by `valuation.py` | Creators and followers are valued by one code path |
+| E13 | Perp followers mirror leverage via notional and are liquidated on cross margin at a fresh mark | Paper perp results would otherwise be fiction |
+| E14 | Asset stats use the flow-adjusted TWR index for return, drawdown and ratios | Deposits are never gains |
+| E15 | Broker equity is checked with a tolerance and only flags | Close vs live mark timing legitimately differs |
+| E16 | Consent text hash on every connect path; aggregator users are registered by Koine, one per connection | Invariant 10; clean deletion |
+
 ## 5. What Aiden needs to set up outside the repo
 
 Ordered by when it blocks work. Costs are approximate and should be checked at signup.
@@ -512,21 +526,150 @@ use unconfirmed), **SnapTrade** (re-packaging end-user data). Open without
 approval: Kalshi*, Polymarket, Hyperliquid, Binance.US. (*Kalshi's written
 permission is still the older open item.)
 
-Wave 2 (next):
+Wave 2 (done 2026-10-01; plan with decisions D1-D21 in the session plan,
+summarised as E8-E16 in section 4b below). Scaffold 54fac47 + review fixes
+d453676 (migration 0013, contracts, dispatch hooks; Fable review: 6
+must-fixes); 8 workstreams built and reviewed on `wip/w2-<label>` and merged
+in plan order; integration commits after the merges. 1006 tests pass
+(SQLite + Postgres), ruff clean, one migration head (0014), the pinned binary
+tests (test_mirror, test_stats, test_ledger_parity, test_analytics,
+test_valuation) unchanged since the scaffold. `tests/test_wave2_e2e_pg.py`
+drives the real job runner end to end (Kraken spot copy + stats v2;
+Hyperliquid perp copy, funding and liquidation).
 
-- [ ] P6 paper copy v2: signals from `asset_fills`, sizing by equity ratio,
-      fills at the quote at `observed_at` (E5), fee models per profile,
-      perp funding + liquidation, splits/dividends for followers
-- [ ] Wire valuation into stats/analytics; a `prices_daily` job per venue
-      (`pricing_symbol`), CoinGecko fallback; reconcile broker equity
-- [ ] P8 product surface: Hyperliquid sign-message claim UI, SnapTrade
-      portal connect flow, multi-asset strategy and portfolio pages,
-      marketplace venue/asset filters, "importing history" state, surfacing
-      Alpaca "unsupported activity" flags
-- [ ] OAuth refresh job wiring (`oauth_refresh`), credential rotate
-      endpoint (TOTP-gated) for suspended accounts, email-change flow
-- [ ] Housekeeping jobs: prune rate-limit counters, expired sessions/tokens
-- [ ] P7 streaming (after P6)
+- [x] P6 paper copy v2: signals v2 from `asset_fills` with the quote captured
+      at observed_at (`paper_signals.py`), sizing by equity ratio, fill at
+      ask/bid (E5) else creator price + 50 bps, fee models per profile
+      (`paper.py` over the `paper_book.py` ledger), perp funding,
+      cross-margin liquidation, splits and dividends (`paper_lifecycle.py`)
+- [x] Valuation wired into stats (`analytics_v2.py`, TWR-based), daily
+      closes per pricing venue + CoinGecko fallback (`prices.py`,
+      `connectors/coingecko.py`), broker equity check (flag only, live marks)
+- [x] P8: consent screens (invariant 10), per-credential connect forms,
+      Hyperliquid signed claim (`static/claim.js` + pasted signature),
+      SnapTrade portal with PENDING accounts, multi-asset strategy pages,
+      marketplace venue/asset filters, real `/portfolio`, dashboard importing
+      / flags / finish / replace-key states, unsupported-activity flags
+- [x] Key rotation (`rotate.py`), OAuth refresh tick + job, email change,
+      security-page audit trail, housekeeping
+- [x] P7 streaming (wave 3, 2026-10-04): `stream.py` process, leases in
+      `jobs` (no migration), Hyperliquid userFills in fills mode, Kraken WS v2
+      executions and Coinbase `user` in nudge mode (queue a sync), Hyperliquid
+      10-users/IP slot leases, `jobs.enqueue_fresh` coalescing, optional
+      `stream` group in fly.toml. Alpaca `trade_updates` is a stub
+
+Wave 2 follow-ups (known, not blocking):
+
+- [x] A poison signal (one that raises in the engine) blocks its allocation's
+      pass, including liquidation; isolate per signal with a savepoint
+      (83e0bcc: savepoint per signal, `engine_error` skip; lifecycle stages
+      isolated too; a lost connection still fails the pass)
+- [x] Paper fills are stamped at observed_at; a SIGNALS backlog could mirror a
+      signal after a lifecycle event booked later in time. Clamp or order
+      (83e0bcc: clamped to the newest booked event; a late equity signal
+      that would cross a split's ex-date is skipped as `late_signal`)
+- [x] Funding rows without a mark and no quote/close are skipped for good
+      behind the funding watermark (Hyperliquid fundingHistory has no mark)
+      (83e0bcc: unbooked rows retried for 7 days; a flat perp stops the
+      scan at its last fill)
+- [x] paper_signals recomputes equity per instant over all legs; switch to
+      one forward sweep before high-frequency creators arrive
+      (dee0235: `valuation.LedgerSweep`, O((N + P) log(N + P) + K A log P)
+      instead of O(K (N + P)); seeded equivalence tests against the
+      per-instant functions)
+- [x] Hyperliquid collateral variants (USDT0, USDH) are not valued at par
+      (83e0bcc: `registry.CASH_AT_PAR`, which also fixes Kraken's held and
+      earning stablecoin codes, USDC.M etc., that valuation counted as
+      unpriced)
+- [x] SnapTrade: retry deleteUser when it fails; the picker page is not
+      rate limited and its calls bypass the outbound limiter (a08b33f:
+      `aggregator_jobs.py` AGGREGATOR_DELETE_USER job queued in the
+      disconnect's transaction, 12 attempts then dead letter + audit;
+      `snaptrade_picker_user` 30/10 min; `venue_limits.call_venue` fails
+      fast with "busy" for web calls)
+- [x] SnapTrade finish POST (prove_read_only, balances) still calls the
+      aggregator outside the outbound limiter (wave 3: connect, rotate and
+      claim run their venue calls as one unit through `venues.web_venue_call`;
+      busy is a 503 + Retry-After before any write)
+- [x] Paper symbol changes are only logged (no flag for followers)
+      (83e0bcc: notice on /portfolio for held stocks; converting the
+      position is still not modelled)
+
+New [VERIFY] items from wave 2: SEC Section 31 FY2026 rate and FINRA TAF
+rate/cap/rounding (`registry.US_EQUITY_REGULATORY_FEES`); Hyperliquid
+maintenance margin = 1/(2 x maxLeverage) per tier, liquidation fee (none
+modelled), funding mark and the HIP-3 collateral tokens valued at par (USDT0,
+USDH); CoinGecko endpoint, demo limits, history window,
+attribution and every curated coin id; Alpaca corporate-actions range and
+symbol limits; SnapTrade customRedirect, deleteUser (404/410 = already deleted) and
+per-user billing;
+real-wallet personal_sign; legal review of the consent texts; whether the
+judgement-call defaults stand (50 bps fallback penalty, broker equity
+tolerance max($1, 0.5%), one SnapTrade user per connection, 4-day close
+carry for equity venues, unpriced assets excluded from creator equity,
+7-day retry window for funding rows without a mark).
+
+Wave 3 (2026-10-04): demoable product. Four parallel workstreams on
+`wip/w3-<label>`, merged into `platform-v2`.
+
+- [x] Copy realigned with settled decisions: tails are paper only (invariant
+      8), pricing is flat subscriptions and flat creator royalties (no
+      performance or high-water-mark fees), scope is prediction markets,
+      crypto and US stocks. `tests/test_demo_pages.py` pins the old phrases
+      out. Layout fixes at 1280 px and 390 px
+- [x] Static demo (`demo.py`) gains Kraken, Coinbase, Hyperliquid perps,
+      Alpaca and IBKR sample strategies rendered through the asset page path
+- [x] P7 streaming and the SnapTrade limiter follow-up (above)
+- [x] Seeded demo (`scripts/seed_demo.py`, docs/demo.md): synthetic venues
+      behind the registry seam, everything after the connector is the real
+      pipeline; `users.is_demo` (0015) hides seeded rows outside DEMO_MODE and
+      preflight refuses them
+- [x] Paper tails from the web pages: tail card and `/s/{slug}/tail` form for
+      real strategies (`tail_terms.py` shared with the samples), stop from
+      /portfolio, follow/unfollow forms, login `next` (`pages.safe_next`),
+      number formatting (`numfmt.py`)
+- [x] Portfolio chart is paper P&L and its drawdown is flow-adjusted (a new
+      tail is not a gain); instruments are labelled by canonical codes
+      (`public.instrument_label`: BTC/USD, BTC-PERP)
+
+- [x] Paper engine performance (w3-perf, reviewed by Fable: no must-fix):
+      follower book checkpoints (0016, a verified cache), bounded lifecycle
+      and signals passes. 20 allocations x 6 months of hourly funding: warm
+      MIRROR pass 3.7 s -> 0.46 s, flat in history. Review follow-ups landed:
+      boundary tests (funding at a fill's instant, a leg at the midnight cut),
+      checkpoint savepoint flushes the pass's rows first
+
+Wave 3 follow-ups and open decisions:
+
+- [ ] Venue calls still outside the outbound limiter from web requests:
+      binary `POST /venues/{id}/sync` and reconcile (inline paged calls;
+      needs a busy-vs-ERROR decision), `oauth.callback` provider calls,
+      Hyperliquid `verify_claim` swallowing RateLimited (a 429 claims
+      "could not reach" instead of busy)
+- [ ] Kraken's profile charges its 1 token/s IP bucket on private calls, so a
+      Kraken connect or rotate sleeps ~5 s in the request and two quick
+      rotations 503. Revisit before the Kraken approval lands
+- [ ] Kraken streaming needs the key's optional "WebSocket interface"
+      permission: decide whether the connect/consent text asks for it
+      (product call); keys without it stay polled
+- [ ] P7 [VERIFY]: Kraken and Coinbase frame shapes (docs examples),
+      Kraken `exec_id` vs REST trade id and WS-to-Ledgers delay, Coinbase
+      View-only key on `user`, Alpaca `trade_updates` on a no-trading-scope
+      grant, Hyperliquid cap error text; measure p50 copy lag (< 30 s target)
+- [ ] Static binary sample pages: headline worst drawdown does not match the
+      drawn curve (sample numbers predate the chart generator)
+- [ ] Drawdown stop on crypto/stock paper tails stops copying but keeps the
+      positions open, so a stopped tail keeps moving with the market (the
+      seeded investor's stopped alt-rotation tail shows +41.7%). Proposed:
+      close every position at the bid at the stop, after fees (Aiden to
+      confirm; prediction markets keep running to settlement)
+- [ ] Still linear per pass: `prices._open_instruments` (global sum each
+      prices tick) and `analytics_v2`'s full `account_inputs` (daily series)
+- [ ] `single_asset_concentration` flags a book that is mostly a broad-market
+      ETF (VTI); consider treating index funds as diversified
+- [ ] `docs/security.md` "What is public" now matches the pages (recent
+      trades, holdings and reconciled balance in dollars are shown); confirm
+      that is the intended disclosure
 
 Needs the founder / outside the repo:
 

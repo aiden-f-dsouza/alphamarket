@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from alphamarket.ingest import is_asset_venue
 from alphamarket.marketdata import latest_marks
 from alphamarket.models import Fill, Settlement, Strategy, StrategyStats, VenueAccount
 from alphamarket.stats import compute_stats, mark_positions
@@ -18,6 +19,19 @@ logger = logging.getLogger(__name__)
 
 
 def compute_strategy_stats(
+    db: Session, strategy: Strategy, as_of: datetime | None = None
+) -> StrategyStats:
+    """wave2: asset venues go to analytics_v2 (ledger v2 + valuation.py);
+    binary venues keep compute_binary_stats, unchanged."""
+    account = db.get(VenueAccount, strategy.venue_account_id)
+    if account is not None and is_asset_venue(account.venue):
+        from alphamarket.analytics_v2 import compute_asset_stats
+
+        return compute_asset_stats(db, strategy, as_of)
+    return compute_binary_stats(db, strategy, as_of)
+
+
+def compute_binary_stats(
     db: Session, strategy: Strategy, as_of: datetime | None = None
 ) -> StrategyStats:
     account = db.get(VenueAccount, strategy.venue_account_id)

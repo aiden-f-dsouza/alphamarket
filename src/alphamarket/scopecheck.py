@@ -18,19 +18,32 @@ from sqlalchemy.orm import Session
 
 from alphamarket import alerts, audit, credentials
 from alphamarket.audit import AuditAction
-from alphamarket.connectors.base import ReadOnlyEvidence, ReadOnlyProof, VenueConnector
+from alphamarket.connectors.base import (
+    RateLimited,
+    ReadOnlyEvidence,
+    ReadOnlyProof,
+    VenueConnector,
+)
 from alphamarket.ingest import connector_for
 from alphamarket.models import VenueAccount, VenueAccountStatus
+from alphamarket.venue_limits import VenueBusy, VenueLimiter, rate_limit_from_http
 
 logger = logging.getLogger(__name__)
 
 RECHECK_STATUSES = (VenueAccountStatus.ACTIVE, VenueAccountStatus.ERROR)
 
 
-def prove(connector: VenueConnector) -> ReadOnlyEvidence:
+def prove(connector: VenueConnector, *, raise_limits: bool = False) -> ReadOnlyEvidence:
+    """`raise_limits` is set by web requests (venues.py): a refusal by the outbound
+    limiter (VenueBusy) or a 429 from the venue is not "undetermined", it is
+    "busy, try again", so it propagates to venue_limits.call_venue."""
     try:
         return connector.prove_read_only()
+    except VenueBusy:
+        raise  # only a web request's throttle raises it; never an undetermined pass
     except Exception as exc:  # network, parse: undetermined, never a pass
+        if raise_limits and (isinstance(exc, RateLimited) or rate_limit_from_http(exc)):
+            raise
         return ReadOnlyEvidence(
             method=ReadOnlyProof.NONE,
             read_only=None,
@@ -50,7 +63,9 @@ def apply_evidence(account: VenueAccount, evidence: ReadOnlyEvidence) -> None:
         account.scope_checked_at = evidence.checked_at
 
 
-def recheck_account(db: Session, account: VenueAccount) -> ReadOnlyEvidence:
+def recheck_account(
+    db: Session, account: VenueAccount, limiter: VenueLimiter | None = None
+) -> ReadOnlyEvidence:
     connector = connector_for(account, db, purpose="scope_recheck")
     evidence = prove(connector)
     apply_evidence(account, evidence)
@@ -62,12 +77,22 @@ def recheck_account(db: Session, account: VenueAccount) -> ReadOnlyEvidence:
         details={"trigger": "nightly", "venue": account.venue, **evidence_json(evidence)},
     )
     if evidence.read_only is False:
-        suspend(db, account, evidence)
+        suspend(db, account, evidence, limiter=limiter)
     db.commit()
     return evidence
 
 
-def suspend(db: Session, account: VenueAccount, evidence: ReadOnlyEvidence) -> None:
+def suspend(
+    db: Session,
+    account: VenueAccount,
+    evidence: ReadOnlyEvidence,
+    limiter: VenueLimiter | None = None,
+) -> None:
+    # wave2: a writable aggregator connection (SnapTrade) is released at the
+    # aggregator too, so the trade-capable brokerage link does not outlive
+    # the erased credential. One attempt now, an AGGREGATOR_DELETE_USER retry
+    # job queued in this transaction if it fails (aggregator_jobs.py).
+    credentials.delete_aggregator_user(db, account, limiter=limiter, cause="scope_writable")
     credentials.revoke(db, account, reason="scope_writable")
     account.status = VenueAccountStatus.SUSPENDED
     account.last_sync_error = (
@@ -98,7 +123,7 @@ def suspend(db: Session, account: VenueAccount, evidence: ReadOnlyEvidence) -> N
     )
 
 
-def recheck_all(db: Session) -> dict[str, int]:
+def recheck_all(db: Session, limiter: VenueLimiter | None = None) -> dict[str, int]:
     """Nightly sweep. Returns counts by outcome."""
     counts = {"read_only": 0, "undetermined": 0, "suspended": 0, "failed": 0}
     accounts = db.scalars(
@@ -106,7 +131,7 @@ def recheck_all(db: Session) -> dict[str, int]:
     ).all()
     for account in accounts:
         try:
-            evidence = recheck_account(db, account)
+            evidence = recheck_account(db, account, limiter)
         except Exception:
             db.rollback()
             logger.exception("scope re-check failed for venue account %s", account.id)

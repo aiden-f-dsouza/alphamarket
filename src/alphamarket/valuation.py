@@ -9,7 +9,8 @@ Units (invariant 1, amended by platform_plan D3):
 - quantities are integer ATOMS at a stated `decimals` (one whole unit =
   10**decimals atoms), exactly as money.to_atoms parsed them;
 - USD values are integer MICROS;
-- closes are USD micros per ONE WHOLE unit (`PriceIn.usd_micros_per_unit`);
+- closes are USD micros per ONE WHOLE unit (`PriceIn.usd_micros_per_unit`),
+  or exactly the decimal `PriceIn.close` when given (wave2 D14);
 - intermediate arithmetic is exact (int / Fraction); floats never appear.
 
 Precision rule (connectors/base.py "Precision"): atoms of one asset are never
@@ -27,8 +28,9 @@ valuation" and "External flows (time-weighted return)"; every formula is
 pinned by tests/test_valuation.py with hand-computed values.
 """
 
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections.abc import Iterable, Sequence
+from copy import copy
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -36,14 +38,16 @@ from enum import StrEnum
 from fractions import Fraction
 from typing import Protocol
 
-from alphamarket.connectors.base import EXTERNAL_FLOW_KINDS, LegKind, MarketDataSource
+from alphamarket.connectors import registry
+from alphamarket.connectors.base import EXTERNAL_FLOW_KINDS, LegKind
 from alphamarket.money import MAX_DECIMALS, MICROS_PER_UNIT
 
 PERP_SUFFIX = "-PERP"
 """Perp positions are the asset "<COIN>-PERP" (connectors/base.py asset codes)."""
 
-CASH_AT_PAR: frozenset[str] = MarketDataSource.STABLECOINS_AT_PAR
-"""Assets valued at exactly 1.00 USD per unit, never looked up in prices."""
+CASH_AT_PAR: frozenset[str] = registry.CASH_AT_PAR
+"""Assets valued at exactly 1.00 USD per unit, never looked up in prices
+(USD, USDC, USDT and each venue's own codes for them: registry.CASH_AT_PAR)."""
 
 
 # ---- validation helpers -------------------------------------------------------
@@ -116,11 +120,32 @@ class PriceIn:
     asset: str
     day: date
     usd_micros_per_unit: int
+    # wave2 (D14): the exact close, USD per one whole unit, as the source's
+    # decimal string. Preferred over usd_micros_per_unit when present, so a
+    # sub-cent coin ("0.00001234" = 12.34 micros) keeps its precision. It
+    # must agree with usd_micros_per_unit (= close x 1e6 truncated toward zero).
+    close: str | None = None
 
     def __post_init__(self) -> None:
         _require_int(self.usd_micros_per_unit, "usd_micros_per_unit")
         if self.usd_micros_per_unit < 0:
             raise ValueError(f"close for {self.asset} on {self.day} is negative")
+        if self.close is not None:
+            exact = parse_price(self.close) * MICROS_PER_UNIT
+            if exact < 0:
+                raise ValueError(f"close for {self.asset} on {self.day} is negative")
+            if _trunc_micros(exact) != self.usd_micros_per_unit:
+                raise ValueError(
+                    f"close {self.close!r} for {self.asset} on {self.day} disagrees with "
+                    f"usd_micros_per_unit {self.usd_micros_per_unit}"
+                )
+
+    @property
+    def exact_micros(self) -> Fraction:
+        """USD micros per unit, exact: from `close` when present."""
+        if self.close is not None:
+            return parse_price(self.close) * MICROS_PER_UNIT
+        return Fraction(self.usd_micros_per_unit)
 
 
 @dataclass(frozen=True)
@@ -194,6 +219,18 @@ def _max_decimals(pairs: Iterable[tuple[str, int]]) -> dict[str, int]:
     for asset, decimals in pairs:
         scales[asset] = max(decimals, scales.get(asset, 0))
     return scales
+
+
+def _widen(scales: dict[str, int], asset: str, decimals: int, *totals: dict[str, int]) -> None:
+    """_max_decimals one quantity at a time: raise `asset`'s scale to `decimals`
+    when finer (never lower it), rescaling its atoms in each of `totals` up so
+    they stay exact. For state fed legs or fills one by one (LedgerSweep)."""
+    old = scales.get(asset, 0)
+    scales[asset] = max(old, decimals)
+    if decimals > old:
+        for running in totals:
+            if asset in running:
+                running[asset] = _rescale(running[asset], old, decimals)
 
 
 def _check_anchor(anchor: Sequence[AnchorIn]) -> None:
@@ -271,6 +308,14 @@ class _PerpBook:
         known = atoms != 0 and row.entry_price is not None
         self.entry[row.asset] = parse_price(row.entry_price) if known else None  # type: ignore[arg-type]
 
+    def widen(self, asset: str, decimals: int) -> None:
+        """Raise `asset`'s scale to at least `decimals`, for a book fed fills one at
+        a time (LedgerSweep) instead of sized from all of them up front. The open
+        quantity is rescaled exactly; the entry is per unit, so it is unchanged,
+        and every rule above compares or weights quantities at one scale, so the
+        book evolves exactly as one built at the finer scale from the start."""
+        _widen(self.scales, asset, decimals, self.qty)
+
     def apply(self, fill: PerpFillIn) -> None:
         d = _rescale(fill.qty_delta_atoms, fill.decimals, self.scales[fill.asset])
         if d == 0:
@@ -330,7 +375,7 @@ def perp_positions_at(
     return book.positions()
 
 
-def unrealized_pnl_micros(position: PerpPosition, close_micros: int) -> int:
+def unrealized_pnl_micros(position: PerpPosition, close_micros: int | Fraction) -> int:
     """qty x (close - entry), in USD micros, truncated toward zero. Positive
     for a long above entry and for a short below it. Realized P&L is NOT
     computed here: the venue's REALIZED_PNL leg is the truth, already in cash."""
@@ -343,31 +388,50 @@ def unrealized_pnl_micros(position: PerpPosition, close_micros: int) -> int:
 
 
 class _PriceIndex:
+    """Closes by asset and day, as EXACT USD micros per unit (PriceIn.exact_micros:
+    the decimal `close` when given, else the integer micros)."""
+
     def __init__(self, prices: Iterable[PriceIn]) -> None:
-        rows: dict[str, dict[date, int]] = {}
+        rows: dict[str, dict[date, Fraction]] = {}
         for price in prices:
             by_day = rows.setdefault(price.asset, {})
             if price.day in by_day:
                 raise ValueError(f"two closes for {price.asset} on {price.day}")
-            by_day[price.day] = price.usd_micros_per_unit
+            by_day[price.day] = price.exact_micros
         self._days = {asset: sorted(by_day) for asset, by_day in rows.items()}
         self._rows = rows
+        self._cut: date | None = None  # set on a before() view only
+
+    def before(self, day: date) -> "_PriceIndex":
+        """A view of the same closes limited to days strictly BEFORE `day`, sharing
+        the index (nothing is copied or re-sorted). It answers has / close /
+        perp_close exactly as _PriceIndex([p for p in prices if p.day < day])
+        would, including a perp falling back to its coin when the perp's own
+        closes all fall on or after `day`."""
+        view = copy(self)
+        view._cut = day if self._cut is None else min(day, self._cut)
+        return view
+
+    def _visible(self, days: list[date]) -> int:
+        """How many of an asset's sorted close days this index may use."""
+        return len(days) if self._cut is None else bisect_left(days, self._cut)
 
     def has(self, asset: str) -> bool:
-        return asset in self._rows
+        days = self._days.get(asset)
+        return bool(days) and self._visible(days) > 0
 
-    def close(self, asset: str, day: date) -> tuple[int, date] | None:
-        """Last known close on or before `day`: (usd micros per unit, day of that close)."""
+    def close(self, asset: str, day: date) -> tuple[Fraction, date] | None:
+        """Last known close on or before `day`: (exact usd micros per unit, day of that close)."""
         days = self._days.get(asset)
         if not days:
             return None
-        i = bisect_right(days, day)
+        i = min(bisect_right(days, day), self._visible(days))
         if i == 0:
             return None
         found = days[i - 1]
         return self._rows[asset][found], found
 
-    def perp_close(self, perp_asset: str, day: date) -> tuple[int, date] | None:
+    def perp_close(self, perp_asset: str, day: date) -> tuple[Fraction, date] | None:
         """A perp is valued at closes of its own asset code ("BTC-PERP") when
         any exist, else at closes of the underlying coin ("BTC")."""
         if self.has(perp_asset):
@@ -409,6 +473,7 @@ class PositionValue:
     value_micros: int  # contribution to equity
     notional_micros: int  # signed qty x close (equal to value except for perps)
     entry: Fraction | None = None  # perps only
+    # wave2 (D14): close_micros above is truncated for display; values use the exact close.
 
 
 @dataclass(frozen=True)
@@ -440,11 +505,11 @@ class _Flags:
 
 def _unit_close(
     asset: str, day: date, prices: _PriceIndex, flags: _Flags
-) -> tuple[int, date | None] | None:
+) -> tuple[Fraction, date | None] | None:
     """USD micros per unit for a non-perp asset on `day`, with the carry-forward
     and unpriced rules applied (and flagged). None means: exclude it."""
     if asset in CASH_AT_PAR:
-        return MICROS_PER_UNIT, None
+        return Fraction(MICROS_PER_UNIT), None
     found = prices.close(asset, day)
     if found is None:
         flags.add(asset, FlagReason.UNPRICED)
@@ -474,7 +539,9 @@ def _value_day(
         close, price_day = found
         value = _trunc_micros(qty.units * close)
         kind = PositionKind.CASH if asset in CASH_AT_PAR else PositionKind.ASSET
-        positions.append(PositionValue(asset, kind, qty, close, price_day, value, value))
+        positions.append(
+            PositionValue(asset, kind, qty, _trunc_micros(close), price_day, value, value)
+        )
 
     perp_assets = {a for a in holdings if a.endswith(PERP_SUFFIX)} | set(perps)
     for asset in sorted(perp_assets):
@@ -500,7 +567,7 @@ def _value_day(
                 asset,
                 PositionKind.PERP,
                 position.qty,
-                close,
+                _trunc_micros(close),
                 price_day,
                 unrealized_pnl_micros(position, close),
                 _trunc_micros(position.qty.units * close),
@@ -745,3 +812,255 @@ def exposure(valuation: DayValuation) -> Exposure:
         perp_gross_micros=perp_gross,
         perp_gross_leverage=Fraction(perp_gross, equity) if equity > 0 else None,
     )
+
+
+# ---- wave2: creator equity at a fill (signals v2) ---------------------------------
+
+
+def equity_before(
+    anchor: Sequence[AnchorIn],
+    legs: Sequence[LegIn],
+    prices: Iterable[PriceIn],
+    perp_fills: Sequence[PerpFillIn],
+    t: datetime,
+) -> DayValuation:
+    """Equity just BEFORE instant `t`, for sizing a follower against a fill at `t`:
+
+        E(t-) = cash + spot/equity holdings x last close + perp qty x (close - entry)
+
+    where holdings and perp positions include every leg and perp fill with
+    occurred_at < t (strictly: the fill at t is what is being sized), and
+    only closes of complete UTC days BEFORE t's day are used (day D-1,
+    carried back further if missing), so no intraday price is assumed.
+
+    Returns the valuation of day D = t's UTC day built from those inputs.
+    Every priced asset therefore carries a CARRIED_FORWARD flag (expected:
+    day D has no close yet); UNPRICED assets are excluded, as in the daily
+    series. The day whose closes were used is the max `price_day` over the
+    returned positions (equity_basis_day on the signal)."""
+    _require_aware(t, "t")
+    day = _utc_day(t)
+    return valuation_on(
+        anchor,
+        [leg for leg in legs if leg.occurred_at < t],
+        [price for price in prices if price.day < day],
+        [fill for fill in perp_fills if fill.occurred_at < t],
+        day,
+    )
+
+
+def basis_day(valuation: DayValuation) -> date | None:
+    """Latest close day used by a valuation (None when only cash was valued)."""
+    days = [p.price_day for p in valuation.positions if p.price_day is not None]
+    return max(days) if days else None
+
+
+# ---- wave2: many instants in one forward sweep (signals v2) -----------------------
+
+
+class LedgerSweep:
+    """Holdings, the perp book and equity just BEFORE each instant of a
+    non-decreasing series, in ONE forward pass over the ledger. For each t
+    (never earlier than the previous t; repeats are fine):
+
+        holdings_before(t)        == holdings_at(anchor, [legs < t], t)
+        perp_positions_before(t)  == perp_positions_at(anchor, [perp fills < t], t)
+        equity_before(t)          == equity_before(anchor, legs, prices, perp_fills, t)
+
+    exactly, scales included: an asset's scale is the max decimals over the
+    anchor and the legs (or perp fills) before t, as those functions see it.
+    The state advances with the same primitives (_rescale and _widen, _PerpBook,
+    _PriceIndex cut to the closes before t's UTC day, _value_day), so every
+    formula still lives once; tests/test_valuation_sweep.py pins the equality.
+
+    Cost: legs and fills are sorted and the closes indexed once, and each leg
+    and fill is applied once, so N legs and fills, P closes and K instants
+    cost O((N + P) log(N + P) + K A log P) for A held assets, where calling
+    the per-instant functions K times costs O(K (N + P)).
+
+    One difference: the closes are indexed up front, so two closes for one
+    asset and day raise here even when both fall on or after every instant
+    asked (valuation_db.price_inputs returns one close per asset and day)."""
+
+    def __init__(
+        self,
+        anchor: Sequence[AnchorIn],
+        legs: Sequence[LegIn],
+        prices: Iterable[PriceIn],
+        perp_fills: Sequence[PerpFillIn],
+    ) -> None:
+        _check_anchor(anchor)
+        self._legs = sorted(legs, key=lambda leg: leg.occurred_at)
+        self._fills = sorted(perp_fills, key=lambda f: f.occurred_at)
+        self._prices = _PriceIndex(prices)
+        self._scales = _asset_scales(anchor, ())
+        self._held = {
+            row.asset: _rescale(row.atoms, row.decimals, self._scales[row.asset]) for row in anchor
+        }
+        self._book = _new_book(anchor, ())
+        self._flows: dict[str, int] = {}  # external flows on self._day before self._t
+        self._li = self._fi = 0
+        self._t: datetime | None = None
+        self._day: date | None = None
+
+    def _advance(self, t: datetime) -> None:
+        """Apply every leg and perp fill with occurred_at < t (in the order
+        holdings_at / perp_positions_at use), then stand at t."""
+        _require_aware(t, "t")
+        if self._t is not None and t < self._t:
+            raise ValueError(f"instants must be non-decreasing: {t} is before {self._t}")
+        day = _utc_day(t)
+        if day != self._day:
+            self._flows = {}  # every leg applied so far falls on an earlier UTC day
+        self._t, self._day = t, day
+        legs, fills = self._legs, self._fills
+        while self._li < len(legs) and legs[self._li].occurred_at < t:
+            leg = legs[self._li]
+            _widen(self._scales, leg.asset, leg.decimals, self._held, self._flows)
+            atoms = _rescale(leg.delta_atoms, leg.decimals, self._scales[leg.asset])
+            self._held[leg.asset] = self._held.get(leg.asset, 0) + atoms
+            # daily_equity_series attributes a flow leg to day D when its UTC day >= D.
+            if leg.kind in EXTERNAL_FLOW_KINDS and _utc_day(leg.occurred_at) >= day:
+                self._flows[leg.asset] = self._flows.get(leg.asset, 0) + atoms
+            self._li += 1
+        while self._fi < len(fills) and fills[self._fi].occurred_at < t:
+            fill = fills[self._fi]
+            self._book.widen(fill.asset, fill.decimals)
+            self._book.apply(fill)
+            self._fi += 1
+
+    def _qtys(self, atoms_by_asset: dict[str, int]) -> dict[str, Qty]:
+        return {a: Qty(atoms, self._scales[a]) for a, atoms in atoms_by_asset.items() if atoms}
+
+    def holdings_before(self, t: datetime) -> dict[str, Qty]:
+        """holdings_at over the anchor and every leg strictly before `t`."""
+        self._advance(t)
+        return self._qtys(self._held)
+
+    def perp_positions_before(self, t: datetime) -> dict[str, PerpPosition]:
+        """perp_positions_at over the anchor and every perp fill strictly before `t`."""
+        self._advance(t)
+        return self._book.positions()
+
+    def equity_before(self, t: datetime) -> DayValuation:
+        """equity_before(anchor, legs, prices, perp_fills, t): the valuation of
+        t's UTC day D from the holdings, perp book and day-D flows before `t`,
+        at the closes of days before D."""
+        self._advance(t)
+        day = _utc_day(t)
+        return _value_day(
+            day,
+            self._qtys(self._held),
+            self._book.positions(),
+            self._qtys(self._flows),
+            self._prices.before(day),
+        )
+
+
+# ---- perf: the end state of a growing ledger, folded incrementally -----------------
+
+
+class OutOfOrderFill(ValueError):
+    """A perp fill folded before the last one folded (LedgerFold.add_fill)."""
+
+
+class LedgerFold:
+    """Holdings and the perp book at the END of a ledger that only grows,
+    folded one leg and one perp fill at a time, and serializable, so a caller
+    can keep the state (paper_book's checkpoints) and later fold only what is
+    new. With L the legs and F the perp fills folded so far:
+
+        holdings()        == holdings_at(anchor, L, t)        for any t >= every leg
+        perp_positions()  == perp_positions_at(anchor, F, t)  for any t >= every fill
+
+    exactly, scales included: an asset's scale is the max decimals over the
+    anchor and what was folded, widened as finer legs arrive (_widen and
+    _PerpBook.widen, as in LedgerSweep), so every formula still lives once.
+    Legs may come in any order (holdings are sums). Fills must come in the
+    order perp_positions_at applies them: occurred_at non-decreasing, ties in
+    input order; an earlier fill raises OutOfOrderFill, so a caller resuming
+    a saved state replays from scratch instead. tests/test_paper_checkpoints.py
+    pins the equality."""
+
+    STATE_VERSION = 1
+
+    def __init__(self, anchor: Sequence[AnchorIn]) -> None:
+        _check_anchor(anchor)
+        self.anchor = tuple(anchor)
+        self._scales = _asset_scales(anchor, ())
+        self._held = {
+            row.asset: _rescale(row.atoms, row.decimals, self._scales[row.asset]) for row in anchor
+        }
+        self._book = _new_book(anchor, ())
+        self.fills_through: datetime | None = None  # occurred_at of the last fill folded
+
+    def add_leg(self, leg: LegIn) -> None:
+        _widen(self._scales, leg.asset, leg.decimals, self._held)
+        atoms = _rescale(leg.delta_atoms, leg.decimals, self._scales[leg.asset])
+        self._held[leg.asset] = self._held.get(leg.asset, 0) + atoms
+
+    def add_fill(self, fill: PerpFillIn) -> None:
+        if self.fills_through is not None and fill.occurred_at < self.fills_through:
+            raise OutOfOrderFill(
+                f"{fill.asset} fill at {fill.occurred_at} is before {self.fills_through}"
+            )
+        self._book.widen(fill.asset, fill.decimals)
+        self._book.apply(fill)
+        self.fills_through = fill.occurred_at
+
+    def holdings(self) -> dict[str, Qty]:
+        return {a: Qty(atoms, self._scales[a]) for a, atoms in self._held.items() if atoms}
+
+    def perp_positions(self) -> dict[str, PerpPosition]:
+        return self._book.positions()
+
+    # The state is JSON-safe with every integer and fraction as a string, never
+    # a float (invariant 1), so a JSON column round-trips it exactly.
+
+    def to_state(self) -> dict:
+        book = self._book
+        return {
+            "v": self.STATE_VERSION,
+            "anchor": _anchor_state(self.anchor),
+            "held": {a: str(atoms) for a, atoms in sorted(self._held.items())},
+            "scales": dict(sorted(self._scales.items())),
+            "perp_qty": {a: str(q) for a, q in sorted(book.qty.items())},
+            "perp_entry": {
+                a: None if e is None else f"{e.numerator}/{e.denominator}"
+                for a, e in sorted(book.entry.items())
+            },
+            "perp_scales": dict(sorted(book.scales.items())),
+            "fills_through": (
+                None
+                if self.fills_through is None
+                else self.fills_through.astimezone(UTC).isoformat()
+            ),
+        }
+
+    @classmethod
+    def from_state(cls, anchor: Sequence[AnchorIn], state: dict) -> "LedgerFold":
+        """The fold that to_state() described. Raises ValueError for a state of
+        another version or one made over a different anchor."""
+        if state.get("v") != cls.STATE_VERSION:
+            raise ValueError(f"fold state version {state.get('v')!r}")
+        if state.get("anchor") != _anchor_state(anchor):
+            raise ValueError("fold state was made over a different anchor")
+        fold = cls(anchor)
+        fold._held = {a: int(atoms) for a, atoms in state["held"].items()}
+        fold._scales = {a: int(d) for a, d in state["scales"].items()}
+        book = fold._book
+        book.scales.clear()
+        book.scales.update({a: int(d) for a, d in state["perp_scales"].items()})
+        book.qty = {a: int(q) for a, q in state["perp_qty"].items()}
+        book.entry = {a: None if e is None else Fraction(e) for a, e in state["perp_entry"].items()}
+        for decimals in (*fold._scales.values(), *book.scales.values()):
+            _require_decimals(decimals)
+        if set(fold._held) - set(fold._scales) or set(book.qty) - set(book.scales):
+            raise ValueError("fold state has a quantity without a scale")
+        through = state.get("fills_through")
+        fold.fills_through = None if through is None else datetime.fromisoformat(through)
+        return fold
+
+
+def _anchor_state(anchor: Sequence[AnchorIn]) -> list[list]:
+    return [[a.asset, str(a.atoms), a.decimals, a.entry_price] for a in anchor]

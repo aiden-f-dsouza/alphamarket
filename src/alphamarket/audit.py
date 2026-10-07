@@ -38,6 +38,15 @@ class AuditAction(StrEnum):
     SCOPE_CHECK = "scope.check"
     ACCOUNT_SUSPEND = "account.suspend"
     ADMIN_ACTION = "admin.action"  # details.op names the operation
+    # ---- wave2 ----
+    CREDENTIAL_REFRESH = "credential.refresh"  # OAuth access token refreshed
+    VENUE_CONSENT = "venue.consent"  # consent screen accepted (invariant 10)
+    EMAIL_CHANGE_REQUEST = "account.email_change_request"
+    EMAIL_CHANGE = "account.email_change"
+    # An aggregator user (SnapTrade) deleted at the aggregator after a disconnect,
+    # suspension or abandoned connect; details.outcome is deleted | already_gone |
+    # retry_queued | gave_up (aggregator_jobs.py).
+    AGGREGATOR_USER_DELETE = "aggregator.user_delete"
 
 
 @dataclass(frozen=True)

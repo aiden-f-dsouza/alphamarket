@@ -1,0 +1,15 @@
+{# wave2 (D18, invariant 10): the exact consent text for this venue, shown
+   inside the connect form. The form posts the text's sha256; the server
+   recomputes the text and refuses a hash that does not match it. Needs
+   `consent` (consent.ConsentScreen) in the context. #}
+<section class="consent" aria-labelledby="consent-title">
+  <div class="spread" style="align-items:baseline;gap:12px">
+    <span class="label" id="consent-title">Terms of this connection</span>
+    <span class="mono muted" style="font-size:11px">Consent text {{ consent.version }}</span>
+  </div>
+  <div class="consent-text" tabindex="0">
+    {% for p in consent.paragraphs %}<p{% if loop.first %} class="consent-head"{% endif %}>{{ p }}</p>{% endfor %}
+  </div>
+  <input type="hidden" name="consent_sha256" value="{{ consent.sha256 }}">
+  <label class="consent-ack"><input type="checkbox" name="consent_ack" value="yes" required> I have read this and I want to connect {{ profile.display_name }} on these terms.</label>
+</section>

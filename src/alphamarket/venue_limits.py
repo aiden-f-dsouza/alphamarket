@@ -28,6 +28,11 @@ breaker opens for 2 minutes after 5 consecutive 5xx/timeouts; jobs for an
 open venue are deferred, never failed (jobs.py), so an outage cannot
 dead-letter every account.
 
+Web requests that call a venue (the SnapTrade connect pages, the disconnect's
+deleteUser) spend the same buckets through `call_venue`, but never wait for
+them: a refill longer than WEB_MAX_WAIT_SECONDS, an open breaker or a fresh 429
+raises VenueBusy and the page says "busy, try again in a minute".
+
 Two backends share one interface: MemoryBuckets (tests, one process) and
 PostgresBuckets (rate_buckets / venue_circuits tables, shared by every worker
 process; the refill+take is one UPDATE ... RETURNING, so two workers can never
@@ -47,7 +52,13 @@ from typing import Protocol
 import httpx
 from sqlalchemy import Engine, text
 
-from alphamarket.connectors.base import BudgetExhausted, RateBudget, RateLimited, RateScope
+from alphamarket.connectors.base import (
+    BudgetExhausted,
+    RateBudget,
+    RateLimited,
+    RateScope,
+    Throttle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +67,11 @@ PENALTY_MS = 10 * 60 * 1000  # adaptive: refill halved for 10 minutes after a 42
 BREAKER_THRESHOLD = 5  # consecutive 5xx/timeouts that open a venue's circuit
 BREAKER_OPEN_MS = 2 * 60 * 1000  # how long an open circuit stays open
 DEFAULT_RETRY_AFTER_S = 60.0  # 429 without a usable Retry-After header
+WEB_MAX_WAIT_SECONDS = 2.0  # the longest a web request sleeps for a token
+# A bucket that was refunded after a refusal has lost a milli-token or two to
+# integer refill rounding, so the retry after the sleep can still be a few ms
+# short; that is slept off, a real shortfall is not.
+WEB_ROUNDING_SLACK_SECONDS = 0.1
 
 
 def now_ms() -> int:
@@ -417,10 +433,12 @@ class PostgresBuckets:
 
 
 def _profile_budgets(venue: str) -> tuple[RateBudget, ...]:
-    from alphamarket.connectors.registry import PROFILES
+    from alphamarket.connectors.registry import DATA_SOURCE_BUDGETS, PROFILES
 
     profile = PROFILES.get(venue)
-    return profile.rate_budgets if profile is not None else ()
+    if profile is not None:
+        return profile.rate_budgets
+    return DATA_SOURCE_BUDGETS.get(venue, ())  # wave2: non-venue data sources
 
 
 class VenueLimiter:
@@ -587,3 +605,122 @@ def rate_limit_from_http(exc: BaseException) -> RateLimited | None:
     if header and header.strip().replace(".", "", 1).isdigit():
         retry = float(header)  # the HTTP-date form falls back to the default
     return RateLimited(retry, str(exc.request.url.path) if exc.request else "")
+
+
+# ---- web requests: fail fast instead of waiting ----------------------------------
+
+
+class VenueBusy(Exception):  # noqa: N818  (a control-flow signal, like jobs.Defer)
+    """A web request's call to `venue` was NOT made (or was refused with a 429):
+    Koine's own bucket would make it wait longer than WEB_MAX_WAIT_SECONDS, the
+    venue's circuit is open, or the venue just answered 429/418. Render a
+    "busy, try again in a minute" page; `retry_after_seconds` is the honest
+    wait. Background callers do not use this: jobs defer instead."""
+
+    def __init__(self, venue: str, retry_after_seconds: float, reason: str) -> None:
+        super().__init__(f"{venue} busy ({reason}); retry in {retry_after_seconds:.0f}s")
+        self.venue = venue
+        self.retry_after_seconds = retry_after_seconds
+        self.reason = reason
+
+
+class _FailFastThrottle:
+    """connectors.base.Throttle for a web request: if the bucket needs at most
+    `max_wait_seconds` to refill the request sleeps that long and tries once
+    more; anything longer (or a second refusal) is VenueBusy."""
+
+    def __init__(
+        self,
+        inner: VenueThrottle,
+        max_wait_seconds: float,
+        sleep: Callable[[float], None],
+    ) -> None:
+        self.inner = inner
+        self.max_wait_seconds = max_wait_seconds
+        self.sleep = sleep
+
+    def before(self, endpoint: str) -> None:
+        venue = self.inner.venue
+        try:
+            self.inner.before(endpoint)
+            return
+        except BudgetExhausted as exc:
+            if exc.retry_after_seconds > self.max_wait_seconds:
+                raise VenueBusy(venue, exc.retry_after_seconds, "budget") from None
+            wait = exc.retry_after_seconds
+        self.sleep(wait)
+        try:
+            self.inner.before(endpoint)
+            return
+        except BudgetExhausted as exc:
+            if exc.retry_after_seconds > WEB_ROUNDING_SLACK_SECONDS:
+                raise VenueBusy(venue, exc.retry_after_seconds, "budget") from None
+            wait = exc.retry_after_seconds
+        self.sleep(wait)
+        try:
+            self.inner.before(endpoint)
+        except BudgetExhausted as exc:
+            raise VenueBusy(venue, exc.retry_after_seconds, "budget") from None
+
+    def after(self, endpoint: str, extra_cost: int = 0, used: int | None = None) -> None:
+        self.inner.after(endpoint, extra_cost, used)
+
+
+def call_venue[T](
+    limiter: VenueLimiter | None,
+    venue: str,
+    credential_id: str | None,
+    call: Callable[[Throttle | None], T],
+    *,
+    max_wait_seconds: float = WEB_MAX_WAIT_SECONDS,
+    sleep: Callable[[float], None] = time.sleep,
+) -> T:
+    """Make one venue call from a web request through the same buckets, 429
+    backoff and circuit breaker the worker uses. `call` receives the Throttle to
+    hand to the connector (None without a limiter: tests, scripts) and does the
+    HTTP request(s).
+
+    Fails fast (VenueBusy, nothing sent) when the venue's circuit is open or a
+    bucket needs longer than `max_wait_seconds`; a 429/418 penalises the
+    buckets exactly as a job's would and also raises VenueBusy. Other errors
+    propagate unchanged after being counted: a 5xx or transport failure feeds
+    the breaker (so a venue outage stops web calls too), anything else is the
+    caller's to render. A completed call closes the breaker."""
+    if limiter is None:
+        return call(None)
+    open_until = limiter.breaker_open_until(venue)
+    if open_until is not None:
+        wait = max(1.0, open_until.timestamp() - limiter.clock_ms() / 1000)
+        raise VenueBusy(venue, wait, "circuit open")
+    throttle = _FailFastThrottle(limiter.throttle(venue, credential_id), max_wait_seconds, sleep)
+    try:
+        result = call(throttle)
+    except VenueBusy:
+        raise
+    except Exception as exc:
+        limited = exc if isinstance(exc, RateLimited) else rate_limit_from_http(exc)
+        if limited is not None:
+            limiter.on_rate_limited(
+                venue, credential_id, limited.retry_after_seconds, limited.endpoint
+            )
+            raise VenueBusy(venue, limited.retry_after_seconds, "rate limited") from None
+        if is_venue_outage(exc):
+            limiter.record_failure(venue)
+        raise
+    limiter.record_success(venue)
+    return result
+
+
+def get_web_limiter(app) -> VenueLimiter:
+    """One outbound limiter per app instance (so each test client starts
+    clean). In production it is the shared Postgres backend: the web process
+    and every worker spend the same buckets and see the same breaker, because
+    `egress_ip` is the same setting for both."""
+    limiter = getattr(app.state, "venue_limiter", None)
+    if limiter is None:
+        from alphamarket.config import get_settings
+        from alphamarket.db import engine
+
+        limiter = build_limiter(get_settings(), engine)
+        app.state.venue_limiter = limiter
+    return limiter

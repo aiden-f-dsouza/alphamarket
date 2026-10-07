@@ -76,6 +76,18 @@ class JobKind(StrEnum):
     OAUTH_REFRESH = "oauth_refresh"  # refresh an OAuth access token (P3/P5)
     KEY_ROTATE = "key_rotate"  # re-encrypt credentials under a new data key (P3)
     SCOPE_RECHECK = "scope_recheck"  # re-prove a credential is read-only (P3)
+    PRICES_DAILY = "prices_daily"  # wave2: daily closes, margin tiers, corp actions per venue
+    HOUSEKEEPING = "housekeeping"  # wave2: prune counters, sessions, tokens, quotes
+    # wave2: delete an aggregator user (SnapTrade) after a disconnect, suspension or
+    # abandoned connect whose first delete failed (aggregator_jobs.py). 22 chars;
+    # jobs.kind is String(40).
+    AGGREGATOR_DELETE_USER = "aggregator_delete_user"
+    # P7: NOT work. A row of this kind is a coordination lease (acquire_lease
+    # below): "stream process X holds account 7's websocket". No handler is
+    # ever registered for it, so no worker claims it; venue_account_id stays
+    # NULL so it never blocks the account's own jobs (one running job per
+    # account) and an expired one never puts the account in `error`.
+    LEASE = "lease"
 
 
 # Lower runs first. Copy lag matters for creators with followers, so their
@@ -83,7 +95,23 @@ class JobKind(StrEnum):
 # OAuth token would fail every sync of that account, so it goes before them.
 # Accounts the worker never touches: disconnected, or suspended because the
 # key became writable (p3-vault; the credential is already erased).
-INACTIVE_ACCOUNT_STATUSES = (VenueAccountStatus.DISCONNECTED, VenueAccountStatus.SUSPENDED)
+# wave2: a PENDING account (connect not finished) is never touched either.
+INACTIVE_ACCOUNT_STATUSES = (
+    VenueAccountStatus.DISCONNECTED,
+    VenueAccountStatus.SUSPENDED,
+    VenueAccountStatus.PENDING,
+)
+
+# Kinds that DO run for an account in INACTIVE_ACCOUNT_STATUSES, because the
+# account is inactive precisely since the work exists: an aggregator user is
+# deleted after its account was disconnected or suspended. The job keeps its
+# venue_account_id (so the runner still applies that venue's circuit breaker and
+# 429 backoff, serialises per account, and the job row traces to the account),
+# and run_job's inactive skip would otherwise complete it unrun: Koine would keep
+# paying for (and SnapTrade keep the brokerage link of) a user nobody can reach.
+# These handlers must check the account's status themselves and never act on a
+# live account.
+RUNS_ON_INACTIVE_ACCOUNT = frozenset({JobKind.AGGREGATOR_DELETE_USER})
 
 PRIORITY_URGENT = 5
 PRIORITY_SYNC_FOLLOWED = 10
@@ -93,6 +121,9 @@ PRIORITY_BACKFILL = 40
 
 DEFAULT_PRIORITY: dict[str, int] = {
     JobKind.OAUTH_REFRESH: PRIORITY_URGENT,
+    # One request, and until it succeeds a brokerage link (a trade-capable one
+    # after a scope suspension) stays live at the aggregator.
+    JobKind.AGGREGATOR_DELETE_USER: PRIORITY_URGENT,
     JobKind.SIGNALS: PRIORITY_SYNC_FOLLOWED,
     JobKind.MIRROR: PRIORITY_SYNC_FOLLOWED,
     JobKind.SYNC: PRIORITY_SYNC,
@@ -101,6 +132,8 @@ DEFAULT_PRIORITY: dict[str, int] = {
     JobKind.PRICES: PRIORITY_MAINTENANCE,
     JobKind.SCOPE_RECHECK: PRIORITY_MAINTENANCE,
     JobKind.KEY_ROTATE: PRIORITY_MAINTENANCE,
+    JobKind.PRICES_DAILY: PRIORITY_MAINTENANCE,
+    JobKind.HOUSEKEEPING: PRIORITY_MAINTENANCE,
     JobKind.BACKFILL: PRIORITY_BACKFILL,
 }
 
@@ -111,6 +144,7 @@ KIND_LABELS: dict[str, str] = {
     JobKind.OAUTH_REFRESH: "Refreshing your venue connection",
     JobKind.SCOPE_RECHECK: "Re-checking that your key is read-only",
     JobKind.KEY_ROTATE: "Rotating your stored key's encryption",
+    JobKind.AGGREGATOR_DELETE_USER: "Removing your brokerage link at the aggregator",
 }
 
 MAX_ERROR_CHARS = 1000
@@ -220,6 +254,17 @@ PageRunner = Callable[
     [Session, VenueAccount, VenueConnector, str | None], tuple[str | None, str | None]
 ]
 PAGE_RUNNERS: dict[str, PageRunner] = {}
+
+# fn(db, job, attempts, last_error), called by fail() when a job of that kind is
+# dead-lettered, in the same transaction as the status change (fail() commits
+# it). For kinds whose dead letter matters beyond the account's own `error`
+# state, which an inactive account never gets (aggregator_jobs.py audits it).
+DeadLetterHook = Callable[[Session, Job, int, str], None]
+DEAD_LETTER_HOOKS: dict[str, DeadLetterHook] = {}
+
+
+def register_dead_letter_hook(kind: str, hook: DeadLetterHook) -> None:
+    DEAD_LETTER_HOOKS[str(kind)] = hook
 
 
 def register_page_runner(stream: str, runner: PageRunner) -> None:
@@ -364,6 +409,182 @@ def enqueue(
             .values(priority=priority, updated_at=now)
         )
     return job_id
+
+
+def enqueue_fresh(
+    db: Session,
+    kind: str,
+    *,
+    account_id: int,
+    priority: int | None = None,
+    now: datetime | None = None,
+) -> tuple[int | None, str]:
+    """Queue `kind` for the account so that a run STARTS after this call, for
+    callers that just committed new input (a streamed fill) the job must see.
+    Returns (job id or None, outcome): "queued", "coalesced" (a pending job
+    will start later anyway: nothing to add, so a burst queues one job) or
+    "busy" (both slots are running; the next scheduled run picks it up).
+
+    Plain enqueue() coalesces into a RUNNING job too, which may already have
+    read its input before the caller's commit and would never see it. So
+    when the default key is running, a follow-up is queued under
+    "<key>:next"; claim() runs one job per account at a time, so the
+    follow-up starts after the running one ends. Flushes, does not commit."""
+    base = default_dedupe_key(kind, account_id)
+    for key in (base, f"{base}:next"):
+        job_id = enqueue(
+            db, kind, account_id=account_id, priority=priority, dedupe_key=key, now=now
+        )
+        if job_id is not None:
+            return job_id, "queued"
+        status = db.scalar(
+            select(Job.status).where(Job.dedupe_key == key, Job.status.in_(ACTIVE_JOB_STATUSES))
+        )
+        if status == JobStatus.PENDING:
+            return None, "coalesced"
+        if status is None:  # it finished between the insert and the look: retry once
+            job_id = enqueue(
+                db, kind, account_id=account_id, priority=priority, dedupe_key=key, now=now
+            )
+            if job_id is not None:
+                return job_id, "queued"
+    return None, "busy"
+
+
+# ---- leases (coordination rows, not work; P7 stream subscriptions) ---------------
+#
+# A lease is a `jobs` row of kind LEASE whose dedupe_key names the thing held
+# ("stream:account:7"). The partial unique index on active dedupe keys makes
+# the INSERT race-free; an expired lease (lease_until passed: its holder died)
+# is taken over by a conditional UPDATE, so at most one holder ever wins.
+# The worker's reaper may turn an expired lease row back to `pending`; any
+# acquirer (or the late holder's renewal) takes such a row over too.
+
+
+def _lease_row_where(key: str):
+    return (Job.dedupe_key == key, Job.kind == JobKind.LEASE)
+
+
+def acquire_lease(
+    db: Session,
+    key: str,
+    holder: str,
+    ttl_seconds: int,
+    *,
+    payload: dict | None = None,
+    now: datetime | None = None,
+) -> bool:
+    """Take the lease `key` for `holder` (or extend it if already held).
+    False when someone else holds it and it has not expired. Commits."""
+    now = now or utcnow()
+    until = now + timedelta(seconds=ttl_seconds)
+    stmt = (
+        _insert(db)
+        .values(
+            kind=JobKind.LEASE.value,
+            venue_account_id=None,
+            dedupe_key=key,
+            payload=payload or {},
+            priority=PRIORITY_MAINTENANCE,
+            status=JobStatus.RUNNING,
+            run_after=now,
+            attempts=0,
+            max_attempts=get_settings().worker_max_attempts,
+            deferrals=0,
+            locked_by=holder,
+            lease_until=until,
+            created_at=now,
+            updated_at=now,
+        )
+        .on_conflict_do_nothing(index_elements=["dedupe_key"], index_where=_ACTIVE_WHERE)
+        .returning(Job.id)
+    )
+    if db.execute(stmt).scalar() is not None:
+        db.commit()
+        return True
+    values = {
+        "status": JobStatus.RUNNING,
+        "locked_by": holder,
+        "lease_until": until,
+        "attempts": 0,
+        "updated_at": now,
+    }
+    if payload is not None:
+        values["payload"] = payload
+    n = db.execute(
+        _update_jobs()
+        .where(
+            *_lease_row_where(key),
+            or_(
+                Job.status == JobStatus.PENDING,
+                (Job.status == JobStatus.RUNNING)
+                & or_(Job.locked_by == holder, Job.lease_until < now),
+            ),
+        )
+        .values(**values)
+    ).rowcount
+    db.commit()
+    return n == 1
+
+
+def renew_lease(
+    db: Session, key: str, holder: str, ttl_seconds: int, *, now: datetime | None = None
+) -> bool:
+    """Extend `holder`'s lease. A lease the reaper turned back to pending
+    (this holder was too slow) is retaken if nobody else took it. False:
+    the lease is lost, and whatever it guarded must stop. Commits."""
+    now = now or utcnow()
+    n = db.execute(
+        _update_jobs()
+        .where(
+            *_lease_row_where(key),
+            or_(
+                (Job.status == JobStatus.RUNNING) & (Job.locked_by == holder),
+                Job.status == JobStatus.PENDING,
+            ),
+        )
+        .values(
+            status=JobStatus.RUNNING,
+            locked_by=holder,
+            lease_until=now + timedelta(seconds=ttl_seconds),
+            attempts=0,
+            updated_at=now,
+        )
+    ).rowcount
+    db.commit()
+    return n == 1
+
+
+def release_lease(db: Session, key: str, holder: str, *, now: datetime | None = None) -> bool:
+    """Give the lease up (only if `holder` still has it). Commits."""
+    now = now or utcnow()
+    n = db.execute(
+        _update_jobs()
+        .where(
+            *_lease_row_where(key),
+            Job.status == JobStatus.RUNNING,
+            Job.locked_by == holder,
+        )
+        .values(
+            status=JobStatus.DONE, done_at=now, lease_until=None, locked_by=None, updated_at=now
+        )
+    ).rowcount
+    db.commit()
+    return n == 1
+
+
+def live_leases(db: Session, prefix: str, *, now: datetime | None = None) -> dict[str, str]:
+    """{key: holder} of every unexpired lease whose key starts with `prefix`."""
+    now = now or utcnow()
+    rows = db.execute(
+        select(Job.dedupe_key, Job.locked_by).where(
+            Job.kind == JobKind.LEASE,
+            Job.status == JobStatus.RUNNING,
+            Job.lease_until >= now,
+            Job.dedupe_key.startswith(prefix, autoescape=True),
+        )
+    ).all()
+    return {key: holder for key, holder in rows}
 
 
 def claim(
@@ -561,6 +782,12 @@ def fail(
             # Same as ingest.sync_account today: a failed sync shows on the account.
             account.status = VenueAccountStatus.ERROR
             account.last_sync_error = msg
+    hook = DEAD_LETTER_HOOKS.get(job.kind) if values["status"] == JobStatus.DEAD else None
+    if hook is not None:
+        try:
+            hook(db, job, attempts, msg)
+        except Exception:  # a hook must never keep the dead letter from being recorded
+            logger.exception("dead-letter hook for job %s (%s) failed", job_id, job.kind)
     db.commit()
     return values["status"]
 
@@ -817,7 +1044,11 @@ class JobRunner:
                 db, job_id, self.worker_id, self.settings.worker_lease_seconds, now=self.clock()
             ):
                 return "lost"
-            if account is not None and account.status in INACTIVE_ACCOUNT_STATUSES:
+            if (
+                account is not None
+                and account.status in INACTIVE_ACCOUNT_STATUSES
+                and job.kind not in RUNS_ON_INACTIVE_ACCOUNT
+            ):
                 complete(db, job_id, self.worker_id, now=self.clock())
                 return "done"
             if venue and self.limiter is not None:

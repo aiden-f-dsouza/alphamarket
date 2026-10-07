@@ -16,6 +16,10 @@ CSP notes:
   Scripts do not: that is the actual XSS-relevant half of CSP.
 - `font-src`/`style-src` include Google Fonts (Newsreader, IBM Plex), the
   only third-party origin any page loads from.
+- `form-action` also lists each OAuth venue's authorize origin (wave2):
+  Chrome applies form-action to the redirect that follows a form
+  submission, and the connect form's GET /oauth/<venue>/start answers with
+  a 302 to the venue. Only those exact origins are added.
 """
 
 from starlette.datastructures import MutableHeaders
@@ -30,9 +34,21 @@ CONTENT_SECURITY_POLICY = (
     "font-src https://fonts.gstatic.com; "
     "img-src 'self' data:; "
     "frame-ancestors 'none'; "
-    "form-action 'self'; "
+    "form-action 'self'{oauth_origins}; "
     "base-uri 'none'"
 )
+
+
+def _oauth_form_origins() -> str:
+    from urllib.parse import urlsplit
+
+    from alphamarket.connectors.registry import OAUTH_AUTHORIZE_URLS
+
+    origins = sorted({"{0.scheme}://{0.netloc}".format(urlsplit(u)) for u in OAUTH_AUTHORIZE_URLS})
+    return "".join(" " + o for o in origins)
+
+
+CONTENT_SECURITY_POLICY = CONTENT_SECURITY_POLICY.format(oauth_origins=_oauth_form_origins())
 
 STRICT_TRANSPORT_SECURITY = "max-age=63072000; includeSubDomains"
 PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=()"

@@ -9,30 +9,24 @@ so both surfaces enforce the same limits.
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from alphamarket import account, mfa, ratelimit, sessions
+from alphamarket.audit import AuditAction
 from alphamarket.auth import optional_user, totp_enabled
+from alphamarket.connectors.registry import PROFILES
 from alphamarket.db import get_db
-from alphamarket.models import User
-from alphamarket.pages import _render
+from alphamarket.models import AuditLog, User, VenueAccount
+from alphamarket.pages import _render, safe_next
 
 router = APIRouter(include_in_schema=False)
+# wave2: POST /account/email (JSON) rides on this router, which main.py includes.
 
 
 def _safe_next(next_url: str | None, default: str = "/dashboard/security") -> str:
-    """Only same-site paths: never an open redirect. Browsers read a
-    backslash as a slash (`/\\evil.com` goes to evil.com) and drop tabs and
-    newlines, so those are refused too."""
-    if (
-        next_url
-        and next_url.startswith("/")
-        and not next_url.startswith("//")
-        and "\\" not in next_url
-        and not any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in next_url)
-    ):
-        return next_url
-    return default
+    """pages.safe_next (the one open-redirect guard), defaulting here."""
+    return safe_next(next_url, default)
 
 
 def _status(exc: HTTPException) -> int:
@@ -43,23 +37,26 @@ def _status(exc: HTTPException) -> int:
 
 
 @router.get("/login/2fa", response_class=HTMLResponse)
-def login_2fa_page(request: Request, db: Session = Depends(get_db)):
+def login_2fa_page(request: Request, next: str = "", db: Session = Depends(get_db)):
     if sessions.pending(db, request) is None:
         return RedirectResponse("/login", status_code=303)
-    return _render(request, "login_2fa.html", user=None, error=None)
+    return _render(request, "login_2fa.html", user=None, error=None, next=safe_next(next, ""))
 
 
 @router.post("/login/2fa")
-def login_2fa(request: Request, code: str = Form(), db: Session = Depends(get_db)):
+def login_2fa(
+    request: Request, code: str = Form(), next: str = Form(""), db: Session = Depends(get_db)
+):
+    next = safe_next(next, "")
     try:
         mfa.complete_login(request, db, code)
     except HTTPException as exc:
         if sessions.pending(db, request) is None:
             return RedirectResponse("/login", status_code=303)
-        resp = _render(request, "login_2fa.html", user=None, error=str(exc.detail))
+        resp = _render(request, "login_2fa.html", user=None, error=str(exc.detail), next=next)
         resp.status_code = _status(exc)
         return resp
-    return RedirectResponse("/dashboard", status_code=303)
+    return RedirectResponse(next or "/dashboard", status_code=303)
 
 
 # ---- /dashboard/security --------------------------------------------------------
@@ -88,8 +85,96 @@ def _security_ctx(request: Request, db: Session, user: User, **extra) -> dict:
         "next": _safe_next(request.query_params.get("next"), ""),
         "notice": None,
         "error": None,
+        "audit_rows": audit_trail(db, user),
         **extra,
     }
+
+
+# ---- wave2:account-security: audit trail ---------------------------------------------
+
+AUDIT_TRAIL_LIMIT = 50
+AUDIT_TRAIL_DECRYPTS = 10  # the newest key uses, merged into the list
+AUDIT_LABELS = {
+    "credential.connect": "Key stored",
+    "credential.rejected": "Key refused (not read-only)",
+    "credential.disconnect": "Key erased",
+    "credential.rotate": "Key replaced",
+    "credential.decrypt": "Key used",
+    "credential.refresh": "Access token refreshed",
+    "scope.check": "Read-only check",
+    "account.suspend": "Connection suspended",
+    "aggregator.user_delete": "Brokerage link removed",
+    "venue.consent": "Venue terms accepted",
+    "account.email_change_request": "Email change requested",
+    "account.email_change": "Email changed",
+    "security.login": "Signed in",
+    "security.new_login": "Sign-in from a new device",
+    "security.password_changed": "Password changed",
+    "security.totp_enabled": "Two-factor turned on",
+    "security.totp_disabled": "Two-factor turned off",
+    "security.totp_lockout": "Two-factor locked after wrong codes",
+    "security.recovery_code_used": "Recovery code used",
+    "security.sessions_revoked": "Signed out everywhere",
+}
+# The only detail fields the page shows; each is a short label, never a secret.
+_PURPOSE_KEYS = ("purpose", "trigger", "reason", "outcome")
+
+
+def audit_trail(db: Session, user: User, limit: int = AUDIT_TRAIL_LIMIT) -> list[dict]:
+    """The user's own audit rows, newest first: what they did (actor), and
+    everything done to their venue accounts, including the worker's decrypts
+    (no actor, target = one of their accounts). Never another user's rows,
+    and from `details` only the venue and one purpose/trigger label."""
+    venues_by_id = {
+        str(account_id): venue
+        for account_id, venue in db.execute(
+            select(VenueAccount.id, VenueAccount.venue).where(VenueAccount.user_id == user.id)
+        ).all()
+    }
+    conditions = [AuditLog.actor_user_id == user.id]
+    if venues_by_id:
+        conditions.append(
+            (AuditLog.target_type == "venue_account") & AuditLog.target_id.in_(list(venues_by_id))
+        )
+    # Every sync decrypts, so a busy account writes a decrypt row every few
+    # minutes: one query for the rest and a short one for decrypts keeps a
+    # sign-in or a password change from being pushed off the list by them.
+    newest = (AuditLog.at.desc(), AuditLog.id.desc())
+    decrypt = AuditLog.action == AuditAction.CREDENTIAL_DECRYPT
+    others = db.scalars(
+        select(AuditLog).where(or_(*conditions), ~decrypt).order_by(*newest).limit(limit)
+    ).all()
+    decrypts = db.scalars(
+        select(AuditLog)
+        .where(or_(*conditions), decrypt)
+        .order_by(*newest)
+        .limit(min(limit, AUDIT_TRAIL_DECRYPTS))
+    ).all()
+    rows = sorted([*others, *decrypts], key=lambda r: (sessions.aware(r.at), r.id), reverse=True)[
+        :limit
+    ]
+    out = []
+    for row in rows:
+        details = row.details if isinstance(row.details, dict) else {}
+        if row.target_type == "venue_account":
+            venue = venues_by_id.get(row.target_id or "")
+        elif row.target_type == "venue":
+            venue = row.target_id
+        else:
+            venue = details.get("venue")
+        venue = str(venue) if venue else ""
+        purpose = next((str(details[k]) for k in _PURPOSE_KEYS if details.get(k)), "")
+        out.append(
+            {
+                "action": row.action,
+                "label": AUDIT_LABELS.get(row.action, row.action),
+                "purpose": purpose.replace("_", " ")[:60],
+                "venue": PROFILES[venue].display_name if venue in PROFILES else venue[:40],
+                "at": sessions.aware(row.at),
+                "ip": row.ip or ("Koine worker" if row.actor_user_id is None else "unknown"),
+            }
+        )
+    return out
 
 
 def _page(request: Request, db: Session, user: User, status_code: int = 200, **extra):
@@ -202,6 +287,7 @@ def recovery_codes_form(request: Request, code: str = Form(""), db: Session = De
 def revoke_all_form(request: Request, db: Session = Depends(get_db)):
     user = _need_user(request, db)
     if user is not None:
+        account.cancel_email_changes(db, user.id)  # committed by revoke_all
         sessions.revoke_all(db, user.id)
     sessions.revoke_current(db, request)
     return RedirectResponse("/login", status_code=303)
@@ -326,4 +412,49 @@ def reset_form(
         heading="Password changed.",
         body="Every session was signed out. Log in with your new password.",
         cta=("/login", "Log in"),
+    )
+
+
+# ---- wave2:account-security: email change ---------------------------------------------
+
+
+@router.post("/dashboard/security/email")
+def change_email_form(
+    request: Request,
+    new_email: str = Form(),
+    current_password: str = Form(),
+    code: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = _need_user(request, db)
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    try:
+        if "@" not in new_email or len(new_email) > 254:
+            raise HTTPException(status_code=422, detail="Enter a valid email address.")
+        if code:
+            mfa.step_up(request, db, user, code)
+        account.request_email_change(request, db, user, current_password, new_email)
+    except HTTPException as exc:
+        return _page(request, db, user, _status(exc), error=exc.detail)
+    return _page(request, db, user, notice=account.EMAIL_CHANGE_REQUESTED)
+
+
+@router.get("/account/email/confirm", response_class=HTMLResponse)
+def confirm_email_change_page(request: Request, token: str = "", db: Session = Depends(get_db)):
+    user = account.confirm_email_change(request, db, token) if token else None
+    return _render(
+        request,
+        "account_notice.html",
+        user=optional_user(request, db),
+        title="Email changed" if user else "Link not valid",
+        heading="Email changed." if user else "This link cannot be used.",
+        body=(
+            f"Your Koine email address is now {user.email}. Every other session was "
+            "signed out, and we told your previous address."
+            if user
+            else account.EMAIL_CHANGE_FAILED
+            + " Links work once and last 1 hour. Request a new one from your security settings."
+        ),
+        cta=("/dashboard/security", "Security settings"),
     )

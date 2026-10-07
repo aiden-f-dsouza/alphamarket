@@ -134,6 +134,11 @@ ALERT_SUBJECTS = {
     "sessions_revoked": "You were signed out everywhere",
     "key_connected": "A venue key was connected to your Koine account",
     "key_suspended": "A venue key was suspended",
+    # wave2
+    "key_rotated": "A venue key on your Koine account was replaced",
+    "oauth_reconnect": "Reconnect a venue on your Koine account",
+    "email_change_requested": "A change of your Koine email address was requested",
+    "email_changed": "Your Koine email address was changed",
 }
 
 ALERT_LEADS = {
@@ -146,6 +151,21 @@ ALERT_LEADS = {
     "sessions_revoked": "Every session on your account was signed out.",
     "key_connected": "A read-only venue key was connected.",
     "key_suspended": "A venue key was suspended and is no longer used.",
+    # wave2
+    "key_rotated": "The read-only key for one of your venue connections was replaced.",
+    "oauth_reconnect": (
+        "A venue stopped accepting Koine's read-only access, so syncing has paused. "
+        "Reconnect it from your dashboard to resume."
+    ),
+    "email_change_requested": (
+        "Someone signed in to your account asked to change its email address. Nothing "
+        "changes unless the link sent to the new address is opened within 1 hour. If this "
+        "was not you, change your password or sign out everywhere: either cancels the link."
+    ),
+    "email_changed": (
+        "The email address on your Koine account was changed and every other session was "
+        "signed out. This address no longer receives Koine email."
+    ),
 }
 
 

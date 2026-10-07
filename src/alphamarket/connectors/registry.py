@@ -27,6 +27,8 @@ from alphamarket.connectors.base import (
     RateBudget,
     RateScope,
     ReadOnlyProof,
+    RegulatoryFees,
+    StreamMode,
     VenueConnector,
     VenueProfile,
 )
@@ -36,9 +38,31 @@ from alphamarket.connectors.coinbase import CoinbaseConnector, CoinbaseMarketDat
 from alphamarket.connectors.coinbase import load_private_key as load_coinbase_key
 from alphamarket.connectors.ibkr import IbkrConnector, IbkrMarketData
 from alphamarket.connectors.kalshi import KalshiConnector, KalshiMarketData, load_private_key_pem
-from alphamarket.connectors.kraken import KRAKEN_API_URL, KrakenConnector, KrakenMarketData
+from alphamarket.connectors.kraken import (
+    KRAKEN_API_URL,
+    KrakenConnector,
+    KrakenMarketData,
+    underlying_asset,
+)
 from alphamarket.connectors.polymarket import PolymarketConnector, PolymarketMarketData
 from alphamarket.connectors.snaptrade import SnapTradeConnector, SnapTradeMarketData
+
+# ---- wave2 scaffold ----
+# US equity sell-side regulatory fees for paper followers (PaperFeeModel.
+# US_EQUITY_REGULATORY). [VERIFY] every value before launch: the SEC Section
+# 31 rate was set to $0.00 per million from 2025-05-14 and the FY2026 rate
+# is not confirmed here; FINRA TAF $0.000166/share capped at $8.30 are the
+# 2024 schedule values. Rounding (methodology): each fee rounds UP to the cent.
+US_EQUITY_REGULATORY_FEES = RegulatoryFees(
+    sec_fee_per_million="0.00",
+    taf_per_share="0.000166",
+    taf_max="8.30",
+    effective="2026-10-01 [VERIFY]",
+)
+
+# Daily-resolution venues see fills a day late: copying them stays allowed
+# (with the lag shown) for three days, then they are stale.
+DAILY_MAX_COPY_LAG_SECONDS = 3 * 24 * 3600
 
 PROFILES: dict[str, VenueProfile] = {
     "kalshi": VenueProfile(
@@ -59,6 +83,7 @@ PROFILES: dict[str, VenueProfile] = {
         fee_rate_bps=700,  # 7% x count x p x (1-p), verified against a live fill
         fee_rounding_micros=100,  # fee_cost has four decimals
         ownership=OwnershipProof.KEY,
+        asset_classes=("prediction",),  # wave2
     ),
     "polymarket": VenueProfile(
         venue="polymarket",
@@ -79,6 +104,7 @@ PROFILES: dict[str, VenueProfile] = {
         fee_rate_bps=500,  # 5% x size x p x (1-p), verified against activity rows
         fee_rounding_micros=1,  # usdcSize carries six decimals
         ownership=OwnershipProof.PROFILE_CODE,
+        asset_classes=("prediction",),  # wave2
     ),
     # ---- venue-kraken ----
     "kraken": VenueProfile(
@@ -130,6 +156,10 @@ PROFILES: dict[str, VenueProfile] = {
             RateBudget(scope=RateScope.IP, capacity=1, refill_per_minute=60),
         ),
         paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
+        asset_classes=("crypto",),  # wave2
+        # P7: WS v2 `executions` queues a sync (legs need Ledgers rows). Only
+        # keys that also carry the optional WebSocket permission stream.
+        stream_mode=StreamMode.NUDGE,
     ),
     # ---- venue-hyperliquid ----
     "hyperliquid": VenueProfile(
@@ -158,10 +188,9 @@ PROFILES: dict[str, VenueProfile] = {
         # (paper followers are charged slightly more, never less).
         fee_rate_bps=5,
         fee_rounding_micros=1,  # fees print 6 dp in USDC
-        # No OwnershipProof value fits a signed message yet (contract request):
-        # PROFILE_CODE routes the account through the claim flow, where
-        # verify_claim checks an EIP-191 signature instead of a bio.
-        ownership=OwnershipProof.PROFILE_CODE,
+        # SIGNED_MESSAGE routes the account through the claim flow, where
+        # verify_claim checks an EIP-191 signature over claim_text(code).
+        ownership=OwnershipProof.SIGNED_MESSAGE,  # wave2: EIP-191 claim message
         readonly_proof=ReadOnlyProof.NONE,
         transfers_observable=True,
         history_depth="10k_fills",
@@ -171,6 +200,10 @@ PROFILES: dict[str, VenueProfile] = {
         daily_resolution=False,
         rate_budgets=(hyperliquid.RATE_BUDGET,),
         paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
+        asset_classes=("crypto",),  # wave2
+        # P7: `userFills` frames are the REST fill objects, ingested directly.
+        stream_mode=StreamMode.FILLS,
+        stream_users_per_ip=hyperliquid.WS_USERS_PER_IP,
     ),
     # ---- venue-coinbase ----
     "coinbase": VenueProfile(
@@ -213,6 +246,9 @@ PROFILES: dict[str, VenueProfile] = {
             RateBudget(scope=RateScope.IP, capacity=10, refill_per_minute=600),
         ),
         paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
+        asset_classes=("crypto",),  # wave2
+        # P7: the `user` channel reports orders, not fills: it queues a sync.
+        stream_mode=StreamMode.NUDGE,
     ),
     # ---- venue-binanceus ----
     "binanceus": VenueProfile(
@@ -276,6 +312,7 @@ PROFILES: dict[str, VenueProfile] = {
             ),
         ),
         paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
+        asset_classes=("crypto",),  # wave2
     ),
     "alpaca": VenueProfile(
         venue="alpaca",
@@ -334,6 +371,8 @@ PROFILES: dict[str, VenueProfile] = {
             ),
         ),
         paper_fee_model=PaperFeeModel.US_EQUITY_REGULATORY,
+        regulatory_fees=US_EQUITY_REGULATORY_FEES,  # wave2
+        asset_classes=("equities",),
     ),
     # ---- venue-ibkr ----
     "ibkr": VenueProfile(
@@ -389,6 +428,10 @@ PROFILES: dict[str, VenueProfile] = {
             ),
         ),
         paper_fee_model=PaperFeeModel.US_EQUITY_REGULATORY,
+        regulatory_fees=US_EQUITY_REGULATORY_FEES,  # wave2
+        asset_classes=("equities",),
+        pricing_venue="alpaca",  # no public market data of its own
+        max_copy_lag_seconds=DAILY_MAX_COPY_LAG_SECONDS,
     ),
     # ---- venue-snaptrade ----
     "snaptrade": VenueProfile(
@@ -448,6 +491,10 @@ PROFILES: dict[str, VenueProfile] = {
             ),
         ),
         paper_fee_model=PaperFeeModel.US_EQUITY_REGULATORY,
+        regulatory_fees=US_EQUITY_REGULATORY_FEES,  # wave2
+        asset_classes=("equities",),
+        pricing_venue="alpaca",  # no public market data of its own
+        max_copy_lag_seconds=DAILY_MAX_COPY_LAG_SECONDS,
     ),
 }
 
@@ -459,6 +506,12 @@ def get_profile(venue: str) -> VenueProfile:
         return PROFILES[venue]
     except KeyError:
         raise ValueError(f"Unsupported venue: {venue!r}") from None
+
+
+def streaming_venues() -> dict[str, VenueProfile]:
+    """P7: venues whose connectors offer a private stream (stream.py opens it
+    through build_connector(...).stream_source())."""
+    return {venue: p for venue, p in PROFILES.items() if p.stream_mode is not None}
 
 
 def _build_kalshi(venue_env: str, key_id: str, secret: str | None) -> VenueConnector:
@@ -572,6 +625,15 @@ def build_connector(
     return connector
 
 
+# ---- wave2 scaffold ----
+# Outbound budgets for market data sources that are not venues (no profile,
+# never connectable), e.g. the CoinGecko fallback price source. The limiter
+# falls back to this table (venue_limits._profile_budgets).
+DATA_SOURCE_BUDGETS: dict[str, tuple[RateBudget, ...]] = {
+    # CoinGecko demo plan: 30 calls/min [VERIFY against the account's plan].
+    "coingecko": (RateBudget(scope=RateScope.IP, capacity=30, refill_per_minute=30),),
+}
+
 _MARKET_DATA_BUILDERS: dict[str, Callable[[str], MarketDataSource]] = {
     "kalshi": lambda venue_env: KalshiMarketData(base_url=KALSHI_BASE_URLS[venue_env]),
     "polymarket": lambda venue_env: PolymarketMarketData(
@@ -597,6 +659,31 @@ _MARKET_DATA_BUILDERS: dict[str, Callable[[str], MarketDataSource]] = {
 }
 
 
+# Assets a venue holds that are priced as another asset, one unit for one
+# (Kraken staked/bonded/opt-in variants: ETH2.S, DOT28.S, BTC.M -> ETH, DOT,
+# BTC). Valuation looks prices up under the result (valuation_db.price_inputs).
+_PRICE_ASSET: dict[str, Callable[[str], str]] = {"kraken": underlying_asset}
+
+
+def price_asset(venue: str, asset: str) -> str:
+    """The asset whose closes value one unit of `asset` held on `venue`."""
+    mapper = _PRICE_ASSET.get(venue)
+    return mapper(asset) if mapper is not None else asset
+
+
+# Every asset code worth exactly 1.00 USD whichever account holds it: the
+# common stablecoins plus each venue's own codes for them (Kraken's held and
+# earning variants, Hyperliquid's HIP-3 collateral tokens). One set, so the
+# creator's equity, stats, signals and the paper book all agree
+# (valuation.CASH_AT_PAR). A venue's market data class lists its codes in
+# STABLECOINS_AT_PAR so no close is ever fetched for them.
+CASH_AT_PAR: frozenset[str] = (
+    MarketDataSource.STABLECOINS_AT_PAR
+    | KrakenMarketData.STABLECOINS_AT_PAR
+    | hyperliquid.HyperliquidMarketData.STABLECOINS_AT_PAR
+)
+
+
 def build_market_data(venue: str, venue_env: str) -> MarketDataSource:
     """Public (unauthenticated) market data for a venue environment."""
     try:
@@ -607,6 +694,10 @@ def build_market_data(venue: str, venue_env: str) -> MarketDataSource:
 
 
 # ---- venue-alpaca: OAuth providers (oauth.py) ----
+
+# Authorize endpoints the connect form may redirect to (CSP form-action,
+# security_headers.py). One entry per OAuth venue.
+OAUTH_AUTHORIZE_URLS: tuple[str, ...] = (ALPACA_OAUTH_AUTHORIZE_URL,)
 
 
 def get_oauth_provider(venue: str):
@@ -638,3 +729,178 @@ def resolve_oauth_account_id(venue: str, venue_env: str, secret: str) -> str:
     if venue != "alpaca":
         raise ValueError(f"{venue} does not connect by OAuth")
     return _build_alpaca(venue_env, "", secret).fetch_account_id()
+
+
+# ---- wave2:market-data ----
+# CoinGecko fallback prices (connectors/coingecko.py, plan D13). A market data
+# source only: it has no profile, so it never appears in PROFILES and can never
+# be connected (build_connector raises for it).
+#
+# Curated asset code -> CoinGecko coin id. No search: an asset missing here
+# stays unpriced rather than being matched by ticker (tickers collide). Asset
+# codes are the canonical ledger codes (Kraken XBT -> BTC, XDG -> DOGE).
+# [VERIFY] every id against https://api.coingecko.com/api/v3/coins/list before
+# launch; ids occasionally change when a coin migrates. Stablecoins are priced
+# at par (MarketDataSource.STABLECOINS_AT_PAR) and are deliberately absent.
+COINGECKO_COIN_IDS: dict[str, str] = {
+    "BTC": "bitcoin",
+    "ETH": "ethereum",
+    "SOL": "solana",
+    "XRP": "ripple",
+    "ADA": "cardano",
+    "DOGE": "dogecoin",
+    "LTC": "litecoin",
+    "BCH": "bitcoin-cash",
+    "DOT": "polkadot",
+    "LINK": "chainlink",
+    "AVAX": "avalanche-2",
+    "ATOM": "cosmos",
+    "XLM": "stellar",
+    "UNI": "uniswap",
+    "AAVE": "aave",
+    "ETC": "ethereum-classic",
+    "FIL": "filecoin",
+    "ALGO": "algorand",
+    "NEAR": "near",
+    "APT": "aptos",
+    "SUI": "sui",
+    "TRX": "tron",
+    "SHIB": "shiba-inu",
+    "PEPE": "pepe",
+    "ARB": "arbitrum",
+    "OP": "optimism",
+    "HYPE": "hyperliquid",
+    "POL": "polygon-ecosystem-token",
+    "MATIC": "matic-network",
+}
+
+
+def _build_coingecko(venue_env: str) -> MarketDataSource:
+    from alphamarket.connectors.coingecko import CoinGeckoMarketData
+
+    settings = get_settings()
+    return CoinGeckoMarketData(
+        coin_ids=COINGECKO_COIN_IDS,
+        api_key=settings.coingecko_api_key,
+        base_url=settings.coingecko_base_url,
+    )
+
+
+_MARKET_DATA_BUILDERS["coingecko"] = _build_coingecko
+
+# ---- wave2:p8-connect ----
+# Aggregator account lifecycle (CredentialKind.AGGREGATOR, D20): registering
+# one aggregator user per connection, the Connection Portal link, the account
+# picker and deleting the user on disconnect. Core code calls these wrappers,
+# never connectors/snaptrade.py. Secrets (the user secret) are passed in and
+# returned, never logged.
+
+from dataclasses import dataclass  # noqa: E402 (shared file: wave2 end block)
+
+from alphamarket.connectors.base import Throttle  # noqa: E402 (shared file: wave2 end block)
+
+
+@dataclass(frozen=True)
+class AggregatorAccount:
+    """One brokerage account behind an aggregator user, as the picker shows
+    it. `number_last4` only: the full account number is never rendered."""
+
+    account_ref: str
+    institution: str
+    name: str | None
+    number_last4: str | None
+    is_paper: bool
+
+
+def _snaptrade_keys() -> tuple[str, str]:
+    settings = get_settings()
+    if not settings.snaptrade_client_id or not settings.snaptrade_consumer_key:
+        raise ValueError("SnapTrade needs snaptrade_client_id/snaptrade_consumer_key configured")
+    return settings.snaptrade_client_id, settings.snaptrade_consumer_key
+
+
+def _require_aggregator(venue: str) -> None:
+    if get_profile(venue).credential is not CredentialKind.AGGREGATOR or venue != "snaptrade":
+        raise ValueError(f"{venue} is not an aggregator venue")
+
+
+# Every wrapper below takes an optional `throttle` (connectors.base.Throttle):
+# the outbound limiter's charge for the call. The worker's connectors get theirs
+# from JobContext; web requests pass one from venue_limits.call_venue, which
+# fails fast instead of waiting (SnapTrade is shared by every connected user).
+
+
+def aggregator_register_user(venue: str, *, throttle: Throttle | None = None) -> tuple[str, str]:
+    """Register a fresh aggregator user for one connection: (user_id, user_secret).
+    The id is random (no email or Koine user id leaks to the aggregator)."""
+    import secrets as _secrets
+
+    from alphamarket.connectors import snaptrade
+
+    _require_aggregator(venue)
+    client_id, consumer_key = _snaptrade_keys()
+    for _ in range(3):
+        user_id = f"koine-{_secrets.token_hex(16)}"
+        try:
+            return snaptrade.register_user(client_id, consumer_key, user_id, throttle=throttle)
+        except snaptrade.SnapTradeUserExists:
+            continue  # astronomically unlikely; draw another id
+    raise RuntimeError("could not register an aggregator user")
+
+
+def aggregator_portal_url(
+    venue: str,
+    user_id: str,
+    user_secret: str,
+    *,
+    redirect: str | None = None,
+    throttle: Throttle | None = None,
+) -> str:
+    """The aggregator's Connection Portal link, read-only connection type."""
+    from alphamarket.connectors import snaptrade
+
+    _require_aggregator(venue)
+    client_id, consumer_key = _snaptrade_keys()
+    return snaptrade.generate_connection_portal_url(
+        client_id, consumer_key, user_id, user_secret, custom_redirect=redirect, throttle=throttle
+    )
+
+
+def aggregator_list_accounts(
+    venue: str, user_id: str, user_secret: str, *, throttle: Throttle | None = None
+) -> list[AggregatorAccount]:
+    """Every brokerage account the aggregator user has linked."""
+    _require_aggregator(venue)
+    connector = build_connector(venue, get_settings().venue_env(venue), user_id, user_secret)
+    connector.set_throttle(throttle)
+    rows = connector.list_accounts()  # type: ignore[attr-defined]
+    out = []
+    for r in rows:
+        number = str(r.get("number") or "")
+        out.append(
+            AggregatorAccount(
+                account_ref=str(r["account_ref"]),
+                institution=str(r.get("institution_name") or ""),
+                name=r.get("name"),
+                number_last4=number[-4:] if number else None,
+                is_paper=bool(r.get("is_paper")),
+            )
+        )
+    return out
+
+
+def aggregator_delete_user(venue: str, user_id: str, *, throttle: Throttle | None = None) -> bool:
+    """Delete the aggregator user (stops billing; the aggregator drops its
+    brokerage connections). True when it was deleted now, False when the
+    aggregator no longer knows it (already deleted: the same end state, so a
+    retry counts it as done). Raises on any other failure; the caller hands
+    that to the retry job (aggregator_jobs.py)."""
+    from alphamarket.connectors import snaptrade
+
+    _require_aggregator(venue)
+    client_id, consumer_key = _snaptrade_keys()
+    try:
+        snaptrade.delete_user(client_id, consumer_key, user_id, throttle=throttle)
+    except snaptrade.SnapTradeUserNotFound:
+        return False
+    return True

@@ -91,6 +91,25 @@ class PaperFeeModel(StrEnum):
     US_EQUITY_REGULATORY = "us_equity_regulatory"  # $0 commission + SEC fee + FINRA TAF on sells
 
 
+class StreamMode(StrEnum):
+    """How a venue's private stream feeds the ledger (P7, stream.py). The
+    poller stays the source of truth either way: a stream only shortens copy
+    lag, and a dropped stream changes nothing but that lag."""
+
+    # Frames carry fills normalized EXACTLY as the polled path normalizes
+    # them (same venue ids, same legs), so they are ingested directly through
+    # ingest.ingest_asset_fills; a fill seen by both is stored once. Only for
+    # venues whose stream payload is the REST payload (Hyperliquid userFills).
+    FILLS = "fills"
+    # Frames only say "this account just traded"; the account's sync job is
+    # queued at once and the REST path ingests the fill. For venues whose
+    # stream shape differs from the polled one (Kraken legs come from Ledgers
+    # rows with running balances, which no stream carries): ingesting a
+    # differently-shaped copy would quarantine the account on the poller's
+    # exact duplicate check.
+    NUDGE = "nudge"
+
+
 class InstrumentKind(StrEnum):
     BINARY = "binary"  # contracts that settle at $1 or $0 (yes/no)
     ASSET = "asset"  # shares/coins valued at a mark, no settlement
@@ -99,6 +118,35 @@ class InstrumentKind(StrEnum):
 class OwnershipProof(StrEnum):
     KEY = "key"  # holding a valid read-only key proves the account is yours
     PROFILE_CODE = "profile_code"  # put a Koine code in the venue profile bio
+    # wave2: sign a Koine message (the claim code is the nonce) with the
+    # account's wallet; see VenueConnector.claim_text / claim_payload.
+    SIGNED_MESSAGE = "signed_message"
+
+
+@dataclass(frozen=True)
+class RegulatoryFees:
+    """US equity sell-side regulatory fees the paper mirror charges under
+    PaperFeeModel.US_EQUITY_REGULATORY (decimal strings, USD).
+
+    SEC Section 31 fee: notional x sec_fee_per_million / 1e6 on sells.
+    FINRA TAF: shares x taf_per_share on sells, capped at taf_max.
+    `effective` is the date the values were checked against the sources
+    (docs/methodology.md "Paper copying v2"); rates change by SEC order."""
+
+    sec_fee_per_million: str
+    taf_per_share: str
+    taf_max: str
+    effective: str
+
+
+@dataclass(frozen=True)
+class MarginTier:
+    """One perp maintenance-margin tier: positions with notional >=
+    lower_bound (USD, decimal string) may use at most max_leverage.
+    Maintenance margin rate = 1 / (2 x max_leverage) [VERIFY per venue]."""
+
+    lower_bound: str
+    max_leverage: int
 
 
 @dataclass(frozen=True)
@@ -131,6 +179,26 @@ class VenueProfile:
     daily_resolution: bool = False  # EOD data only -> "daily_verified" tier
     rate_budgets: tuple[RateBudget, ...] = ()
     paper_fee_model: PaperFeeModel = PaperFeeModel.BINARY_PXQ
+    # ---- wave2 fields ----
+    # Venue whose public market data prices this venue's assets when it has
+    # none of its own (IBKR, SnapTrade -> "alpaca"). None = this venue.
+    pricing_venue: str | None = None
+    # Paper fill when no quote at observed_at exists: creator price moved
+    # against the follower by this many bps (methodology "Paper copying v2").
+    paper_fallback_penalty_bps: int = 50
+    # A signal observed later than this after its fill is not copied
+    # ("stale_signal"): a follower could not have traded near that price.
+    max_copy_lag_seconds: int = 6 * 3600
+    regulatory_fees: RegulatoryFees | None = None  # US_EQUITY_REGULATORY only
+    asset_classes: tuple[str, ...] = ()  # "prediction" | "crypto" | "equities"
+    # ---- P7 streaming (stream.py) ----
+    # None: the venue is polled only. Otherwise how its private stream feeds
+    # the ledger (StreamMode); the connector's stream_source() builds it.
+    stream_mode: StreamMode | None = None
+    # Venue cap on distinct accounts streamed from one egress IP (Hyperliquid:
+    # "at most 10 unique users" across websocket user subscriptions per IP).
+    # None: no documented cap.
+    stream_users_per_ip: int | None = None
 
     @property
     def needs_secret(self) -> bool:
@@ -455,6 +523,80 @@ class _Throttled:
             self._throttle.after(endpoint, extra_cost, used)
 
 
+# ---- P7 streaming (optional capability) --------------------------------------
+#
+# A venue that can push its own fills implements VenueConnector.stream_source()
+# and sets VenueProfile.stream_mode. The source is protocol logic only: it
+# names the websocket URL, builds the subscribe frames and parses incoming
+# frames into StreamEvents. It never opens a socket; the core (stream.py)
+# owns the connection, pings, timeouts, reconnects, leases and ingestion, so
+# every frame parser is testable from fixture text without a network.
+#
+# Rules for implementations:
+# - prepare() may make REST calls (a websocket token); they go through the
+#   connector's throttle like any other request.
+# - subscribe_frames() may contain a token or JWT: callers never log them.
+# - parse() is synchronous and may call the connector's cached metadata
+#   (Hyperliquid spotMeta); BudgetExhausted/RateLimited from it make the core
+#   fall back to a nudge, never drop the activity silently.
+# - Venue ids of streamed fills MUST equal the polled ids, and in
+#   StreamMode.FILLS the legs must be identical too (ingest quarantines a
+#   differing duplicate).
+
+
+class StreamUnavailable(Exception):  # noqa: N818  (a state, like BalanceUnavailable)
+    """This account cannot stream (the key lacks the websocket permission,
+    the venue refused the subscription). The account stays polled; the
+    stream process does not retry it until a cool-off has passed."""
+
+
+class StreamProtocolError(Exception):
+    """The venue sent an error frame or something unparseable; the stream
+    reconnects with backoff."""
+
+
+@dataclass
+class StreamEvent:
+    """What one frame means. `fills` (StreamMode.FILLS only) go through the
+    idempotent ingest path; `nudge` asks for the account's sync job now.
+    `ref` is a venue id for logs (never a secret)."""
+
+    fills: list["NormalizedAssetFill"] = field(default_factory=list)
+    nudge: bool = False
+    ref: str | None = None
+
+
+class StreamingSource(ABC):
+    """One account's private stream, as protocol logic (see the rules above)."""
+
+    venue: str
+    # Application-level keepalive: the core sends ping_frame() this often.
+    ping_interval_seconds: float = 30.0
+    # No frame at all for this long means a dead connection: reconnect.
+    idle_timeout_seconds: float = 90.0
+
+    def prepare(self) -> None:
+        """Called before every (re)connect: fetch a fresh token, etc."""
+        return None
+
+    @abstractmethod
+    def url(self) -> str: ...
+
+    @abstractmethod
+    def subscribe_frames(self) -> list[str]:
+        """Text frames sent right after connecting (may hold a token)."""
+
+    def ping_frame(self) -> str | None:
+        """An application ping, or None when the venue needs none."""
+        return None
+
+    @abstractmethod
+    def parse(self, frame: str | bytes) -> list[StreamEvent]:
+        """Events in one frame (heartbeats and acks: none). Raises
+        StreamProtocolError on an error frame, StreamUnavailable when the
+        venue says this account may not subscribe."""
+
+
 class VenueConnector(_Throttled, ABC):
     """One instance per connected venue account."""
 
@@ -492,7 +634,34 @@ class VenueConnector(_Throttled, ABC):
     def verify_claim(self, code: str) -> bool | None:
         """For OwnershipProof.PROFILE_CODE venues: True if `code` is visible
         in the account's public profile, False if not, None if the venue
-        could not be asked. Key-based venues never need this."""
+        could not be asked. Key-based venues never need this.
+        SIGNED_MESSAGE venues receive claim_payload(code, signature)."""
+        return None
+
+    # ---- wave2: ownership by signed message, unsupported activity ----
+
+    def claim_text(self, code: str) -> str | None:
+        """SIGNED_MESSAGE venues: the exact text the user signs for claim
+        code `code`. None for venues that do not claim by signature."""
+        return None
+
+    def claim_payload(self, code: str, signature: str) -> str:
+        """What verify_claim receives for a signature over claim_text(code).
+        The caller passes the account's STORED claim code, never one the user
+        submitted (replay protection). Default: the bare code."""
+        return code
+
+    def drain_unsupported(self) -> list["UnsupportedActivity"]:
+        """Activities skipped by page methods since the last call, oldest
+        first, then forgotten. The page runner persists them after every
+        page (venue_activity_flags). Default: the venue skips nothing."""
+        return []
+
+    def stream_source(self) -> StreamingSource | None:
+        """P7: this account's private stream (VenueProfile.stream_mode says
+        how it feeds the ledger). None: the venue, or this credential, is
+        polled only. Core code reaches it only through a connector built by
+        the registry."""
         return None
 
     # ---- v2 (platform_plan 2.3): additive, with defaults for M7 venues ----
@@ -691,6 +860,10 @@ class MarketDataSource(_Throttled, ABC):
         """Splits, dividends and symbol changes in [start, end] (equities)."""
         return []
 
+    def fetch_margin_tiers(self, symbol: str) -> list[MarginTier]:
+        """Perp maintenance-margin tiers, ascending by lower_bound (wave2)."""
+        return []
+
 
 class AssetMarketData(MarketDataSource):
     """Base for non-binary market data: there are no binary markets to fetch."""
@@ -735,3 +908,18 @@ class CorporateAction(BaseModel):
     ratio_old: int | None = None
     cash_per_share: str | None = None  # dividend, decimal string USD
     new_symbol: str | None = None  # symbol change
+
+
+class UnsupportedActivity(BaseModel):
+    """An activity Koine cannot yet put in the ledger. It is skipped (never
+    guessed at) and surfaced so the account shows a visible "unsupported
+    activity" flag: numbers after it may not reconcile. Persisted as
+    venue_activity_flags rows (wave2; moved here from alpaca.py)."""
+
+    venue_ref: str
+    activity_type: str
+    activity_sub_type: str | None = None
+    symbol: str | None = None
+    occurred_at: datetime
+    reason: str  # short_sale | option | crypto | stock_dividend | canceled | unsupported_type
+    description: str | None = None

@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session, object_session
 
 from alphamarket import credentials
 from alphamarket.connectors.base import (
+    CredentialKind,
     InstrumentKind,
     InstrumentType,
     NormalizedAssetFill,
@@ -116,9 +117,14 @@ def connector_for(
     db = db if db is not None else object_session(account)
     if db is None:
         raise ValueError(f"venue account {account.id} is detached; cannot audit the decrypt")
-    if get_profile(account.venue).needs_secret:
+    profile = get_profile(account.venue)
+    if profile.needs_secret:
         opened = credentials.open_credential(db, account, purpose=purpose)
         secret, account_ref = opened.secret, opened.account_ref
+        if profile.credential is CredentialKind.OAUTH2:  # wave2: refresh before use
+            from alphamarket.oauth_jobs import refresh_if_due
+
+            secret = refresh_if_due(db, account, opened) or secret
     else:
         secret, account_ref = None, credentials.account_ref_for(db, account)
     return build_connector(
@@ -733,6 +739,7 @@ def ingest_asset_fills_page(
     `cursor`, and so does the next sync_account."""
     page = connector.fetch_asset_fills_page(cursor, since)
     result = ingest_asset_fills(db, account, page.items)
+    _persist_unsupported(db, account, connector)
     _store_resume_cursor(db, account, STREAM_ASSET_FILLS, _pass_cursor(page))
     if commit:  # the job runner commits the page with its own cursor instead
         db.commit()
@@ -753,12 +760,21 @@ def ingest_events_page(
     """Same as ingest_asset_fills_page for non-fill events."""
     page = connector.fetch_events_page(cursor, since)
     result = ingest_events(db, account, page.items)
+    _persist_unsupported(db, account, connector)
     _store_resume_cursor(db, account, STREAM_EVENTS, _pass_cursor(page))
     if commit:  # the job runner commits the page with its own cursor instead
         db.commit()
     if into is not None:
         into.merge(result)
     return PageCursors(page.next_cursor, page.resume_cursor)
+
+
+def _persist_unsupported(db: Session, account: VenueAccount, connector) -> None:
+    """wave2: activity the connector skipped on this page becomes a visible
+    flag, committed with the page (activity_flags.py)."""
+    from alphamarket import activity_flags
+
+    activity_flags.persist(db, account, connector.drain_unsupported())
 
 
 def _run_stream(db: Session, account: VenueAccount, connector, stream: str, page_fn):

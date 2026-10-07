@@ -13,16 +13,22 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from alphamarket.ingest import is_asset_venue
 from alphamarket.models import Fill, Settlement, Signal, Strategy, VenueAccount
 from alphamarket.stats import replay
 
 logger = logging.getLogger(__name__)
 
 
-def emit_signals(db: Session, strategy: Strategy) -> int:
+def emit_signals(db: Session, strategy: Strategy, *, limiter=None) -> int:
     """Create Signal rows for every post-anchor fill that has none. Idempotent
-    (unique on fill_id). Returns rows added."""
+    (unique on fill_id). Returns rows added. wave2: asset venues go to
+    paper_signals (signals v2); `limiter` lets it capture quotes."""
     account = db.get(VenueAccount, strategy.venue_account_id)
+    if account is not None and is_asset_venue(account.venue):
+        from alphamarket.paper_signals import emit_asset_signals
+
+        return emit_asset_signals(db, strategy, limiter=limiter)
     if account is None or account.anchor_balance_micros is None or account.anchor_at is None:
         return 0
     fills = db.scalars(

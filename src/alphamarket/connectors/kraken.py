@@ -79,6 +79,10 @@ from alphamarket.connectors.base import (
     RateLimited,
     ReadOnlyEvidence,
     ReadOnlyProof,
+    StreamEvent,
+    StreamingSource,
+    StreamProtocolError,
+    StreamUnavailable,
 )
 from alphamarket.money import from_atoms, to_atoms, to_micros
 
@@ -801,6 +805,36 @@ class KrakenConnector(AssetVenueConnector):
             return Page(items=fills, resume_cursor=walk.resume())
         return Page(items=fills, next_cursor=json.dumps({"v": 1, "w": asdict(walk)}))
 
+    # -- P7 streaming --
+
+    def websockets_token(self) -> str:
+        """A token for the authenticated websocket (POST GetWebSocketsToken).
+        It needs the key's "WebSocket interface" permission (Kraken UI:
+        "Access WebSockets API"), which the connect screen does not ask for:
+        a key without it gets EGeneral:Permission denied and the account is
+        simply polled (StreamUnavailable). The permission grants no trading
+        of its own: WS add_order still needs "Create & Modify Orders", which
+        prove_read_only's AddOrder probe refuses [VERIFY with a real key].
+        The token is a bearer secret: never logged, held only in memory.
+        Valid 15 minutes until used to subscribe, then for the connection."""
+        try:
+            result = self._private("GetWebSocketsToken")
+        except KrakenAuthError:
+            raise
+        except KrakenError as exc:
+            if any(e.startswith(PERMISSION_DENIED) for e in exc.errors):
+                raise StreamUnavailable(
+                    "kraken: the API key lacks the WebSocket interface permission"
+                ) from None
+            raise
+        token = (result or {}).get("token")
+        if not token:
+            raise KrakenError("GetWebSocketsToken", ["no token in the response"])
+        return str(token)
+
+    def stream_source(self) -> "KrakenExecutionStream":
+        return KrakenExecutionStream(self)
+
 
 def _complete_prefix(rows: list[LedgerRow]) -> int:
     """Rows (oldest first) to emit from a page that is not the top of the
@@ -920,3 +954,101 @@ class KrakenMarketData(AssetMarketData):
             last=str(info["c"][0]),
             as_of=datetime.now(UTC),
         )
+
+
+# ---- P7: private websocket (StreamMode.NUDGE) ----------------------------------
+
+KRAKEN_WS_AUTH_URL = "wss://ws-auth.kraken.com/v2"
+# exec_type values that mean "a trade happened" (WS v2 `executions`, docs
+# 2026-10). "trade" is each fill; "filled" closes a fully filled order and
+# may repeat the last trade [VERIFY]. A duplicate nudge coalesces into one
+# queued sync, so both are taken.
+_TRADE_EXEC_TYPES = frozenset({"trade", "filled"})
+
+
+class KrakenExecutionStream(StreamingSource):
+    """WS v2 private `executions` channel (the v1 `ownTrades` successor).
+
+    NUDGE mode, deliberately: a Kraken fill's ledger legs come from its
+    Ledgers rows (exact running balances, ZUSD at 4 dp while `cost` prints
+    5), and no websocket message carries those rows. A fill built from the
+    execution report would differ from the poller's copy of the same txid,
+    and ingest quarantines a differing duplicate. So a trade execution only
+    queues the account's sync, which ingests it through REST in seconds.
+
+    Frames (docs examples, docs.kraken.com/api/docs/websocket-v2/executions;
+    not yet seen on a real key [VERIFY]):
+      subscribe ack {"method":"subscribe","result":{"channel":"executions",..},
+                     "success":true,...}; refused: "success":false + "error"
+      update        {"channel":"executions","type":"update","data":[{
+                     "exec_type":"trade","exec_id":..,"order_id":..,
+                     "symbol":"BTC/USD","side":"buy","last_qty":..,..}]}
+      heartbeat     {"channel":"heartbeat"} about once a second
+      status        {"channel":"status","type":"update","data":[..]}
+      pong          {"method":"pong",...}
+    A trade's exec_id is expected to equal the REST TradesHistory txid
+    [VERIFY]; nothing depends on it (it is only logged as `ref`)."""
+
+    venue = "kraken"
+    ping_interval_seconds = 30.0
+    idle_timeout_seconds = 60.0  # heartbeats arrive every second while subscribed
+
+    def __init__(self, connector: KrakenConnector, ws_url: str = KRAKEN_WS_AUTH_URL) -> None:
+        self.connector = connector
+        self.ws_url = ws_url
+        self._token: str | None = None
+
+    def __repr__(self) -> str:  # never show the token
+        return f"KrakenExecutionStream(url={self.ws_url!r})"
+
+    def prepare(self) -> None:
+        self._token = self.connector.websockets_token()
+
+    def url(self) -> str:
+        return self.ws_url
+
+    def subscribe_frames(self) -> list[str]:
+        if self._token is None:
+            raise StreamProtocolError("kraken: prepare() did not fetch a websocket token")
+        params = {
+            "channel": "executions",
+            "token": self._token,
+            "snap_orders": False,
+            # No snapshot: the gap a reconnect leaves is closed by the
+            # catch-up sync the core queues after every reconnect.
+            "snap_trades": False,
+        }
+        return [json.dumps({"method": "subscribe", "params": params, "req_id": 1})]
+
+    def ping_frame(self) -> str | None:
+        return json.dumps({"method": "ping"})
+
+    def parse(self, frame: str | bytes) -> list[StreamEvent]:
+        try:
+            msg = json.loads(frame)
+        except ValueError:
+            raise StreamProtocolError("kraken: frame is not JSON") from None
+        if not isinstance(msg, dict):
+            return []
+        method = msg.get("method")
+        if method == "subscribe":
+            if msg.get("success") is False:
+                error = str(msg.get("error") or "subscribe refused")
+                if "Permission denied" in error or error.startswith("EAccount"):
+                    raise StreamUnavailable(f"kraken: executions refused: {error[:200]}")
+                raise StreamProtocolError(f"kraken: subscribe failed: {error[:200]}")
+            return []
+        if method is not None:  # pong, unsubscribe acks
+            return []
+        if msg.get("error"):
+            raise StreamProtocolError(f"kraken: {str(msg['error'])[:200]}")
+        if msg.get("channel") != "executions":
+            return []  # heartbeat, status
+        refs = [
+            str(e.get("exec_id") or e.get("order_id") or "")
+            for e in msg.get("data") or []
+            if isinstance(e, dict) and e.get("exec_type") in _TRADE_EXEC_TYPES
+        ]
+        if not refs:
+            return []  # order lifecycle only (new, canceled, amended, ...)
+        return [StreamEvent(nudge=True, ref=refs[0] or None)]

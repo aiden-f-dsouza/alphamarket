@@ -8,10 +8,14 @@ Every formula here is pinned by a unit test with hand-computed expected values
 
 - Every number on a strategy page is computed by Koine from data pulled
   directly from the venue using a **read-only** connection the trader made:
-  a read-only API key (Kalshi) or a public wallet address (Polymarket).
-  Traders cannot enter, edit, or upload performance figures.
-- A key's scope is checked at connect time against the venue's own key
-  registry; a key with trading permission is rejected. A wallet address
+  a read-only API key (Kalshi, Kraken, Coinbase, Binance.US), a read-only
+  OAuth grant (Alpaca), a reporting token (Interactive Brokers Flex), an
+  aggregator's read-only connection (SnapTrade) or a public wallet address
+  (Polymarket, Hyperliquid). Traders cannot enter, edit, or upload
+  performance figures.
+- A key's scope is checked at connect time (against the venue's own key
+  registry, or by a probe a read-only key must fail; see each venue's section
+  below); a key with trading permission is rejected. A wallet address
   involves no key at all: the history is public on-chain data.
 - Fills and settlements are stored **append-only**: rows are never updated or
   deleted, at the application layer and (on Postgres) by database triggers.
@@ -379,7 +383,7 @@ first rescaled to the finest precision seen before anything is added. Example:
 **Equity at the end of each UTC day `d`:**
 
 ```
-E_d = Σ cash assets (USD, USDC, USDT)   qty × 1.00
+E_d = Σ cash assets (USD, stablecoins)  qty × 1.00
     + Σ coins and shares                qty × close_d
     + Σ open perpetual positions        qty × (close_d − entry)
 ```
@@ -642,3 +646,536 @@ reported account equity.
 **Prices.** Daily closes are Alpaca's unadjusted daily bars (share counts
 are adjusted by the split entries themselves, so prices must not be
 adjusted twice). A bar belongs to its New York trading date.
+
+<!-- wave2:market-data -->
+## Daily prices and fallback pricing
+
+Every number that values a coin, a share or a perpetual contract in US
+dollars comes from a daily close stored in `prices_daily`. The code is
+`alphamarket/prices.py`; `tests/test_prices.py` and `tests/test_coingecko.py`
+pin the rules below with hand-computed values.
+
+**Which instrument prices an asset.** The venue whose public market data
+prices the account (the venue itself, except IBKR and SnapTrade accounts,
+which are priced from Alpaca's market data) picks one instrument per asset
+with one rule: the first spot or equity instrument whose base is the asset and
+whose quote is USD, then USDC, then USDT. A staked or bonded Kraken variant
+(`ETH2.S`) is priced as its underlying coin. A perpetual contract (`BTC-PERP`)
+is priced only by that venue's own perpetual contract, never by the spot coin.
+Cash and stablecoins need no price: they are worth 1.00. That is USD, USDC
+and USDT, plus each venue's own codes for them: Kraken's held and earning
+balances (USD.HOLD, USD.M, USDC.M, USDC.F, USDT.M, USDT.F) and the tokens
+Hyperliquid's HIP-3 markets settle in (USDT0, USDH). One list is used for the
+creator's equity, the statistics, signals and paper books alike.
+
+**Fallback pricing.** An asset the venue does not list is priced from
+CoinGecko, which is a source of daily prices only (no quotes, no fills, never
+a venue). Koine keeps a curated list of asset codes and CoinGecko coin ids and
+never searches by ticker, because tickers collide: an asset that is not on the
+list stays unpriced, and its holding is shown without a value instead of being
+matched to whatever coin shares its ticker. Every fallback close is labelled
+`source = coingecko`, and the pricing venue's own close always wins when both
+exist.
+
+**Which day a close belongs to.** The close of UTC day `d` is the last price of
+that day. Exchange candles are read as the venue publishes them (Alpaca stamps
+a bar with its New York trading date). CoinGecko publishes a price at an
+instant, so the close of day `d` is its price at 00:00 UTC of `d + 1`: the
+sample nearest to that midnight within 30 minutes, the earlier one on a tie,
+and no close at all if there is none that near. The day still in progress has
+no close.
+
+**From close to dollars.** A close is stored exactly as the source sent it. Its
+USD value per unit is that decimal times 1,000,000 micro-dollars, truncated
+toward zero, and only when the quote asset is USD or a stablecoin held at par
+(the list above):
+
+```
+61234.5 USD          -> 61,234.5 x 1,000,000       = 61,234,500,000 micros
+100.5 USDT           -> 100.5 x 1,000,000          = 100,500,000 micros (par)
+61234.56789123 USD   -> 61,234,567,891.23          -> 61,234,567,891 micros
+0.0000004 USD        -> 0.4                        -> 0 micros
+0.052 BTC            -> no value (quoted in BTC; it would need a second price)
+```
+
+The decimal is never passed through a floating-point number, so no digit of a
+sub-cent price is lost before the truncation. The stored close keeps every
+digit, which is what lets very small prices be valued exactly elsewhere.
+
+**Which days are fetched.** For each priced instrument, only the days that are
+missing: from the day before the earliest account anchor or paper allocation
+start that holds the asset (the creator's equity at a fill uses the previous
+complete close, so a fill on the anchor day needs it) up to yesterday UTC. A
+day of the last four that the source has not published yet is asked for again
+by the next night's request, so a close published late is still stored; an
+older day without a close (weekends and holidays for stocks) is taken as one
+the source never publishes and is not asked for again. A close that is already
+stored is never rewritten.
+
+**Perpetual contract margin tiers.** For Hyperliquid perpetuals Koine stores
+the contract's maintenance-margin tiers, refreshed once per UTC day: a list of
+`(notional lower bound in USD, maximum leverage)` ascending by lower bound, read
+from the venue's published margin tables. A contract whose table is not
+published gets one tier from its own maximum leverage. [VERIFY] that the
+maintenance rate 1 / (2 x maximum leverage) of a tier is the venue's definition
+for every table.
+
+**Quotes, funding and corporate actions.** The latest quote of an instrument held
+in an open paper book is stored with its time and source. It is a mark only while
+younger than `QUOTE_MAX_AGE_SECONDS` (15 minutes): the mid of the bid and ask when
+both are quoted, otherwise the last trade; an older quote is not a mark. Funding rates of held
+perpetuals are stored as the venue publishes them, one row per interval. Splits,
+cash dividends and symbol changes are stored for US stocks held by paper books,
+looked ahead 30 days so an announced action is known before its ex-date, and
+re-read for the last 14 days each night.
+
+<!-- wave2:stats-v2 -->
+
+## Asset strategy statistics
+
+Crypto and stock strategies are measured on the daily equity of the
+section "Asset valuation", with deposits and withdrawals taken out as in
+"External flows (time-weighted return)". Pinned by
+`tests/test_analytics_v2.py`; the code is `alphamarket/analytics_v2.py`.
+
+**Which days.** One point per UTC day, from the day the account was
+connected (the anchor day) to the last *complete* UTC day. Today is never in
+the series, because today has no close yet, and no figure on the page uses
+a close before its day is complete.
+
+**Return index.** A growth-of-$1 index built from the flow-adjusted daily
+returns:
+
+```
+I_first = 1
+I_d     = I_(d−1) × (1 + r_d),    r_d = (E_d − F_d) / E_(d−1) − 1
+```
+
+A day with no capital at risk the day before has no return, and the index
+stays flat across it.
+
+| Statistic | Formula |
+|---|---|
+| Total return | `I_last − 1`, the time-weighted return |
+| Max drawdown | `max over d of (peak_d − I_d) / peak_d` on the index, not on raw equity |
+| Sharpe | `mean(r) / stdev(r) × √365` over the days with a return; sample stdev |
+| Sortino | `mean(r) / √(mean(min(r,0)²)) × √365` |
+| Win rate | not shown: a coin or a share has no single "trade" that wins or loses |
+| P&L, net of deposits | last day's equity - first day's equity - net deposits and withdrawals; the headline dollar figure on an asset strategy's page (spot exchanges and brokers report no realized-P&L entries) |
+| Realized P&L | the venue's own realized-P&L and liquidation entries, in dollars (a stablecoin at 1.00, anything else at its close that day, or the last close before it) |
+| Money-weighted return | Modified Dietz, shown only beside the TWR |
+| Worst periods | the two deepest runs of days below the running peak of the drawdown series: from the last day at the peak to the deepest day, with the days until the first day back at a peak ("not yet recovered" while below); listed after 90 verified days, for every strategy |
+
+Drawdown and the ratios read the index, so a deposit can never look like a
+gain and a withdrawal can never look like a loss. Worked example: equity
+$10,000, $10,500, then $13,605 on a day the trader deposited $3,000, then
+$12,244.50.
+
+| Day | Equity | Flow | r_d | Index |
+|---|---|---|---|---|
+| 1 | 10,000 | | | 1 |
+| 2 | 10,500 | | 10,500 / 10,000 − 1 = +5% | 1.05 |
+| 3 | 13,605 | 3,000 | (13,605 − 3,000) / 10,500 − 1 = +1% | 1.0605 |
+| 4 | 12,244.50 | | 12,244.50 / 13,605 − 1 = −10% | 0.95445 |
+
+Total return is 0.95445 − 1 = **−4.555%**. Reading the raw equity instead
+(12,244.50 / 10,000 − 1) would claim **+22.4%**: that is the deposit, not
+skill. Max drawdown is (1.0605 − 0.95445) / 1.0605 = **10%**. The
+money-weighted figure for the same days is
+(12,244.50 − 10,000 − 3,000) / (10,000 + ⅓ × 3,000) = −6.87%.
+
+**Risk score.** The same 1-to-10 formula as "Risk score", with the TWR
+drawdown, the downside deviation of the daily returns above, and, as the
+concentration term, the largest share of gross exposure on the last day
+(spot and perp of one coin count together). The stake term is 0: a coin
+account has no single "stake". Leverage is shown as a flag instead.
+
+**Holdings and exposure** are those of the last day in the series, at that
+day's closes. Next to them, the "marked equity" values the holdings right
+now at the freshest public quote, or at the last complete day's close when
+no quote is fresh. On the day an account connects there is no complete day
+yet: holdings are shown at the previous day's closes and no return is shown.
+
+**Flags** (displayed, never used to delist):
+
+- **unpriced_assets**: on some day an asset held had no close at all, so it
+  was left out of that day's equity.
+- **carried_forward_prices**: a close older than the day it valued was used.
+  Stock venues are allowed 4 calendar days (weekends and market holidays
+  have no close); crypto, which trades every day, is allowed none.
+- **single_asset_concentration**: one underlying is more than 50% of gross
+  exposure on the last day.
+- **high_leverage**: on some day the perp notional, `Σ |perp qty × close|`,
+  was more than 5× equity.
+- **broker_equity_divergence**: the newest broker equity check (below)
+  failed.
+
+**Exact closes.** A close is kept as the source's decimal string whenever
+Koine has it, so a coin worth a fraction of a cent is not rounded before it
+is multiplied: 1,000,000,000 tokens at $0.00001234 are worth exactly
+$12,340, where a close rounded to whole micro-dollars ($0.000012) would
+say $12,000. The rounding rule of "Asset valuation" (truncate once, per
+position) is unchanged.
+
+## Broker equity check
+
+Some venues report their own total for the account: Alpaca's account
+equity, IBKR's net asset value, Hyperliquid's account value. At every
+reconciliation Koine compares that figure with its own equity for the same
+moment: the holdings from the ledger, valued at the freshest public quote
+(or the last daily close), with perp positions at `qty × (price − entry)`.
+
+```
+divergence = venue equity − Koine equity
+tolerance  = max($1.00, 0.5% × venue equity)
+ok         = |divergence| ≤ tolerance
+```
+
+Example: Koine computes $10,000. A venue figure of $10,040 is within
+tolerance (40 ≤ 50.20); $10,100 is not (100 > 50.50). For a $150 account
+the $1 floor applies (0.5% would be 75 cents).
+
+The tolerance is wider than the per-asset check in "Reconciliation v2"
+because the two sides use different prices taken at slightly different
+moments. For the same reason **a failed check never quarantines a
+strategy**: the per-asset balance check is what proves the ledger. A
+failed equity check shows the broker_equity_divergence flag on the
+strategy until a later check passes. Venues that report no total skip
+the check.
+
+<!-- wave2:p6-signals -->
+## Signals v2 and copy lag
+
+**What a signal is.** For stocks, coins and perpetual futures, every fill the
+creator made after connecting (strictly after the anchor) becomes one
+signal, in fill order. A fill at or before the anchor never does, and
+deposits, withdrawals, transfers, staking, dividends and funding are never
+signals. A signal is a fact about a trade that already happened, never a
+recommendation, and it is never edited afterwards.
+
+**What it records.**
+
+```
+qty, price          exactly as the venue reported the fill
+notional            qty x price in USD, rounded down to $0.000001;
+                    only when the pair is quoted in USD or a stablecoin at par,
+                    otherwise left empty (a BTC-quoted pair has no USD notional)
+position before     the creator's signed holding of the asset just before the fill
+position after      before + qty for a buy, before - qty for a sell
+side                long or short by the sign of the position after the fill
+                    (before it, when the fill closed the position)
+creator equity      cash + holdings x last complete daily close + perp
+                    unrealized P&L, just before the fill (below)
+```
+
+Spot coins and shares take the position from the ledger (every entry before
+the fill); perps take it from the perp position built from the creator's
+perp fills. When one order fills several times at the same instant, the
+fills chain: the second fill's "before" is the first fill's "after", and all
+of them share one equity figure (none of them is "before" the others in
+time). A holding recorded more precisely than the venue reports fill sizes
+is cut to the fill's precision (dust below it is dropped).
+
+**Creator equity at the fill.** The denominator followers are sized
+against:
+
+```
+E(t-) = cash + sum(qty x close of day D-1) + sum(perp qty x (close of D-1 - entry))
+```
+
+where D is the fill's UTC day, holdings include everything strictly before
+the fill, and the closes are those of the last complete UTC day (carried
+back further if a day is missing), so no intraday price is assumed. The day
+whose closes were used is stored with the signal. Assets with no close at
+all are left out, exactly as in the daily equity series. When the result is
+not positive the equity is stored as unknown and followers do not copy the
+signal.
+
+Worked example: anchored with $5,000 and 1 ETH, ETH closed at 3,000 on D-1,
+and the creator buys 0.5 ETH at 3,100 on D. Equity before the fill is
+5,000 + 1 x 3,000 = $8,000 (D's own close is not used); the position goes
+1 -> 1.5 ETH; the notional is 0.5 x 3,100 = $1,550, which is 19.375% of
+equity. Two sells of 0.2 and 0.3 ETH at the same later instant both use
+equity 3,450 + 1.5 x 3,000 = $7,950, and the position goes 1.5 -> 1.3 -> 1.0.
+
+**Copy lag.** Each signal stores when the fill happened and when Koine
+first saw it (`observed_at`, the moment the fill was imported). The copy
+lag is the difference. At that moment Koine takes one public quote per
+instrument (bid, ask, last and its time and source) and stores it on the
+signal: paper followers buy at that ask and sell at that bid, which is the
+cost of copying late. A signal whose lag already exceeds the venue's limit
+(6 hours; 3 days for venues that report once a day) gets no quote and is
+not copied (it is still shown). If no quote can be had (the data budget is
+spent or the source is down), the signal is stored without one and paper
+followers use the creator's price with a stated penalty instead.
+
+**Streaming shortens the lag, nothing else.** For creators whose strategy
+has active paper copies, Koine may hold a live connection to the venue
+(Hyperliquid's fill feed for the most-followed creators, and on Kraken or
+Coinbase a notice that triggers an immediate import). A fill imported that
+way is the same fill, with the same id and the same ledger entries, as the
+one the regular import fetches minutes later; it is stored once, whichever
+arrives first, and `observed_at` is simply earlier. The regular import stays
+the record of truth: when a live connection drops, the next regular import
+picks up anything it missed, and the only effect is a longer copy lag on
+those signals.
+
+<!-- wave2:p6-engine -->
+## Paper copying v2: sizing, fill price, fees
+
+Paper allocations of crypto and equity strategies (Kraken, Hyperliquid,
+Coinbase, Binance.US, Alpaca, IBKR, SnapTrade) follow the creator's verified
+fills with virtual capital. Nothing is placed anywhere, and a live mode does
+not exist: asking for one is refused in code. Prediction markets keep the
+rules in "Paper tailing" above. Every number below is reproduced by a
+hand-computed test (`tests/test_paper_engine.py`).
+
+**Which signals are copied.** A follower copies only signals filled after the
+allocation started. A signal Koine observed more than 6 hours after the fill
+(3 days on venues that only publish daily reports: IBKR, SnapTrade) is
+skipped as stale, because a follower could not have traded near that price.
+Instruments not quoted in USD or a stablecoin held at par (see "Daily prices
+and fallback pricing") are skipped. Every skip is recorded with its reason and
+counted on the follower's portfolio. A signal that makes the paper engine
+fail is skipped on its own ("engine error") and logged for us to fix, so it
+never holds back the follower's later signals, funding or liquidation check.
+
+**Fill price.** A paper fill happens when Koine observed the creator's fill,
+at the venue's public quote captured at that moment: buys at the ask, sells
+at the bid. When no quote was available, the creator's own price is moved
+against the follower by 0.5% (50 basis points):
+
+```
+buy:   price = creator_price x 1.005
+sell:  price = creator_price x 0.995
+```
+
+The fill records which rule priced it ("ask", "bid" or
+"creator_price_penalty") and the quote's timestamp.
+
+**Late signals.** A paper fill is never dated before an event already in the
+follower's book (funding, a dividend, an earlier paper fill). If Koine's own
+processing fell behind and a signal arrives after such a later event was
+booked, the fill keeps its price but takes that event's time, so no booked
+payment is ever recomputed against a position it did not see. For a stock,
+if that later time would cross the ex-date of a split, the signal is skipped
+("late signal") instead: its size is in pre-split shares.
+
+**Sizing.** F is the follower's equity (cash plus holdings at the freshest
+mark, below) and C the creator's equity just before the fill.
+
+```
+spot / equity buy:   q = creator_qty x F / C
+perp open or add:    q = creator_qty x creator_price x F / C / fill_price
+                     (the notional scales, so the follower's leverage
+                      equals the creator's)
+reduce (any kind):   q = follower_position x closed_qty / creator_position_before
+                     (the same fraction; all of it when the creator went
+                      flat or flipped)
+perp flip:           close the follower's whole position, then open the
+                     remainder sized as an open; one fill of the sum
+```
+
+Quantities are floored to the instrument's step. An opening order below the
+venue's minimum quantity or minimum order value is skipped, and so is a
+partial reduction below them; a full exit never is. A spot or equity buy is
+capped at the largest stepped quantity whose cost plus fee fits in the
+follower's cash. Spot and shares are never sold short on paper. If the
+follower's position has drifted from the creator's (a closing fill was
+skipped as stale, say), any part of an order that runs against the
+follower's own perp position closes it and realizes its profit or loss.
+
+**Rounding.** Always against the follower: a buy's cost rounds up to the
+micro-dollar, a sale's proceeds round down, realized perp profit rounds down
+and a realized perp loss rounds up.
+
+**Fees.** By the venue's fee model:
+
+```
+crypto (bps of notional):  fee = qty x price x taker_rate, rounded half up
+                           to the venue's fee precision
+                           (Kraken 0.80% to $0.0001; Hyperliquid 0.05% to $0.000001)
+US equities:               buys: $0 (commission-free)
+                           sells: SEC fee  = notional x SEC rate per $1M, up to the cent
+                                + FINRA TAF = min(shares x TAF rate, TAF cap), up to the cent
+```
+
+The SEC and FINRA rates are listed with the date they were checked; they
+change by regulatory order.
+
+**Worked example (Kraken, 0.80% taker).** A $10,000 creator buys 0.1 BTC; the
+quote has an ask of 60,030. A $1,000 follower buys 0.1 x 1,000 / 10,000 = 0.01
+BTC: cost 600.30, fee 4.8024, cash left 394.8976. The creator then sells 0.04
+of its 0.1 (40%) with the bid at 60,990.5: the follower sells 40% of 0.01 =
+0.004 BTC for 243.962, fee 1.9517, cash 636.9079, 0.006 BTC left. A $100
+follower of a $1,000,000 creator buying 0.1 BTC would buy 0.00001 BTC, under
+Kraken's 0.0001 BTC minimum, so that signal is skipped.
+
+**Worked example (Hyperliquid perp, 0.05%).** A $10,000 creator buys 1 BTC
+(60,000 notional, 6x). A $1,000 follower mirrors 6,000 of notional at the ask
+60,010: 0.09998 BTC (5 decimals), fee 2.9999, cash 997.0001 (perp margin stays
+in cash). The creator then sells 3 at 61,000 (long 1 to short 2) with the bid
+at 60,990: the follower closes its 0.09998 (realized 0.09998 x 980 = 97.9804)
+and opens 2 x 61,000 x 997.0001 / 10,000 / 60,990 = 0.19943 short, one sale of
+0.29941 (notional 18,261.0159, fee 9.130508), cash 1,085.849992, short 0.19943
+at an entry of 60,990.
+
+**Worked example (US equity sell).** Selling 20 shares at $80 (notional
+$1,600) with the SEC rate at $0.00 per million and FINRA TAF at $0.000166 per
+share: SEC fee $0.00, TAF 20 x 0.000166 = $0.00332, rounded up to $0.01.
+
+**Valuing the follower.** Each holding is valued at the freshest mark: the
+mid (or, without both sides, the last trade) of a public quote no
+older than 15 minutes, else the last daily close,
+else (never priced yet) its cost, so an unpriced holding never shows as a
+loss. A perp position is worth quantity x (mark - entry), with the entry
+averaged over the follower's own fills; while unpriced it adds nothing. The
+drawdown stop reads this equity exactly as for prediction markets. The
+portfolio shows the median copy lag (observed time minus fill time) of the
+signals the follower copied, and how many were skipped and why.
+
+<!-- wave2:p6-lifecycle -->
+## Paper copying v2: funding, liquidation, corporate actions
+
+A paper allocation that copies a perp or stock strategy keeps living between
+signals: perps pay or receive funding and can be liquidated, and shares are
+split and pay dividends. Each event is applied once (it is keyed by its
+source row), on every mirror pass, including for an allocation that has
+stopped copying, because what it still holds keeps accruing. Every amount is
+computed exactly, then rounded to the micro-dollar against the follower:
+credits round down and debits round up.
+
+**Funding.** For each funding rate the venue publishes for a perp the
+follower holds (not before the follower first traded it):
+
+```
+payment = -q x mark x rate        (q signed: + long, - short)
+mark    = the rate's own mark price, else a quote within 15 minutes of it,
+          else the last complete daily close before that day
+```
+
+A rate with no position at that moment pays nothing. A rate with no mark yet
+is never estimated: it is retried on later passes (the day's close or a
+quote may still arrive) for 7 days, then given up. Example: 0.09998 BTC long, rate
++0.0000125 at mark 60,000 pays 0.074985; rate -0.00001 at mark 59,000
+receives 0.0589882, credited as 0.058988. Cash 997.0001 becomes 996.925115,
+then 996.984103.
+
+**Liquidation (Hyperliquid, cross margin).** Checked whenever every open perp
+has a mark no older than 15 minutes; with any mark stale, there is no check.
+
+```
+notional = |q| x mark
+mmr      = 1 / (2 x max leverage of the tier with the largest lower bound <= notional)
+MM       = sum of notional x mmr
+AV       = cash + sum of q x (mark - entry)
+AV < MM  ->  every perp is closed at the mark and the allocation stops ("liquidated")
+```
+
+The P&L of each closed position is realized at the mark (a liquidation entry,
+no extra fee). A perp whose venue publishes no margin tiers is never given a
+guessed leverage: it adds nothing to MM, and with no tiered position there is
+no check. Example (BTC, max leverage 40, mmr 1.25%; 0.09998 long at 60,010,
+cash 996.984103): at 51,000, AV = 996.984103 - 900.8198 = 96.164303 and MM =
+5,098.98 x 1.25% = 63.73725, so nothing happens; at 50,500, AV =
+996.984103 - 950.8098 = 46.174303 < MM = 63.112375, so the position is
+closed, realizing -950.8098 and leaving cash 46.174303.
+
+**Splits.** Applied at 00:00 UTC on the ex-date to the shares held just
+before it: new shares = floor(held x new / old), at the venue's share
+precision. A fraction the split would create is dropped, with no cash in
+lieu. 10 shares in a 2-for-1 split become 20; the cash spent on them is
+unchanged. 7 whole shares in a 1-for-3 reverse split become 2.
+
+**Cash dividends.** Shares held at the end of the day before the ex-date x
+cash per share, credited at 00:00 UTC on the pay date and not before (a
+dividend whose pay date is not yet known waits). Shares bought on the
+ex-date do not count. 20 shares x $0.25 = $5.00.
+
+**Not modelled yet.** Symbol changes are not applied to paper books. A
+follower who still holds a stock whose symbol changed sees it on the
+portfolio: the position stays under the old symbol at its last price, and
+the creator's trades in the new symbol cannot reduce it. When two data
+sources report the same action (same symbol, kind and ex-date) it is applied
+once.
+
+<!-- wave2:p8-pages -->
+
+## Reading an asset strategy's page
+
+A strategy on a crypto or stock venue is valued by the asset statistics (the
+time-weighted return, see "External flows"), and its page is drawn from that
+series, never from the raw equity curve. A deposit or a withdrawal changes
+the money in the account, not the return, so it must not bend the picture.
+
+```
+index(d)     = growth of 1.0 with external flows removed (time-weighted)
+growth(d)    = equity(f) / index(f) x index(d)       the chart, in dollars; f is the
+               first day with positive equity (index(f) = 1.0 for an
+               account that opened funded or was funded on day f)
+drawdown(d)  = (max over s <= d of index(s) - index(d)) / max over s <= d of index(s)
+month return = index(month end) / index(prior month end) - 1
+               (the first month is measured from the first day's index)
+```
+
+Worked example: equity 10,000, 10,500, 13,605 (a 3,000 deposit on day 3,
+counted at the end of the day as above), 12,244.5. Day returns are
+10,500 / 10,000 - 1 = +5%, (13,605 - 3,000) / 10,500 - 1 = +1% and
+12,244.5 / 13,605 - 1 = -10%. The index is 1.0, 1.05, 1.0605, 0.95445, so the return
+is -4.555% and the worst drawdown 10% (peak 1.0605 on day 3). The raw
+equity would say +22.4%, which is the deposit counted as profit. The chart
+plots 10,000, 10,500, 10,605, 9,544.5. The page still lists the actual equity
+in its JSON, because that is also true.
+
+**Holdings and exposure.** The holdings panel lists the positions at the last
+complete UTC close, largest first, each at the day's close and valued as
+described under "Asset valuation". Cash is not exposure.
+
+```
+share of a holding = value / sum of the cash, spot and equity values (perps excluded)
+gross exposure     = sum over spot, equity and perp of |notional|
+largest exposure   = the underlying with the largest share of gross (BTC spot and
+                     BTC-PERP count together)
+perp leverage      = sum over perps of |quantity x close| / equity
+```
+
+A perpetual's value is its unrealized profit or loss, quantity x (close -
+entry), so the panel shows its notional separately and does not give it a
+share. An asset with no price, or a perp with no known entry, is listed under
+the table as not valued and carries no value; days valued at the last
+available close are counted. Nothing is estimated.
+
+**Verification tiers for asset venues.** *Reconciled*: an intraday venue whose
+cash and holdings are re-read and checked every night. *Daily verified*:
+a venue that reports end of day only (Interactive Brokers Flex statements,
+SnapTrade). The record is checked against the latest daily statement, so it
+is verified at day resolution and intraday activity between statements is
+not independently checked; the page says so. Where a broker reports its own
+account equity, the page shows it next to the equity Koine computes; a
+difference beyond the tolerance flags the statistics and never hides them.
+
+**What proves the credential cannot trade.** Each page states the method for
+its venue: a read-only API key whose scope is read back from the venue; a key
+proven read-only because a validate-only order or withdrawal is refused; a
+read-only OAuth grant approved inside the account; a reporting-only token (the
+token type cannot place orders); an aggregator's read-only connection (the
+aggregator offers no independent proof, and the page says that rests on its
+connection type); or a public wallet address with no key, whose ownership is
+proven by a message signed with the wallet or a code in the venue profile.
+
+**Unsupported activity.** Activity Koine skipped rather than guess at (a short
+sale, an option, a stock dividend) is counted on the page by reason. Only the
+reason and the count are public, not the symbol or the size.
+
+**Paper portfolios.** A follower's page lists each position at the freshest
+public quote, else the last daily close, else at cost, with the unrealized
+profit or loss, the median delay between the creator's fill and Koine seeing
+it (copy lag) and the signals that were skipped, by reason. The portfolio value
+is the sum of its allocations' equity. Starting a new tail adds paper money,
+not profit, so the portfolio chart shows paper profit or loss in dollars (value
+minus the paper money put in so far), and its drawdown is measured on a
+flow-adjusted index, the same rule as deposits on a strategy page: a day's
+return is (V_d - new paper money_d) / V_(d-1) - 1. Example: a $1,000 tail falls
+to $900 on the day a $500 tail starts. The summed value rises from $1,000 to
+$1,400, but the index goes 1 to (1,400 - 500) / 1,000 = 0.9: a 10% drawdown,
+and the chart reads -$100.

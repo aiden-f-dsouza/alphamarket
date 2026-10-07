@@ -65,6 +65,7 @@ from alphamarket.connectors.base import (
     FundingRate,
     InstrumentType,
     LegKind,
+    MarginTier,
     NormalizedAssetFill,
     NormalizedBalance,
     NormalizedBalances,
@@ -78,6 +79,10 @@ from alphamarket.connectors.base import (
     RateScope,
     ReadOnlyEvidence,
     ReadOnlyProof,
+    StreamEvent,
+    StreamingSource,
+    StreamProtocolError,
+    StreamUnavailable,
 )
 from alphamarket.money import MAX_DECIMALS, MICROS_PER_UNIT, to_atoms
 
@@ -86,6 +91,14 @@ INFO_URLS = {
     "testnet": "https://api.hyperliquid-testnet.xyz/info",
 }
 INFO_URL = INFO_URLS["prod"]
+# P7: the public websocket next to each info endpoint (docs "Websocket").
+WS_URLS = {
+    "prod": "wss://api.hyperliquid.xyz/ws",
+    "testnet": "wss://api.hyperliquid-testnet.xyz/ws",
+}
+# Docs "Rate limits and user limits" (checked 2026-09-26): "at most 10 unique
+# users" across user-specific websocket subscriptions, per IP.
+WS_USERS_PER_IP = 10
 
 FILLS_PAGE_LIMIT = 2000  # userFillsByTime: "at most 2000 fills per response"
 TIME_RANGE_PAGE_LIMIT = 500  # userFunding / ledger updates / fundingHistory
@@ -538,6 +551,14 @@ class HyperliquidConnector(_Info, AssetVenueConnector):
             return str((details or {}).get("leader", "")).lower() == signer
         return False
 
+    def claim_text(self, code: str) -> str | None:
+        """Contract hook (wave2, OwnershipProof.SIGNED_MESSAGE)."""
+        return claim_message(self.address, code)
+
+    def claim_payload(self, code: str, signature: str) -> str:
+        """Contract hook (wave2): what verify_claim reads."""
+        return encode_claim_proof(code, signature)
+
     def verify_claim(self, code: str) -> bool | None:
         """`code` is encode_claim_proof(claim_code, signature). A bare code
         (no signature yet) is False; None only when the venue could not be
@@ -677,6 +698,10 @@ class HyperliquidConnector(_Info, AssetVenueConnector):
             filled_at=_ms_to_dt(r["time"]),
             liquidity="taker" if r.get("crossed") else "maker",
         )
+
+    def stream_source(self) -> HyperliquidFillStream:
+        """P7: the `userFills` websocket subscription for this address."""
+        return HyperliquidFillStream(self, ws_url_for(self.info_url))
 
     # ---- events: funding stream, then ledger-update stream ----------------------
 
@@ -1019,6 +1044,10 @@ class HyperliquidMarketData(_Info, AssetMarketData):
     spot pairs, "xyz:XYZ100" for a HIP-3 perp."""
 
     venue = "hyperliquid"
+    # HIP-3 dexes margin in these instead of USDC (collateral_of); they are
+    # dollar stablecoins, valued at 1.00 like USDC and USDT [VERIFY the
+    # collateral list against perpDexs before launch].
+    STABLECOINS_AT_PAR = AssetMarketData.STABLECOINS_AT_PAR | frozenset({"USDT0", "USDH"})
 
     def __init__(self, info_url: str = INFO_URL, client: httpx.Client | None = None) -> None:
         self._init_info(info_url, client)
@@ -1057,6 +1086,38 @@ class HyperliquidMarketData(_Info, AssetMarketData):
                 continue
             out.append(DailyClose(symbol=symbol, day=day, close=_s(c["c"])))
         return out
+
+    def fetch_margin_tiers(self, symbol: str) -> list[MarginTier]:
+        """Maintenance-margin tiers of a perp coin, ascending by lower bound,
+        from the marginTables the dex's `meta` already carries (no extra
+        request once `meta` is cached). `lower_bound` is the venue's own
+        string (USD notional), `max_leverage` the tier's integer.
+
+        A coin whose marginTableId has no table in the response (HIP-3 dexes
+        publish an empty marginTables list) gets one tier from the coin's own
+        maxLeverage. An unknown coin gets no tiers. [VERIFY] that a tier's
+        maxLeverage is what the maintenance rate 1 / (2 x maxLeverage) is
+        defined on for every table id; Hyperliquid documents the rate that way
+        for the first tier only."""
+        info = self.perp_dex(perp_dex_of(symbol))
+        entry = next((u for u in info.universe if str(u.get("name")) == symbol), None)
+        if entry is None:
+            return []
+        table = (
+            info.margin_tables.get(int(entry["marginTableId"]))
+            if "marginTableId" in entry
+            else None
+        )
+        raw = list((table or {}).get("marginTiers") or [])
+        if raw:
+            tiers = [
+                MarginTier(lower_bound=_s(t["lowerBound"]), max_leverage=int(t["maxLeverage"]))
+                for t in raw
+            ]
+            return sorted(tiers, key=lambda t: Decimal(t.lower_bound))
+        if entry.get("maxLeverage") is None:
+            return []
+        return [MarginTier(lower_bound="0", max_leverage=int(entry["maxLeverage"]))]
 
     def fetch_mids(self) -> dict[str, str]:
         """Every coin's mid (the last trade when a book is empty), one call."""
@@ -1097,3 +1158,88 @@ class HyperliquidMarketData(_Info, AssetMarketData):
                 break
             cursor = int(rows[-1]["time"]) + 1  # one row per coin per time
         return out
+
+
+# ---- P7: public websocket (StreamMode.FILLS) ------------------------------------
+
+
+def ws_url_for(info_url: str) -> str:
+    """The websocket next to an info endpoint: the documented one per env,
+    else the same host with /ws (tests, a self-hosted node later)."""
+    for env, url in INFO_URLS.items():
+        if info_url == url:
+            return WS_URLS[env]
+    base = info_url.removesuffix("/info")
+    return "wss://" + base.split("://", 1)[-1] + "/ws"
+
+
+class HyperliquidFillStream(StreamingSource):
+    """`userFills` for one address on the public websocket (no credential).
+
+    FILLS mode: each element of `data.fills` is the very object REST
+    `userFillsByTime` returns (docs "Websocket > Subscriptions", WsFill: coin,
+    px, sz, side, time, startPosition, dir, closedPnl, hash, oid, crossed,
+    fee, tid, feeToken, builderFee?, liquidation?), so it is normalized by
+    the same HyperliquidConnector.to_fill and lands with the same id (`tid`)
+    and the same legs as the poller's copy: ingest stores it once.
+
+    Frames (VERIFIED live 2026-10-04 by a one-off public probe of the
+    subscription: ack, then a snapshot of 30 fills whose keys are exactly the
+    REST row keys; ping answered {"channel":"pong"}):
+      ack       {"channel":"subscriptionResponse","data":{"method":"subscribe",
+                 "subscription":{"type":"userFills","user":"0x.."}}}
+      snapshot  {"channel":"userFills","data":{"isSnapshot":true,
+                 "user":"0x..","fills":[...]}}  first, the recent fills
+      update    {"channel":"userFills","data":{"user":"0x..","fills":[...]}}
+      pong      {"channel":"pong"}
+      error     {"channel":"error","data":"<text>"}
+    The snapshot is ingested too (duplicates are skipped), which closes any
+    gap a reconnect left. The server drops a connection it has not heard
+    from for 60 s, so the core pings every 30 s."""
+
+    venue = "hyperliquid"
+    ping_interval_seconds = 30.0
+    idle_timeout_seconds = 75.0  # pongs answer every ping
+
+    def __init__(self, connector: HyperliquidConnector, ws_url: str) -> None:
+        self.connector = connector
+        self.ws_url = ws_url
+
+    def url(self) -> str:
+        return self.ws_url
+
+    def subscribe_frames(self) -> list[str]:
+        sub = {"type": "userFills", "user": self.connector.address}
+        return [json.dumps({"method": "subscribe", "subscription": sub})]
+
+    def ping_frame(self) -> str | None:
+        return json.dumps({"method": "ping"})
+
+    def parse(self, frame: str | bytes) -> list[StreamEvent]:
+        try:
+            msg = json.loads(frame)
+        except ValueError:
+            raise StreamProtocolError("hyperliquid: frame is not JSON") from None
+        if not isinstance(msg, dict):
+            return []
+        channel = msg.get("channel")
+        if channel == "error":
+            text = str(msg.get("data") or "")[:200]
+            # The per-IP user cap ("Cannot track more than 10 total users"
+            # [VERIFY wording]): the slot leases should never let it happen;
+            # if another process on this IP ignores them, back off for long.
+            if "users" in text.lower():
+                raise StreamUnavailable(f"hyperliquid: {text}")
+            raise StreamProtocolError(f"hyperliquid: {text}")
+        if channel != "userFills":
+            return []  # subscriptionResponse, pong
+        data = msg.get("data") or {}
+        user = str(data.get("user") or "").lower()
+        if user and user != self.connector.address:
+            return []  # not this account's subscription
+        rows = [r for r in data.get("fills") or [] if isinstance(r, dict)]
+        if not rows:
+            return []
+        rows.sort(key=lambda r: (int(r["time"]), fill_id(r)))
+        fills = [self.connector.to_fill(r) for r in rows]
+        return [StreamEvent(fills=fills, ref=fills[-1].venue_fill_id)]

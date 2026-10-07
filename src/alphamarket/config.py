@@ -109,6 +109,14 @@ class Settings(BaseSettings):
     worker_sync_tick_seconds: int = 30  # how often the ticker looks for due syncs
     rate_limiter_backend: str = "postgres"  # "postgres" (shared) | "memory" (one process)
 
+    # ---- P7 streaming (stream.py, docs/worker.md "Streaming") ----
+    stream_refresh_seconds: int = 30  # re-read who to stream; renew leases
+    stream_lease_seconds: int = 120  # a dead stream process's accounts free up after this
+    stream_max_accounts: int = 200  # websockets one stream process holds at most
+    stream_backoff_base_seconds: float = 1.0  # reconnect: base x 2^n, full jitter
+    stream_backoff_cap_seconds: float = 120.0
+    stream_unavailable_cooloff_seconds: int = 6 * 3600  # e.g. key lacks WS permission
+
     # ---- p3-vault ----
     # Credential vault v2 (vault.py): which KeyWrapper wraps per-record data
     # keys. "local" = Fernet on VAULT_KEY (dev/tests; preflight refuses it in
@@ -175,6 +183,19 @@ class Settings(BaseSettings):
     # https://docs.snaptrade.com/docs/register-a-developer-account
     snaptrade_client_id: str = ""
     snaptrade_consumer_key: str = ""
+
+    # ---- wave2 scaffold ----
+    # CoinGecko: fallback daily prices for assets no connected venue prices
+    # (connectors/coingecko.py; demo key header x-cg-demo-api-key).
+    coingecko_api_key: str = ""
+    coingecko_base_url: str = "https://api.coingecko.com/api/v3"
+    # A quote older than this is not a mark (follower valuation, liquidation).
+    quote_max_age_seconds: int = 900
+    # Housekeeping (housekeeping.py).
+    pending_connect_ttl_hours: int = 24  # unfinished SnapTrade connects are abandoned
+    session_retention_days: int = 30  # dead sessions kept this long, then deleted
+    token_retention_days: int = 7  # expired/used email tokens kept this long
+    quote_retention_days: int = 30  # asset_quotes kept this long
 
 
 @lru_cache

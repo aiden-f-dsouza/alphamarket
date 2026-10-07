@@ -1,0 +1,6 @@
+{
+ "status": {
+  "error_code": 10002,
+  "error_message": "You have exceeded the Rate Limit or provided an invalid API key"
+ }
+}

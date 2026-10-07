@@ -37,6 +37,9 @@ def test_settings():
         "email_backend": "console",
         "hibp_enabled": False,
         "rate_limiter": "memory",
+        # The web process's outbound limiter (venue_limits.get_web_limiter) must
+        # never reach for the developer's Postgres from a unit test.
+        "rate_limiter_backend": "memory",
         "trust_proxy_headers": False,
         "key_wrapper": "local",
         "enable_unapproved_venues": True,  # the gate itself is tested explicitly
@@ -76,6 +79,14 @@ def client(session_factory):
 
     app = create_app()
     app.dependency_overrides[get_db] = override_get_db
+    # The web process's outbound limiter (venue_limits.get_web_limiter) with no
+    # budgets: tests that connect, rotate or claim in a loop must not depend on a
+    # venue's real bucket sizes (Kraken's 15-token key bucket drains in two
+    # rotations). Tests of the limiter itself install their own on
+    # app.state.venue_limiter.
+    from alphamarket.venue_limits import MemoryBuckets, VenueLimiter
+
+    app.state.venue_limiter = VenueLimiter(MemoryBuckets(), budgets_for=lambda venue: ())
     # One fixed rate-limit window for the whole test: loops that count up to a
     # limit must not straddle a real minute boundary (flaky 429 assertions).
     limiter = getattr(app.state, "rate_limiter", None)

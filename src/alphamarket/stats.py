@@ -508,3 +508,29 @@ def monthly_returns(series: list[tuple[date, int]]) -> list[tuple[int, int, floa
 def micros_to_float(micros: int) -> float:
     """Display only. Never feed the result back into storage."""
     return micros / MICROS_PER_UNIT
+
+
+def worst_periods(
+    drawdowns: list[tuple[date, float]], n: int = 2
+) -> list[tuple[date, date, float, date | None]]:
+    """The n deepest drawdown episodes of a per-day drawdown series (as
+    drawdown_series returns: 0 at a peak, positive below it). An episode is a
+    run of days below the running peak: it starts at the last day at the peak
+    before the run, bottoms at its deepest day, and recovers on the first day
+    back at a peak (None while still below). Returns (peak_day, trough_day,
+    depth, recovered_day), deepest first; equal depths keep the earlier one."""
+    episodes = []
+    peak_day = None
+    trough_day, depth = None, 0.0
+    for day, dd in drawdowns:
+        if dd <= 0:
+            if trough_day is not None:
+                episodes.append((peak_day, trough_day, depth, day))
+                trough_day, depth = None, 0.0
+            peak_day = day
+        elif dd > depth:
+            trough_day, depth = day, dd
+    if trough_day is not None:
+        episodes.append((peak_day, trough_day, depth, None))
+    episodes = [e for e in episodes if e[0] is not None]
+    return sorted(episodes, key=lambda e: -e[2])[:n]

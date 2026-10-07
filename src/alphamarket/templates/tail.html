@@ -1,83 +1,112 @@
 {% extends "base.html" %}
 {% import "_macros.html" as m %}
 {% set s = t.strategy %}
-{% block title %}Tail {{ s.name }} · Koine{% endblock %}
+{% set st = s.stats %}
+{% block title %}Paper-tail {{ s.name }} · Koine{% endblock %}
 {% block nav_active %}marketplace{% endblock %}
 {% block style %}
-  .cols { display:grid; grid-template-columns:minmax(0, 720px) 1fr; gap:64px; align-items:start; }
+  .cols { display:grid; grid-template-columns:minmax(0, 720px) minmax(0, 1fr); gap:64px; align-items:start; }
   .stepper { display:flex; align-items:center; gap:12px; }
-  .stepper > div { display:flex; align-items:center; gap:10px; font-size:14px; color:var(--muted); }
+  .stepper > div { display:flex; align-items:center; gap:10px; font-size:14px; color:var(--muted); white-space:nowrap; }
   .stepper > div.on { color:var(--text); }
-  .stepper i { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:50%; font:12px var(--mono); font-style:normal; border:1px solid var(--line2); }
+  .stepper i { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:50%; font:12px var(--mono); font-style:normal; border:1px solid var(--line2); flex-shrink:0; }
   .stepper > div.on i { color:var(--surface); background:var(--brand); border-color:var(--brand); }
   .stepper > span { flex-grow:1; height:1px; background:var(--line2); }
-  .acct { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 18px; border:1px solid var(--brand); border-radius:var(--r); background:var(--surface); }
-  .radio { display:inline-flex; width:18px; height:18px; border-radius:50%; border:5px solid var(--brand); }
   .big { font:500 36px var(--mono); }
+  .amount { display:flex; align-items:center; gap:8px; }
+  .amount span { font:500 28px var(--mono); color:var(--muted); }
+  .amount input { font:500 28px var(--mono); padding:8px 12px; }
+  .terms > div { display:grid; grid-template-columns:160px minmax(0, 1fr); gap:16px; padding:10px 0; border-bottom:1px solid var(--line); font-size:14px; }
   .can > div { display:flex; align-items:flex-start; gap:10px; font-size:14px; color:var(--text2); line-height:1.4; }
-  @media (max-width:1000px) { .cols { grid-template-columns:1fr; } .stepper > div span { display:none; } }
+  @media (max-width:1000px) { .cols { grid-template-columns:minmax(0, 1fr); gap:32px; } .stepper > div span { display:none; } .terms > div { grid-template-columns:minmax(0, 1fr); gap:2px; } }
 {% endblock %}
 {% block content %}
 <div class="cols">
-  <div class="stack" style="gap:32px">
+  {% if t.real %}<form method="post" action="/s/{{ s.slug }}/tail" class="stack" style="gap:32px">{% else %}<div class="stack" style="gap:32px">{% endif %}
     <div class="stack">
-      <span class="label">Tail · {{ s.name }} · by {{ s.display_name }}</span>
-      <h1 style="font-size:40px">Tail from your own account.</h1>
-      <p class="text2">Set the amount and the limits. Trades are mirrored into the account you choose, in proportion to your allocation. Stop any time.</p>
+      <span class="label">Paper tail · {{ s.name }} · by {{ s.display_name }}</span>
+      <h1 style="font-size:40px">Follow it with paper money first.</h1>
+      <p class="text2">Set a paper allocation and a drawdown limit. From the creator's next trade, Koine copies every trade into your paper allocation, sized to it, at prices you could actually have got and after the venue's fees. You see exactly what following would have made before you risk anything. No order is placed anywhere.</p>
     </div>
+    {% if t.error %}<div class="error" role="alert">{{ t.error }}</div>{% endif %}
+    {% if t.real and t.active %}<div class="notice">You already have an active paper tail of this strategy. <a href="/portfolio" style="text-decoration:underline">See it on your portfolio</a>; stop it there to start a new one.</div>{% endif %}
+    {% if t.real and t.own %}<div class="notice">This is your own strategy. Creators cannot paper-tail their own record.</div>{% endif %}
     <div class="stepper">
-      <div class="on"><i>1</i><span>Account</span></div><span></span><div class="on"><i>2</i><span>Allocation</span></div><span></span><div class="on"><i>3</i><span>Drawdown limit</span></div><span></span><div class="on"><i>4</i><span>Fees</span></div><span></span><div><i>5</i><span>Confirm</span></div>
-    </div>
-    <div class="stack" style="gap:12px"><span class="label">1 · Connected account</span>
-      <div class="acct">
-        <div style="display:flex;align-items:center;gap:12px"><span class="radio"></span><div class="stack" style="gap:2px"><span style="font-weight:500">{{ t.account.venue }} · ····{{ t.account.last4 }}</span><span class="mono small muted">trade-scoped key · connected {{ t.account.connected }} · no withdrawal permission</span></div></div>
-        <span class="mono">{{ m.usd(t.account.balance) }}</span>
-      </div>
-      <div><button class="btn secondary sm" type="button" disabled title="Available when tailing launches">{{ m.icon("plus", 14) }}Connect another account</button></div>
+      <div class="on"><i>1</i><span>Allocation</span></div><span></span><div class="on"><i>2</i><span>Drawdown limit</span></div><span></span><div class="on"><i>3</i><span>Pricing of fills</span></div><span></span><div class="on"><i>4</i><span>Koine pricing</span></div><span></span><div><i>5</i><span>Start</span></div>
     </div>
     <div class="grid2">
+      {% if t.real %}
       <div class="card"><div class="body" style="padding:20px 24px">
-        <span class="label">2 · Allocation</span>
-        <span style="display:inline-flex;align-items:baseline;gap:6px"><span class="big">{{ m.usd(t.allocation, 0) }}</span><span class="mono small muted">{{ t.allocation_pct }}% of account</span></span>
-        {{ m.bar(t.allocation_pct, "var(--brand)", 6) }}
-        <div class="spread mono muted" style="font-size:11px"><span>${{ t.min_usd }} min</span><span>{{ m.usd(t.account.balance, 0) }}</span></div>
-        <span class="small muted">Koine mirrors each trade at {{ "%.0f"|format(t.allocation) }} / {{ "%.0f"|format(s.stats.equity) }} of the creator's size.</span>
+        <label class="field" for="allocation"><span class="label">1 · Paper allocation</span></label>
+        <div class="amount"><span>$</span><input id="allocation" name="allocation" type="number" inputmode="decimal" required min="{{ t.min_usd }}" max="{{ t.max_usd }}" step="0.01" value="{{ t.allocation_input }}"></div>
+        <div class="spread mono muted" style="font-size:11px"><span>${{ "{:,}".format(t.min_usd) }} min</span><span>${{ "{:,}".format(t.max_usd) }} max · paper money</span></div>
+        <span class="small muted">Each trade is copied in proportion: your allocation ÷ the creator's equity{% if st and st.equity %} ({{ m.usd(st.equity, 0) }} at the last close){% endif %}, times the creator's size.</span>
       </div></div>
       <div class="card"><div class="body" style="padding:20px 24px">
-        <span class="label">3 · Maximum drawdown</span>
+        <label class="field" for="drawdown"><span class="label">2 · Maximum drawdown</span></label>
+        <select id="drawdown" name="drawdown_limit_bps" class="mono" style="font-size:20px">
+          {% for bps, label in t.dd_choices %}<option value="{{ bps }}" {{ "selected" if bps == t.dd_bps }}>{{ label }}</option>{% endfor %}
+        </select>
+        <span class="small muted">Measured from the paper allocation's high. If it falls this far, no new trades are copied.{% if st %} The strategy's worst drawdown so far is {{ "%.1f"|format(st.max_drawdown * 100) }}%.{% endif %}</span>
+      </div></div>
+      {% else %}
+      <div class="card"><div class="body" style="padding:20px 24px">
+        <span class="label">1 · Paper allocation</span>
+        <span style="display:inline-flex;align-items:baseline;gap:6px"><span class="big">{{ m.usd(t.allocation, 0) }}</span><span class="mono small muted">paper money</span></span>
+        {{ m.bar(t.allocation * 100 / t.allocation_max, "var(--brand)", 6) }}
+        <div class="spread mono muted" style="font-size:11px"><span>${{ t.min_usd }} min</span><span>{{ m.usd(t.allocation_max, 0) }}</span></div>
+        <span class="small muted">Each trade is copied at {{ "%.0f"|format(t.allocation) }} / {{ "%.0f"|format(st.equity) }} of the creator's size.</span>
+      </div></div>
+      <div class="card"><div class="body" style="padding:20px 24px">
+        <span class="label">2 · Maximum drawdown</span>
         <span style="display:inline-flex;align-items:baseline;gap:6px"><span class="big bad">{{ m.pct(-t.dd_limit, 0) }}</span><span class="mono small muted">stop at {{ m.usd(t.stop_at, 0) }}</span></span>
         {{ m.bar(t.dd_limit * 200, "var(--bad)", 6) }}
         <div class="spread mono muted" style="font-size:11px"><span>−5%</span><span>−50%</span></div>
-        <span class="small muted">If your allocation falls {{ "%.0f"|format(t.dd_limit * 100) }}% from its high, mirroring stops and you are notified. The strategy's worst drawdown so far is {{ "%.1f"|format(s.stats.max_drawdown * 100) }}%.</span>
+        <span class="small muted">If the paper allocation falls {{ "%.0f"|format(t.dd_limit * 100) }}% from its high, no new trades are copied and you are notified. The strategy's worst drawdown so far is {{ "%.1f"|format(st.max_drawdown * 100) }}%.</span>
       </div></div>
+      {% endif %}
     </div>
-    <div class="card"><div class="body" style="gap:4px;padding:20px 24px">
-      <span class="label" style="padding-bottom:6px">4 · Fees</span>
-      {% for a, b in t.fee_rows %}<div style="display:grid;grid-template-columns:200px 1fr;gap:16px;padding:10px 0;border-bottom:1px solid var(--line);font-size:14px"><span class="text2">{{ a }}</span><span>{{ b }}</span></div>{% endfor %}
+    <div class="card"><div class="body terms" style="gap:0;padding:20px 24px">
+      <span class="label" style="padding-bottom:6px">3 · How each paper fill is priced on {{ s.venue_label or "Kalshi" }}</span>
+      {% for a, b in t.terms %}<div><span class="text2">{{ a }}</span><span>{{ b }}</span></div>{% endfor %}
+      <span class="small muted" style="padding-top:10px">The full model, with worked examples, is on the <a href="/verification" style="text-decoration:underline">Verification</a> page.</span>
+    </div></div>
+    <div class="card"><div class="body terms" style="gap:0;padding:20px 24px">
+      <span class="label" style="padding-bottom:6px">4 · Koine pricing</span>
+      {% for a, b in t.pricing_rows %}<div><span class="text2">{{ a }}</span><span>{{ b }}</span></div>{% endfor %}
     </div></div>
     <div class="card ink"><div class="body" style="gap:14px">
-      <span class="label">5 · Confirm</span>
-      <span style="font-size:16px;line-height:1.5">Koine will place mirrored trades in {{ t.account.venue }} ····{{ t.account.last4 }} using a trade-scoped key. <span class="text2">That key cannot withdraw, transfer or deposit funds. Koine never holds your money.</span></span>
-      <label style="display:flex;align-items:flex-start;gap:12px;font-size:14px;line-height:1.5" class="text2"><input type="checkbox" style="width:18px;height:18px;margin:2px 0 0;padding:0;flex-shrink:0;accent-color:var(--surface)">I understand this is a live trading strategy with a {{ s.stats.track_days }}-day record. I can lose money, including more than the drawdown limit in a fast market.</label>
-      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap"><a class="btn light lg" href="/s/{{ s.slug }}" title="Sample flow: tailing is not live yet">Start tailing</a><span class="small text2">Sample flow. Tailing launches after the verification layer; nothing is placed.</span></div>
+      <span class="label">5 · Start</span>
+      {% if t.real %}
+      <span style="font-size:16px;line-height:1.5">Koine will copy {{ s.display_name }}'s next trades into your paper allocation. <span class="text2">No order is placed in any account, Koine asks for no key that can trade, and no money moves.</span></span>
+      <label style="display:flex;align-items:flex-start;gap:12px;font-size:14px;line-height:1.5" class="text2"><input type="checkbox" name="confirm" required {{ "checked" if t.confirmed }} style="width:18px;height:18px;margin:2px 0 0;padding:0;flex-shrink:0;accent-color:var(--surface)">I understand this is a paper simulation of a strategy with a {% if st %}{{ st.track_days }}-day{% else %}new{% endif %} record. Paper results are modelled: they assume the quoted price was available in my size, and a real account could do worse.</label>
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">{% if t.active or t.own %}<button class="btn light lg" type="submit" disabled>Start paper tail</button><span class="small text2">{{ "Already tailing this strategy." if t.active else "You cannot tail your own strategy." }}</span>{% else %}<button class="btn light lg" type="submit">Start paper tail</button><a class="small text2" href="/s/{{ s.slug }}" style="text-decoration:underline">Cancel</a>{% endif %}</div>
+      {% else %}
+      <span style="font-size:16px;line-height:1.5">Koine will copy {{ s.display_name }}'s next trades into a paper allocation of {{ m.usd(t.allocation, 0) }}. <span class="text2">No order is placed in any account, Koine asks for no key that can trade, and no money moves.</span></span>
+      <label style="display:flex;align-items:flex-start;gap:12px;font-size:14px;line-height:1.5" class="text2"><input type="checkbox" style="width:18px;height:18px;margin:2px 0 0;padding:0;flex-shrink:0;accent-color:var(--surface)">I understand this is a paper simulation of a strategy with a {{ st.track_days }}-day record. Paper results are modelled: they assume the quoted price was available in my size, and a real account could do worse.</label>
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap"><a class="btn light lg" href="/s/{{ s.slug }}" title="Sample flow: nothing is started in the demo build">Start paper tail</a><span class="small text2">Sample flow. Nothing is started in the demo build.</span></div>
+      {% endif %}
     </div></div>
-  </div>
+  {% if t.real %}</form>{% else %}</div>{% endif %}
   <div class="stack" style="gap:20px">
     <div class="card"><div class="body" style="gap:14px;padding:20px 24px">
-      <span class="label">You are tailing</span>
-      <div class="stack" style="gap:4px"><span style="font-weight:600">{{ s.name }}</span><span class="small muted">{{ s.display_name }} · Kalshi</span></div>
-      {{ m.verified("Verified", s.stats.track_days) }}
+      <span class="label">You are paper-tailing</span>
+      <div class="stack" style="gap:4px"><span style="font-weight:600">{{ s.name }}</span><span class="small muted">{{ s.display_name }} · {{ s.venue_label or "Kalshi" }}</span></div>
+      {% if st %}
+      {% if s.incubating %}<span class="badge warn">incubating · {{ st.track_days }}/90 days</span>{% else %}{{ m.verified("Verified", st.track_days) }}{% endif %}
       <div class="stats two" style="border-top:1px solid var(--line)">
-        <div class="stat" style="padding:12px 0 0"><span class="label">Return</span><span class="v good" style="font-size:18px">{{ m.pct(s.stats.total_return) }}</span></div>
-        <div class="stat" style="padding:12px 0 0"><span class="label">Worst DD</span><span class="v bad" style="font-size:18px">{{ m.pct(-s.stats.max_drawdown) }}</span></div>
+        <div class="stat" style="padding:12px 0 0"><span class="label">Return</span><span class="v {{ 'good' if (st.total_return or 0) >= 0 else 'bad' }}" style="font-size:18px">{{ m.pct(st.total_return) }}</span></div>
+        <div class="stat" style="padding:12px 0 0"><span class="label">Worst DD</span><span class="v bad" style="font-size:18px">{{ m.pct(-st.max_drawdown) }}</span></div>
       </div>
+      {% else %}<span class="small muted">Statistics are computed nightly; this strategy's first run is pending.</span>{% endif %}
     </div></div>
     <div class="card plain"><div class="body can" style="gap:10px;padding:20px 24px">
-      <span class="label">What Koine can and cannot do</span>
-      <div>{{ m.icon("check", 16, "var(--good)", 2) }}Place and close mirrored positions, sized to your allocation</div>
-      <div>{{ m.icon("check", 16, "var(--good)", 2) }}Stop when your drawdown limit is hit</div>
-      <div>{{ m.icon("x", 16, "var(--bad)", 2) }}Withdraw, transfer or deposit funds</div>
-      <div>{{ m.icon("x", 16, "var(--bad)", 2) }}Trade outside the tailed strategy</div>
+      <span class="label">What a paper tail does</span>
+      <div>{{ m.icon("check", 16, "var(--good)", 2) }}Copies each new trade into your paper allocation, sized to it</div>
+      <div>{{ m.icon("check", 16, "var(--good)", 2) }}Prices it as described above, after the venue's fees</div>
+      <div>{{ m.icon("check", 16, "var(--good)", 2) }}Stops copying at your drawdown limit</div>
+      <div>{{ m.icon("x", 16, "var(--bad)", 2) }}Place an order in any account</div>
+      <div>{{ m.icon("x", 16, "var(--bad)", 2) }}Ask for a key that can trade, or touch your money</div>
       <div>{{ m.icon("x", 16, "var(--bad)", 2) }}See or share the creator's strategy logic</div>
     </div></div>
   </div>

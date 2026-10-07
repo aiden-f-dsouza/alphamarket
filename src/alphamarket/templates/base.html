@@ -127,13 +127,13 @@
   .spread { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; }
   .stack { display:flex; flex-direction:column; gap:10px; }
   .unverified { padding:20px 22px; border:1px solid var(--line2); border-radius:var(--r); background:var(--surface); line-height:1.55; }
-  .chart { display:grid; grid-template-columns:44px 1fr; gap:12px; }
+  .chart { display:grid; grid-template-columns:44px minmax(0, 1fr); gap:12px; }
   .chart .y { display:flex; flex-direction:column; justify-content:space-between; align-items:flex-end; }
   .chart .x { display:flex; justify-content:space-between; }
   .chart .y span, .chart .x span { font-family:var(--mono); font-size:11px; color:var(--muted); }
   .legend { display:flex; align-items:center; gap:18px; font-size:13px; color:var(--text2); }
   .legend span { display:inline-flex; align-items:center; gap:7px; } .legend i { width:14px; border-top:2px solid; }
-  @media (max-width:1000px) { .grid2, .grid3 { grid-template-columns:1fr; } .nav { padding-left:20px; padding-right:20px; } .nav-links, .nav-right > a:not(.btn), .nav-right > .account { display:none; } .nav-mobile { display:block; } .footer { grid-template-columns:1fr 1fr; padding:40px 24px; } h1 { font-size:34px; } .stats.four, .stats.five, .stats.six { grid-template-columns:repeat(2, minmax(0,1fr)); } .stats.four > .stat, .stats.five > .stat, .stats.six > .stat { border-bottom:1px solid var(--line); } }
+  @media (max-width:1000px) { .grid2, .grid3 { grid-template-columns:minmax(0, 1fr); } .nav { padding-left:20px; padding-right:20px; } .nav-links, .nav-right > a:not(.btn), .nav-right > .account { display:none; } .nav-mobile { display:block; } .footer { grid-template-columns:repeat(2, minmax(0, 1fr)); padding:40px 24px; } .footer > .col:first-child { grid-column:1 / -1; } h1 { font-size:34px; } .stats.four, .stats.five, .stats.six { grid-template-columns:repeat(2, minmax(0,1fr)); } .stats.four > .stat, .stats.five > .stat, .stats.six > .stat { border-bottom:1px solid var(--line); } }
 
   /* identity marks and category pills (marks.py) */
   .sigil { display:block; flex-shrink:0; border-radius:var(--r); }
@@ -150,13 +150,16 @@
   .ticker .it .side { font-size:10px; letter-spacing:.08em; text-transform:uppercase; padding:2px 6px; border-radius:var(--r); border:1px solid currentColor; }
   @keyframes ticker { to { transform:translateX(-50%); } }
   /* equity charts: area fill, drawdown shading, draw-in and the crosshair */
-  .draw { transition:stroke-dashoffset 1.4s ease-out; }
-  .draw[pathLength] { stroke-dasharray:1; stroke-dashoffset:1; }
-  .draw.done { stroke-dashoffset:0; }
+  /* draw-in is a left-to-right clip, not a stroke dash: pathLength is measured
+     in viewBox units but non-scaling-stroke dashes in screen pixels, so under
+     preserveAspectRatio="none" a dash only covered part of the line. The
+     negative end inset keeps round caps and the stroke from being clipped. */
+  .draw { clip-path:inset(0 100% 0 0); transition:clip-path 1.4s ease-out; }
+  .draw.done { clip-path:inset(-10px); }
   .chart-wrap { position:relative; }
   .chart-tip { position:absolute; top:0; left:0; pointer-events:none; transform:translate(-50%, -100%); background:var(--text); color:var(--bg); font:12px var(--mono); padding:5px 8px; border-radius:var(--r); white-space:nowrap; opacity:0; transition:opacity .1s; }
   .chart-tip.on { opacity:1; }
-  @media (prefers-reduced-motion: reduce) { .ticker .track { animation:none; } .ticker { overflow-x:auto; -webkit-mask-image:none; mask-image:none; } .pulse i { animation:none; } .draw, .draw[pathLength] { stroke-dasharray:none; stroke-dashoffset:0; transition:none; } }
+  @media (prefers-reduced-motion: reduce) { .ticker .track { animation:none; } .ticker { overflow-x:auto; -webkit-mask-image:none; mask-image:none; } .pulse i { animation:none; } .draw { clip-path:none; transition:none; } }
   /* marketplace cards */
   .cards { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:16px; }
   .scard { color:inherit; transition:transform .15s, box-shadow .15s; }
@@ -169,7 +172,17 @@
   .scard .ret { font-family:var(--mono); font-size:28px; font-weight:500; line-height:1; letter-spacing:-.01em; }
   .scard svg.curve { display:block; width:100%; height:64px; margin-top:8px; }
   .scard .foot { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:10px 16px 12px; border-top:1px solid var(--line); font:12px var(--mono); color:var(--muted); }
-  @media (max-width:1000px) { .cards { grid-template-columns:1fr; } }
+  @media (max-width:1000px) { .cards { grid-template-columns:minmax(0, 1fr); } }
+  @media (max-width:600px) {
+    main, .section { padding-left:16px; padding-right:16px; } main { padding-top:32px; }
+    .nav { padding-left:16px; padding-right:16px; gap:12px; } .nav-right { gap:12px; }
+    .footer { padding:32px 16px; gap:28px; } .demo-strip { padding:8px 16px; }
+    .card > .body, .body { padding-left:16px; padding-right:16px; } .stat { padding:14px 16px; }
+    .spread { flex-wrap:wrap; }
+    .hero-card > .row:first-child { flex-direction:column; gap:12px; }
+    .chart .x span:nth-child(2), .chart .x span:nth-child(4) { display:none; }
+    .hero-card .stats.two .stat { flex-direction:column !important; align-items:flex-start !important; gap:6px; }
+  }
   {% block style %}{% endblock %}
 </style>
 </head>
@@ -193,7 +206,7 @@
   </div>
   <div class="nav-right">
     {% if user %}
-      {% if settings.demo_mode %}<a href="/portfolio" class="{{ 'active' if nav == 'portfolio' }}">Portfolio</a>{% endif %}
+      {% if settings.demo_mode or user %}<a href="/portfolio" class="{{ 'active' if nav == 'portfolio' }}">Portfolio</a>{% endif %}
       <a href="/dashboard" class="{{ 'active' if nav == 'dashboard' }}">Dashboard</a>
       <details class="menu account">
         <summary class="avatar" title="Account menu" aria-label="Account menu">{{ user.display_name[:2]|upper }}</summary>
@@ -222,7 +235,7 @@
         {% for key, href, label, hint in learn %}<a href="{{ href }}" class="{{ 'on' if nav == key }}">{{ label }}</a>{% endfor %}
         <hr>
         {% if user %}
-          {% if settings.demo_mode %}<a href="/portfolio">Portfolio</a>{% endif %}
+          {% if settings.demo_mode or user %}<a href="/portfolio">Portfolio</a>{% endif %}
           <a href="/dashboard">Dashboard</a>
           <a href="/dashboard/security">Security</a>
           <form method="post" action="/logout-form"><button type="submit">Log out</button></form>
@@ -239,7 +252,7 @@
   <div class="col" style="gap:14px">
     <a class="brand" href="/">{{ m.logo(30) }}Koine</a>
     <p class="small text2" style="max-width:300px">Invest together. A verified marketplace for trading strategies: records are computed from venue data, never typed in.</p>
-    <span class="mono muted" style="font-size:12px">Koine never holds investor funds.</span>
+    <span class="mono muted" style="font-size:12px">Koine never holds or moves anyone's money. Tails are paper only.</span>
   </div>
   <div class="col"><span class="label">Product</span><a href="/marketplace">Marketplace</a>{% if settings.demo_mode %}<a href="/feed">Feed</a><a href="/portfolio">Portfolio</a>{% endif %}<a href="/creators">For creators</a></div>
   <div class="col"><span class="label">Trust</span><a href="/verification">Verification</a><a href="/transparency">Transparency</a><a href="/security">Security &amp; privacy</a></div>

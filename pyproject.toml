@@ -25,6 +25,7 @@ dependencies = [
     "eth-account>=0.14.0",
     "pyjwt>=2.15.0",
     "defusedxml>=0.7.1",
+    "websockets>=15.0",
 ]
 
 [dependency-groups]
@@ -33,6 +34,7 @@ dev = [
     "respx>=0.21",
     "ruff>=0.6",
     "pre-commit>=3.8",
+    "time-machine>=3.5.1",
 ]
 
 [build-system]

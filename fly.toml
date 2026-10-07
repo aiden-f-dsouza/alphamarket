@@ -1,4 +1,4 @@
-# Fly.io deployment (BUILD_PLAN M4.4; docs/deploy.md). Two process GROUPS
+# Fly.io deployment (BUILD_PLAN M4.4; docs/deploy.md). Three process GROUPS
 # from the one Dockerfile image, sharing Fly Managed Postgres as DATABASE_URL:
 #   web    -- runs migrations then serves HTTP (the only group with a
 #             http_service / public port below)
@@ -6,6 +6,13 @@
 #             stats, incubation promotion. No http_service: it takes no
 #             inbound traffic, so `fly scale count worker=N` never opens a
 #             port for it.
+#   stream -- OPTIONAL (P7): python -m alphamarket.stream holds websockets
+#             for creators with active paper allocations so copies lag by
+#             seconds, not minutes (docs/worker.md "Streaming"). Outbound
+#             only, no http_service. The poller stays the source of truth:
+#             `fly scale count stream=0` turns it off with no other effect.
+#             Several machines are safe (Postgres leases); all machines
+#             behind one egress IP share Hyperliquid's 10-user websocket cap.
 # Secrets set with `fly secrets set`:
 #   SECRET_KEY, VAULT_KEY, DATABASE_URL, KALSHI_ENV=prod, SECURE_COOKIES=true
 #
@@ -25,6 +32,7 @@ primary_region = "iad"
 [processes]
   web = "sh -c 'alembic upgrade head && uvicorn alphamarket.main:app --host 0.0.0.0 --port 8080'"
   worker = "python -m alphamarket.worker"
+  stream = "python -m alphamarket.stream"
 
 [http_service]
   internal_port = 8080
@@ -43,3 +51,8 @@ primary_region = "iad"
   size = "shared-cpu-1x"
   memory = "512mb"
   processes = ["worker"]
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  processes = ["stream"]
