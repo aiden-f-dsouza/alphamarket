@@ -34,10 +34,10 @@ ever sent (`_PublicHttp` in the connector). Base URLs are in
 
 | Purpose | Endpoint | Host |
 |---|---|---|
-| Fills (type TRADE) and redemptions (type REDEEM), paged 500 | `GET /activity?user=<addr>&type=...&sortBy=TIMESTAMP&start=...` | `data-api.polymarket.com` |
-| Open positions (cost basis, size) | `GET /positions?user=<addr>` | `data-api.polymarket.com` |
+| Fills (type TRADE) and redemptions (type REDEEM), 1000 per page, cursor paging | `GET /v2/activity?user=<addr>&type=...&sort_by=TIMESTAMP&sort_direction=ASC&start=...&cursor=...` | `data-api.polymarket.com` |
+| Open positions (cost basis, size) | `GET /v2/positions?user=<addr>&status=OPEN&cursor=...` | `data-api.polymarket.com` |
 | Does this address have a profile; read the bio for the claim code | `GET /public-profile?address=<addr>` | `gamma-api.polymarket.com` |
-| Resolve a token to an outcome side (only when a row has no `outcomeIndex`) | `GET /markets/<conditionId>` | `clob.polymarket.com` |
+| Resolve a token to an outcome side (only when a row has no usable `outcome_index`) | `GET /markets/<condition_id>` | `clob.polymarket.com` |
 | Market quotes for paper fills and marks | `GET /markets/<conditionId>`, `/price?token_id=&side=`, `/midpoint?token_id=` | `clob.polymarket.com` |
 
 Notes.
@@ -48,14 +48,50 @@ Notes.
   https://docs.polymarket.com/trading/wallet-activity.md, read 2026-10-07,
   which shows `PublicClient` calls such as `listPositions()` and
   `listActivity()` taking a wallet address).
-- **The connector calls the Data API v1 routes `/activity` and `/positions`.
+- **The connector reads Data API v2 (`/v2/activity`, `/v2/positions`).
   Polymarket's migration guide states "Data API v1 is retired on October 24,
-  2026" and maps them to `/v2/activity` and `/v2/positions`**
-  (https://docs.polymarket.com/migrate/data-api-v1-to-v2.md, read
-  2026-10-07). This is a code follow-up outside this documentation task: the
-  connector and its recorded fixtures need a v2 port before that date, with
-  v2's cursor pagination and shared response envelope
-  [VERIFY the v2 row shapes against `tests/fixtures/polymarket_*.json`].
+  2026"** (https://docs.polymarket.com/migrate/data-api-v1-to-v2.md, read
+  2026-10-08; the OpenAPI document is https://data-api.polymarket.com/v2/openapi.json).
+  Ported 2026-10-08. What changed, and how Koine handles it:
+  - Envelope: `{"data": [...], "pagination": {limit, offset, has_more,
+    next_cursor}}` instead of a bare array. Paging follows `next_cursor`
+    until it is null (v1: `limit`/`offset`, offset capped). Page size up to
+    1000 (v1: 500). A cursor binds the sort direction; `/v2/activity` only
+    sorts by `TIMESTAMP`, ordered `(block_timestamp, sequence_id)`.
+  - Field names are snake_case: `conditionId` -> `condition_id`,
+    `outcomeIndex` -> `outcome_index`, `usdcSize` -> `usdc_size`,
+    `transactionHash` -> `transaction_hash`, `asset` -> `token_id`. Values
+    are unchanged: a live comparison of v1 and v2 for a wallet with 113
+    trades and 73 redeems (2026-10-08) gave identical fill ids, settlement
+    ids, cash, timestamps and outcome indexes. **Dedupe ids are unchanged**
+    (`transaction_hash:token_id:side:price:size#n` carries the same text the
+    v1 `transactionHash:asset:...` did), so history already ingested is not
+    re-ingested. `tests/test_polymarket_connector.py` pins a hand-spelled id.
+  - Request params are snake_case (`sort_by`, `sort_direction`); `since`
+    still maps to the inclusive `start`.
+  - An omitted `start` now floors to three years back; a full sync sends
+    `start=1`. [VERIFY that `start=1` returns rows older than three years;
+    the only wallet checked has history from 2026.]
+  - Positions: `size` -> `current_size`, `initialValue` -> `entry_cost_usdc`
+    (the fee-exclusive basis, same numbers: 0 mismatches across 46 shared
+    positions of two wallets), new `status` filter (default `OPEN`, a
+    superset that includes settled-but-unredeemed winners). v1 hid positions
+    under 1 share (its default size threshold); v2's dust floor is 0.1
+    share, so up to 20 extra tiny positions appeared for a wallet that had
+    146 on v1. Positions under 0.1 share stay hidden. [VERIFY that those
+    never matter for reconciliation: the venue has no observable balance, so
+    positions only feed the anchor at cost basis.] One position out of 146
+    differed in size between two sequential calls (135.6 vs 165.6 shares),
+    most likely a live trade between the calls. [VERIFY]
+  - Fees: `usdc_size` is still the net cash with the fee included (checked
+    on recent October trades as well as the September ones); there is no
+    separate fee field on activity rows. Position rows add
+    `entry_fees_usdc` (disclosure only).
+  - Protocol V2 (pUSD collateral) is a separate migration track
+    (https://docs.polymarket.com/migrate/polymarket-v2/overview.md); Koine
+    reads only the Data API and did not need a change for it. [VERIFY that
+    pUSD-era rows keep the same `usdc_size` semantics for fees on other
+    wallets.]
 - `/public-profile` returns a profile object. Koine reads only the `bio`
   (for the claim code) and otherwise only that the profile exists (404 means
   not a Polymarket account). Any name, pseudonym, image or linked social
@@ -316,8 +352,8 @@ rejected", per the page.
 | API | Limit | Koine uses |
 |---|---|---|
 | Gamma | general 4,000 / 10 s; `/markets` 300 / 10 s; `/events` 500 / 10 s | `/public-profile` (not itemised on the page [VERIFY]; falls under general presumably) |
-| Data API v1 | general 1,000 / 10 s; `/trades` 200; `/positions` 150 / 10 s | `/activity` (general), `/positions` (150 / 10 s) |
-| Data API v2 | general 800 / 10 s; `/v2/trades` 300; `/v2/positions` 200 / 10 s | none yet (port needed before 2026-10-24) |
+| Data API v1 | general 1,000 / 10 s; `/trades` 200; `/positions` 150 / 10 s | retired 2026-10-24; no longer called |
+| Data API v2 | general 800 / 10 s; `/v2/trades` 300; `/v2/positions` 200 / 10 s | `/v2/activity` (general), `/v2/positions` (200 / 10 s) |
 | CLOB | general 9,000 / 10 s; `/price` 1,500; `/book` 1,500 / 10 s | `/markets/<id>` (general), `/price`, `/midpoint` (`/midpoint` is not itemised [VERIFY]) |
 
 The limits are per IP [VERIFY: the page does not say per what in the part
@@ -328,25 +364,27 @@ The venue profile declares no outbound `RateBudget` for Polymarket today
 (compare Hyperliquid), so several workers at once are limited only by that
 per-instance floor. [VERIFY and add an IP-scope budget in the profile before
 the watchlist or any leaderboard fetching adds volume.] A full account
-history sync costs roughly one `/activity` page of 500 per 500 fills for
-each of TRADE and REDEEM, plus `/positions`.
+history sync costs roughly one `/v2/activity` page of 1000 per 1000 fills
+for each of TRADE and REDEEM, plus `/v2/positions`. The v2 OpenAPI says
+429 and 503 carry `Retry-After`, which `_PublicHttp` honours.
 
 ## History depth and mapping
 
 Summarised from the connector docstring (VERIFIED on public payloads
-captured 2026-09-06): `/activity?type=TRADE` gives size, price and
-`usdcSize` (net cash, fee included, so the fee is the difference);
-`type=REDEEM` is the settlement event (payout $1 per winning token, 0 for
-the losing side); `/positions` gives `initialValue` (cost basis) and
-`outcomeIndex` (0 = first outcome = "yes"). Ticker is the `conditionId`.
-Fill identity is `transactionHash:asset:side:price:size` plus an ordinal for
-identical rows in one transaction. History depth is whatever the API pages
+captured 2026-09-06 on v1 and re-recorded on v2 2026-10-09):
+`/v2/activity?type=TRADE` gives size, price and `usdc_size` (net cash, fee
+included, so the fee is the difference); `type=REDEEM` is the settlement
+event (payout $1 per winning token, 0 for the losing side); `/v2/positions`
+gives `entry_cost_usdc` (cost basis) and `outcome_index` (0 = first outcome
+= "yes"). Ticker is the `condition_id`. Fill identity is
+`transaction_hash:token_id:side:price:size` plus an ordinal for identical
+rows in one transaction (the same text as the v1 id). History depth is whatever the API pages
 back to; no retention limit is documented [VERIFY on a long-lived account].
 
 ## Known gaps
 
 - Terms position unresolved (above).
-- Data API v1 retirement on 2026-10-24: connector must move to v2.
+- Data API v1 retirement on 2026-10-24: done, the connector reads v2 (see above).
 - No cash balance (fills-only tier).
 - Polymarket's perps product and Polymarket US are not covered. The Perps
   section of the docs (docs.polymarket.com/perps) exists; Koine does not read

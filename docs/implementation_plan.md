@@ -671,6 +671,14 @@ Wave 3 follow-ups and open decisions:
       trades, holdings and reconciled balance in dollars are shown); confirm
       that is the intended disclosure
 
+2026-10-08:
+
+- [x] Polymarket Data API v1 -> v2 (v1 retires 2026-10-24): cursor paging,
+      snake_case fields, fixtures re-recorded; ids unchanged.
+      Open [VERIFY] items are in `docs/venues/polymarket.md`
+- [ ] Dependencies: nine dependabot bumps combined in one PR, incl.
+      SQLAlchemy 2.1 (first Postgres run is in CI)
+
 Needs the founder / outside the repo:
 
 - [ ] Open Kraken, Alpaca, IBKR accounts; run `scripts/<venue>_smoke.py` and

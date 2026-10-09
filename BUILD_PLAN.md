@@ -369,13 +369,15 @@ Phases:
 
 7B. Polymarket connector (BUILT 2026-09-06)
 - `connectors/polymarket.py`: `PolymarketConnector(address)` over
-  data-api.polymarket.com: fills from `/activity?type=TRADE` (usdcSize is
-  net cash, so fee = |size x price - usdcSize| exactly), settlements from
-  `/activity?type=REDEEM` (usdcSize = payout, 0 for the losing side),
-  positions from `/positions` (initialValue = cost basis), balance raises
-  `BalanceUnavailable`. Ticker = conditionId, side = outcomeIndex 0 -> yes,
-  1 -> no (CLOB token lookup when the index is missing). Fill identity =
-  txhash:asset:side:price:size plus an ordinal for identical rows.
+  data-api.polymarket.com (ported to Data API v2 2026-10-08; v1 retires
+  2026-10-24): fills from `/v2/activity?type=TRADE` (usdc_size is
+  net cash, so fee = |size x price - usdc_size| exactly), settlements from
+  `/v2/activity?type=REDEEM` (usdc_size = payout, 0 for the losing side),
+  positions from `/v2/positions` (entry_cost_usdc = cost basis), balance
+  raises `BalanceUnavailable`. Ticker = condition_id, side = outcome_index
+  0 -> yes, 1 -> no (CLOB token lookup when the index is missing). Fill
+  identity = txhash:token_id:side:price:size plus an ordinal for identical
+  rows (unchanged from v1, where token_id was named `asset`).
 - `PolymarketMarketData`: CLOB `/markets/{conditionId}` (closed + winner
   token -> result), `/price?side=buy|sell` for bid/ask, `/midpoint`.
 - Fixtures captured 2026-09-06 from public endpoints; respx tests only.

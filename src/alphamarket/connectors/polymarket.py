@@ -5,35 +5,62 @@ at all: the "key id" is the proxy wallet address and every read is an
 unauthenticated call to Polymarket's public APIs. Ownership is proved by a
 claim code in the trader's profile bio (see venues.py), not by a key.
 
-All mappings are VERIFIED against public payloads captured 2026-09-06
-(tests/fixtures/polymarket_*.json). What matters for the ledger:
+Account reads use the Data API **v2** (`{data_url}/v2/...`; v1 is retired on
+2026-10-24). v2 changes the shape of the data, not its meaning:
 
-  /activity?type=TRADE  size (tokens, float, 6 dp)   price (float, up to 10 dp:
-                        volume-weighted across the maker fills of one taker
-                        order)   usdcSize (float, 6 dp) = the NET cash that
-                        moved, fee included. So fee = |size x price - usdcSize|
-                        and the ledger's cash flow reproduces usdcSize exactly.
-                        Cross-checked: 21.294467 x 0.4696055083 = 9.999999
-                        gross (a $10 order), 10.265189 net -> fee 0.265190,
-                        which is 5% x size x p x (1-p) to within the price
-                        rounding: Polymarket's taker formula at a 5% rate.
-  /activity?type=REDEEM the settlement event: size = tokens redeemed,
-                        usdcSize = payout ($1 per winning token, 0 for the
-                        losing side, redeemed in the same transaction).
-  /positions            initialValue = cost basis net of fees, curPrice,
-                        outcomeIndex (0 = first outcome = "yes" here).
-  balance               NOT observable. Proxy wallets of active traders show
-                        0 USDC.e and 0 native USDC on-chain (checked against
-                        four wallets on 2026-09-06), so cash lives somewhere
-                        the public chain read does not see. fetch_balance
-                        raises BalanceUnavailable and the account lands in
-                        the fills-only verification tier.
+  envelope    every payload is {"data": [...], "pagination": {limit, offset,
+              has_more, next_cursor}} (v1 returned a bare array). Paging is
+              an opaque keyset cursor: send cursor=<next_cursor> until it is
+              null (v1: limit/offset, capped). Pages hold up to 1000 rows.
+              /v2/activity orders by (block_timestamp, sequence_id) and
+              sort_by may only be TIMESTAMP; a cursor binds the sort direction.
+  field names snake_case: conditionId -> condition_id, outcomeIndex ->
+              outcome_index, usdcSize -> usdc_size, transactionHash ->
+              transaction_hash, and `asset` -> `token_id` (same value, the CLOB
+              token id). Query params are snake_case too (sort_by,
+              sort_direction); `since` still maps to the inclusive `start`.
+  history     an omitted `start` is floored to three years back, so a full
+              sync sends start=1.
+  positions   `status` defaults to OPEN, a superset that includes settled but
+              unredeemed winners. v1 hid rows under 1 share (default size
+              threshold); v2's floor is 0.1. `size` -> `current_size`,
+              `initialValue` -> `entry_cost_usdc` (still the fee-EXCLUSIVE
+              basis; `total_cost_usdc` = entry_cost_usdc + entry_fees_usdc).
 
-Ticker = conditionId (one binary market); side = outcomeIndex 0 -> yes,
+Sources: https://docs.polymarket.com/migrate/data-api-v1-to-v2.md and
+https://data-api.polymarket.com/v2/openapi.json. The mappings are VERIFIED
+against real v2 payloads recorded 2026-10-09 (tests/fixtures/polymarket/),
+and against the live v1 feed: for a wallet with 113 trades and 73 redeems,
+v1 and v2 rows gave identical fill/settlement ids, cash, timestamps and
+outcome indexes. What matters for the ledger:
+
+  TRADE    size (shares, float, 6 dp)   price (float, up to 10 dp: volume-
+           weighted across the maker fills of one taker order)   usdc_size
+           (float, 6 dp) = the NET cash that moved, fee included. So fee =
+           |size x price - usdc_size| and the ledger's cash flow reproduces
+           usdc_size exactly. Cross-checked: 21.294467 x 0.4696055083 =
+           9.999999 gross (a $10 order), 10.265189 net -> fee 0.265190, which
+           is 5% x size x p x (1-p) to within the price rounding: Polymarket's
+           taker formula at a 5% rate.
+  REDEEM   the settlement event: size = tokens redeemed, usdc_size = payout
+           ($1 per winning token, 0 for the losing side, redeemed in the same
+           transaction).
+  position entry_cost_usdc = cost basis net of fees, current_price,
+           outcome_index (0 = first outcome = "yes" here).
+  balance  NOT observable. Proxy wallets of active traders show 0 USDC.e and
+           0 native USDC on-chain (checked against four wallets on
+           2026-09-06), so cash lives somewhere the public chain read does not
+           see. fetch_balance raises BalanceUnavailable and the account lands
+           in the fills-only verification tier.
+
+Ticker = condition_id (one binary market); side = outcome_index 0 -> yes,
 1 -> no. Prices are token prices for the side traded, like Kalshi's
-no_price for NO fills. Fill identity: transactionHash:asset:side:price:size
-plus an ordinal for identical rows in the same transaction (there is no
-per-fill id; several maker fills share one hash).
+no_price for NO fills. Fill identity: transaction_hash:token_id:side:price:
+size plus an ordinal for identical rows in the same transaction (there is no
+per-fill id; several maker fills share one hash). This is the v1 id with the
+v1 names (transactionHash, asset) swapped for their v2 spellings and the same
+values, so history ingested from v1 is NOT re-ingested; keep it that way
+(fills are append-only and unique on this id).
 """
 
 import time
@@ -58,7 +85,7 @@ from alphamarket.connectors.base import (
 from alphamarket.money import MICROS_PER_UNIT
 
 _MICRO = Decimal(1) / MICROS_PER_UNIT
-PAGE_SIZE = 500
+PAGE_SIZE = 1000  # v2 maximum for /v2/activity and /v2/positions
 
 
 def is_address(value: str) -> bool:
@@ -165,40 +192,58 @@ class PolymarketConnector(VenueConnector):
 
     # ---- transport -------------------------------------------------------
 
-    def _activity(self, kind: str, since: datetime | None) -> list[dict[str, Any]]:
-        """All activity rows of one type, oldest first, via offset paging."""
-        params: dict[str, Any] = {
-            "user": self.address,
-            "type": kind,
-            "limit": PAGE_SIZE,
-            "sortBy": "TIMESTAMP",
-            "sortDirection": "ASC",
-        }
-        if since is not None:
-            params["start"] = int(since.timestamp())
+    def _paged(self, path: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Every row of a v2 `{data, pagination}` endpoint, following the
+        keyset cursor until `next_cursor` is null. A cursor that repeats would
+        loop forever, so it is an error."""
         rows: list[dict[str, Any]] = []
-        offset = 0
+        cursor: str | None = None
+        seen: set[str] = set()
         while True:
-            page = self.http.get_json(f"{self.data_url}/activity", {**params, "offset": offset})
-            if not isinstance(page, list):
-                raise ValueError("unexpected activity payload")
-            rows.extend(page)
-            if len(page) < PAGE_SIZE:
+            page_params = dict(params)
+            if cursor is not None:
+                page_params["cursor"] = cursor
+            body = self.http.get_json(f"{self.data_url}/v2/{path}", page_params)
+            if not isinstance(body, dict):
+                raise ValueError(f"unexpected {path} payload")
+            data = body.get("data")
+            if data is not None and not isinstance(data, list):
+                raise ValueError(f"unexpected {path} payload")
+            rows.extend(data or [])
+            cursor = (body.get("pagination") or {}).get("next_cursor")
+            if not cursor:
                 return rows
-            offset += PAGE_SIZE
+            if cursor in seen:
+                raise ValueError(f"{path} cursor did not advance")
+            seen.add(cursor)
+
+    def _activity(self, kind: str, since: datetime | None) -> list[dict[str, Any]]:
+        """All activity rows of one type, oldest first, via cursor paging."""
+        return self._paged(
+            "activity",
+            {
+                "user": self.address,
+                "type": kind,
+                "limit": PAGE_SIZE,
+                "sort_by": "TIMESTAMP",
+                "sort_direction": "ASC",
+                # An omitted start is floored to three years back; 1 is full history.
+                "start": int(since.timestamp()) if since is not None else 1,
+            },
+        )
 
     def _profile(self) -> dict[str, Any]:
         return self.http.get_json(f"{self.gamma_url}/public-profile", {"address": self.address})
 
     def _side_of(self, row: dict[str, Any]) -> Side:
-        side = _side_from_index(row.get("outcomeIndex"))
+        side = _side_from_index(row.get("outcome_index"))
         if side is not None:
             return side
-        # The unfiltered feed reports outcomeIndex 999; resolve via the
-        # market's token list and remember it.
-        asset = str(row["asset"])
+        # An outcome that cannot be labeled is reported as outcome_index 999;
+        # resolve via the market's token list and remember it.
+        asset = str(row["token_id"])
         if asset not in self._token_sides:
-            market = self.http.get_json(f"{self.clob_url}/markets/{row['conditionId']}")
+            market = self.http.get_json(f"{self.clob_url}/markets/{row['condition_id']}")
             for index, token in enumerate(market.get("tokens", [])):
                 found = _side_from_index(index)
                 if found is not None:
@@ -255,29 +300,27 @@ class PolymarketConnector(VenueConnector):
 
     def fetch_positions(self) -> list[NormalizedPosition]:
         out: list[NormalizedPosition] = []
-        offset = 0
-        while True:
-            page = self.http.get_json(
-                f"{self.data_url}/positions",
-                {"user": self.address, "limit": PAGE_SIZE, "offset": offset},
-            )
-            for p in page:
-                size = micros(p.get("size") or 0)
-                if size == 0:
-                    continue
-                side = self._side_of(p)
-                out.append(
-                    NormalizedPosition(
-                        ticker=str(p["conditionId"]),
-                        position_micros=size if side is Side.YES else -size,
-                        # initialValue is the cost basis net of entry fees,
-                        # which is what the ledger carries open positions at.
-                        market_exposure_micros=micros(p.get("initialValue") or 0),
-                    )
+        # status=OPEN (the default, stated for clarity) is the superset: it
+        # includes settled-but-unredeemed winners, which still hold tokens.
+        rows = self._paged(
+            "positions", {"user": self.address, "status": "OPEN", "limit": PAGE_SIZE}
+        )
+        for p in rows:
+            size = micros(p.get("current_size") or 0)
+            if size == 0:
+                continue
+            side = self._side_of(p)
+            out.append(
+                NormalizedPosition(
+                    ticker=str(p["condition_id"]),
+                    position_micros=size if side is Side.YES else -size,
+                    # entry_cost_usdc (v1 initialValue) is the cost basis net
+                    # of entry fees, which is what the ledger carries open
+                    # positions at.
+                    market_exposure_micros=micros(p.get("entry_cost_usdc") or 0),
                 )
-            if len(page) < PAGE_SIZE:
-                return out
-            offset += PAGE_SIZE
+            )
+        return out
 
     # ---- mapping ---------------------------------------------------------
 
@@ -287,7 +330,7 @@ class PolymarketConnector(VenueConnector):
         count = micros(r["size"])
         price = micros(r["price"])
         gross = micros(_dec(r["size"]) * _dec(r["price"]))
-        net = micros(r["usdcSize"])
+        net = micros(r["usdc_size"])
         # The fee is whatever separates gross from the cash that moved. A
         # zero-fee market can round gross one micro past net; clamp so the
         # fee is never negative and the cash flow is still exactly `net`.
@@ -295,8 +338,10 @@ class PolymarketConnector(VenueConnector):
         if fee < 0:
             gross, fee = net, 0
         return NormalizedFill(
-            venue_fill_id=f"{r['transactionHash']}:{r['asset']}:{action.value}:{price}:{count}",
-            ticker=str(r["conditionId"]),
+            venue_fill_id=(
+                f"{r['transaction_hash']}:{r['token_id']}:{action.value}:{price}:{count}"
+            ),
+            ticker=str(r["condition_id"]),
             side=side,
             action=action,
             count_micros=count,
@@ -309,14 +354,14 @@ class PolymarketConnector(VenueConnector):
     def _to_settlement(self, r: dict[str, Any]) -> NormalizedSettlement:
         side = self._side_of(r)
         count = micros(r["size"])
-        payout = micros(r.get("usdcSize") or 0)
+        payout = micros(r.get("usdc_size") or 0)
         # A payout means this token won; a zero payout means it was the
         # losing side being burned, so the other outcome won.
         other = Side.NO if side is Side.YES else Side.YES
         result = side.value if payout > 0 else other.value
         return NormalizedSettlement(
-            venue_settlement_id=f"{r['transactionHash']}:{r['asset']}",
-            ticker=str(r["conditionId"]),
+            venue_settlement_id=f"{r['transaction_hash']}:{r['token_id']}",
+            ticker=str(r["condition_id"]),
             market_result=result,
             yes_count_micros=count if side is Side.YES else 0,
             no_count_micros=count if side is Side.NO else 0,

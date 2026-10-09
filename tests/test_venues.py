@@ -216,14 +216,14 @@ POLY_ADDRESS = "0x124628E686dB22da39b6Ee43CA786C8A074BD6F2"
 def _mock_polymarket(bio: str = "getting adversely selected"):
     profile = dict(_fixture("polymarket_profile.json"), bio=bio)
     respx.get(f"{POLY_GAMMA}/public-profile").mock(return_value=httpx.Response(200, json=profile))
-    respx.get(f"{POLY_DATA}/activity", params__contains={"type": "TRADE"}).mock(
-        return_value=httpx.Response(200, json=_fixture("polymarket_activity_trades.json"))
+    respx.get(f"{POLY_DATA}/v2/activity", params__contains={"type": "TRADE"}).mock(
+        return_value=httpx.Response(200, json=_fixture("polymarket/activity_trades_20261009.json"))
     )
-    respx.get(f"{POLY_DATA}/activity", params__contains={"type": "REDEEM"}).mock(
-        return_value=httpx.Response(200, json=_fixture("polymarket_activity_redeems.json"))
+    respx.get(f"{POLY_DATA}/v2/activity", params__contains={"type": "REDEEM"}).mock(
+        return_value=httpx.Response(200, json=_fixture("polymarket/activity_redeems_20261009.json"))
     )
-    respx.get(f"{POLY_DATA}/positions").mock(
-        return_value=httpx.Response(200, json=_fixture("polymarket_positions.json"))
+    respx.get(f"{POLY_DATA}/v2/positions").mock(
+        return_value=httpx.Response(200, json=_fixture("polymarket/positions_20261009.json"))
     )
 
 
@@ -256,7 +256,7 @@ def test_polymarket_connect_stores_no_secret_and_starts_unclaimed(client, user, 
         # No observable balance: anchored at zero, positions at cost basis.
         assert account.anchor_balance_micros == 0
         assert len(account.anchor_positions) == 2
-        assert account.anchor_positions[0]["cost_micros"] == 9_999_900
+        assert account.anchor_positions[0]["cost_micros"] == 12_599_900
         fills = db.scalars(select(Fill)).all()
         assert {f.notional_micros for f in fills} == {9_999_999}
         strategy = db.scalars(select(Strategy)).one()

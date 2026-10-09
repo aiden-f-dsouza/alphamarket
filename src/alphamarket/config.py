@@ -12,8 +12,9 @@ KALSHI_BASE_URLS = {
 }
 
 # Polymarket has no demo environment. Three public, unauthenticated hosts
-# (checked 2026-09-06): data-api for per-wallet activity and positions, the
-# CLOB for market state and quotes, gamma for public profiles.
+# (checked 2026-09-06): data-api for per-wallet activity and positions (the
+# /v2 routes; v1 is retired 2026-10-24), the CLOB for market state and
+# quotes, gamma for public profiles.
 POLYMARKET_BASE_URLS = {
     "prod": {
         "data": "https://data-api.polymarket.com",

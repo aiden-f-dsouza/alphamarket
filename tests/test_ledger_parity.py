@@ -53,7 +53,8 @@ def _load(pattern: str) -> list:
     rows: list = []
     for path in sorted(FIXTURES.glob(pattern)):
         payload = json.loads(path.read_text())
-        rows.extend(payload)
+        # Polymarket v2 fixtures are `{data, pagination}` envelopes.
+        rows.extend(payload["data"] if isinstance(payload, dict) else payload)
     return rows
 
 
@@ -85,15 +86,22 @@ def _kalshi_normalized() -> tuple[list[NormalizedFill], list[NormalizedSettlemen
     return conn.fetch_fills(), conn.fetch_settlements()
 
 
+def _v2_page(rows: list) -> dict:
+    return {
+        "data": rows,
+        "pagination": {"limit": 1000, "offset": 0, "has_more": False, "next_cursor": None},
+    }
+
+
 @respx.mock
 def _polymarket_normalized() -> tuple[list[NormalizedFill], list[NormalizedSettlement]]:
-    trades = _load("polymarket_activity_trades*.json")
-    redeems = _load("polymarket_activity_redeems*.json")
-    respx.get(f"{PM_DATA}/activity", params__contains={"type": "TRADE"}).mock(
-        return_value=httpx.Response(200, json=trades)
+    trades = _load("polymarket/activity_trades*.json")
+    redeems = _load("polymarket/activity_redeems*.json")
+    respx.get(f"{PM_DATA}/v2/activity", params__contains={"type": "TRADE"}).mock(
+        return_value=httpx.Response(200, json=_v2_page(trades))
     )
-    respx.get(f"{PM_DATA}/activity", params__contains={"type": "REDEEM"}).mock(
-        return_value=httpx.Response(200, json=redeems)
+    respx.get(f"{PM_DATA}/v2/activity", params__contains={"type": "REDEEM"}).mock(
+        return_value=httpx.Response(200, json=_v2_page(redeems))
     )
     market = _json(FIXTURES / "polymarket_market.json")
     respx.get(url__startswith=f"{PM_CLOB}/markets/").mock(

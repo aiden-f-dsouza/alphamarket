@@ -19,7 +19,7 @@ Usage:
       https://demo-api.kalshi.co/trade-api/v2/markets/KXBTC-25 --get
 
   uv run python scripts/record_fixture.py polymarket activity \\
-      https://data-api.polymarket.com/activity --get \\
+      https://data-api.polymarket.com/v2/activity --get \\
       --param user=0xabc... --param type=TRADE
 
   uv run python scripts/record_fixture.py somevenue quote \\
