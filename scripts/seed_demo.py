@@ -101,12 +101,15 @@ from alphamarket.models import (
     Job,
     JobStatus,
     Strategy,
+    StrategyKind,
     User,
     VenueAccount,
     VenueAccountStatus,
+    Watch,
 )
 from alphamarket.scopecheck import apply_evidence
 from alphamarket.venues import slugify
+from alphamarket.watchlist import UNUSABLE_PASSWORD_HASH, short_address
 
 logger = logging.getLogger("seed_demo")
 
@@ -367,7 +370,14 @@ class CreatorSpec:
     edge: float = 0.0  # binary: the gap between its own probability and the price to trade
     insight: float = 0.1  # binary: how informative its own signal is (0 none, 1 perfect)
     markets_per_day: float = 1.0
+    house: bool = False  # the user is a Koine-run account (User.is_house)
+    watch: bool = False  # no creator: a watched address owned by the system user
+    key_id: str = ""  # a fixed venue key / address instead of a generated one
 
+
+# A watched address is obviously synthetic: "de30" repeated, never a real person's.
+WATCH_ADDRESS = "0x" + "de30" * 10
+SYSTEM_LOCAL = "system"  # system@demo.koine owns the watch accounts
 
 CREATORS = (
     CreatorSpec(
@@ -539,6 +549,52 @@ CREATORS = (
         markets_per_day=0.6,
         frac=(0.025, 0.035),
     ),
+    # Run by Koine: an `is_house` user, so its strategy carries the "Run by
+    # Koine" badge. Same pipeline and the same ranking rules as everyone else.
+    CreatorSpec(
+        handle="koinelab",
+        display_name="Koine Lab",
+        venue="kraken",
+        strategy="Systematic BTC/ETH trend filter",
+        description=(
+            "Run by Koine. A rules-based trend filter on BTC and ETH spot at Kraken: long "
+            "when price holds above its medium-term average, flat otherwise. No leverage, "
+            "and every rule is fixed in advance."
+        ),
+        tags="crypto,systematic,trend",
+        history_days=180,
+        cash=20_000,
+        kind="spot",
+        symbols=(("BTC", 0.6), ("ETH", 0.4)),
+        skill=0.6,
+        trades_per_week=1.6,
+        hold_hours=(72, 288),
+        frac=(0.25, 0.4),
+        fee_bps=25,
+        house=True,
+    ),
+    # Not a creator: a public Hyperliquid address watched privately (the
+    # watchlist). Its venue account belongs to the demo system user, is never
+    # claimed, and its strategy has kind "watch" and is never public.
+    CreatorSpec(
+        handle="whale",
+        display_name="Hyperliquid whale",
+        venue="hyperliquid",
+        strategy="Watched perp address",
+        description="",
+        tags="",
+        history_days=200,
+        cash=150_000,
+        kind="perp",
+        symbols=(("BTC", 0.55), ("ETH", 0.3), ("SOL", 0.15)),
+        skill=0.6,
+        trades_per_week=3.0,
+        hold_hours=(8, 120),
+        frac=(0.6, 1.4),
+        fee_bps=4.5,
+        watch=True,
+        key_id=WATCH_ADDRESS,
+    ),
 )
 
 # (investor email local part, strategy handle, dollars, drawdown limit bps, days before the end)
@@ -550,6 +606,12 @@ ALLOCATIONS = (
     ("investor", "lantern", 1_500, 1_000, 50),
     ("analyst", "harbor", 5_000, 1_000, 58),
     ("analyst", "northwind", 1_000, 1_500, 40),
+    ("investor", "whale", 2_000, 2_000, 52),  # the paper tail of a watched address
+)
+# (investor, watched handle, private label): each user names a watch themselves.
+WATCHES = (
+    ("investor", "whale", "Funding-aware perp whale"),
+    ("analyst", "whale", "BTC momentum book to study"),
 )
 FOLLOWS = (
     ("investor", ("northwind", "tidewater", "meridian", "isobar", "lantern", "fedwatch")),
@@ -705,6 +767,8 @@ class World:
                 SpotGen(self, c, book).run()
 
     def _key_id(self, c: CreatorSpec) -> str:
+        if c.key_id:
+            return c.key_id
         rng = self.rng("key", c.handle)
         if c.venue == "hyperliquid":
             return "0x" + "".join(rng.choice("0123456789abcdef") for _ in range(40))
@@ -1955,6 +2019,9 @@ class Sim:
             for handle in handles:
                 at = max(joined, w.anchor_at[handle] + timedelta(hours=2))
                 evs.append(Ev(at + timedelta(minutes=1), 5, "follow", (who, handle)))
+        for who, handle, label in WATCHES:  # a watch exists before it is tailed
+            at = max(joined, w.anchor_at[handle] + timedelta(hours=2))
+            evs.append(Ev(at + timedelta(minutes=2), 5, "watch", (who, handle, label)))
         for n, (who, handle, dollars, dd, days) in enumerate(ALLOCATIONS):
             back = min(days, w.scale.copy_days) - n * 0.05
             at = w.end - timedelta(days=back) + timedelta(minutes=13 * n)
@@ -1985,13 +2052,28 @@ class Sim:
 
     # ---- events --------------------------------------------------------------------------
 
-    def _user(self, db: Session, local: str, display: str) -> User:
+    def _user(self, db: Session, local: str, display: str, **flags: bool) -> User:
         user = User(
             email=f"{local}@{EMAIL_DOMAIN}",
             password_hash=hash_password(self.password),
             display_name=display,
             is_demo=True,
             email_verified_at=_now(),
+            **flags,
+        )
+        db.add(user)
+        db.flush()
+        return user
+
+    def _system_user(self, db: Session) -> User:
+        """The demo's system user (invariant 7: is_demo too). Made here, before
+        anything could call watchlist.system_user, so that is the one it finds."""
+        user = User(
+            email=f"{SYSTEM_LOCAL}@{EMAIL_DOMAIN}",
+            password_hash=UNUSABLE_PASSWORD_HASH,
+            display_name="Koine watchlist",
+            is_demo=True,
+            is_system=True,
         )
         db.add(user)
         db.flush()
@@ -2005,7 +2087,11 @@ class Sim:
         profile = registry.get_profile(c.venue)
         now = _now()
         with self.sf() as db:
-            user = self._user(db, c.handle, c.display_name)
+            user = (
+                self._system_user(db)
+                if c.watch
+                else self._user(db, c.handle, c.display_name, is_house=c.house)
+            )
             account = VenueAccount(
                 user_id=user.id,
                 venue=c.venue,
@@ -2017,7 +2103,8 @@ class Sim:
                 else None,
                 anchor_at=now,
                 anchor_positions=[],
-                claimed_at=now,
+                claimed_at=None if c.watch else now,
+                is_watch=c.watch,
             )
             connector = registry.build_connector(c.venue, book.venue_env, book.key_id, None)
             apply_evidence(account, connector.prove_read_only())
@@ -2033,7 +2120,7 @@ class Sim:
                         as_of=now,
                     )
                 )
-            if profile.needs_secret:
+            if profile.needs_secret and not c.watch:
                 credentials.store(
                     db,
                     account,
@@ -2041,6 +2128,23 @@ class Sim:
                     kind=profile.credential,
                     actor_user_id=user.id,
                 )
+            if c.watch:  # what watchlist._track leaves behind
+                strategy = Strategy(
+                    user_id=user.id,
+                    venue_account_id=account.id,
+                    name=f"{registry.get_profile(c.venue).display_name} {short_address(c.key_id)}",
+                    slug="pending",
+                    kind=StrategyKind.WATCH,
+                    public=False,
+                )
+                db.add(strategy)
+                db.flush()
+                strategy.slug = f"watch-{strategy.id}"
+                db.commit()
+                self.accounts[c.handle] = account.id
+                self.strategies[c.handle] = strategy.id
+                self._backfill(c, profile)
+                return
             strategy = Strategy(
                 user_id=user.id,
                 venue_account_id=account.id,
@@ -2058,7 +2162,11 @@ class Sim:
             db.commit()
             self.accounts[c.handle] = account.id
             self.strategies[c.handle] = strategy.id
-            self.summary.logins.append((user.email, f"creator ({c.venue})"))
+            role = f"creator ({c.venue}{', run by Koine' if c.house else ''})"
+            self.summary.logins.append((user.email, role))
+        self._backfill(c, profile)
+
+    def _backfill(self, c: CreatorSpec, profile) -> None:
         paged = profile.instrument.value != "binary"
         self.enqueue(
             JobKind.BACKFILL if paged else JobKind.SYNC, account_id=self.accounts[c.handle]
@@ -2106,6 +2214,12 @@ class Sim:
         who, handle = arg
         with self.sf() as db:
             db.add(Follow(user_id=self.users[who], strategy_id=self.strategies[handle]))
+            db.commit()
+
+    def on_watch(self, arg) -> None:
+        who, handle, label = arg
+        with self.sf() as db:
+            db.add(Watch(user_id=self.users[who], strategy_id=self.strategies[handle], label=label))
             db.commit()
 
     def on_allocate(self, arg) -> None:

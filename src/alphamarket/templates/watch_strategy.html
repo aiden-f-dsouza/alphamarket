@@ -34,6 +34,9 @@
       <span class="addr">{{ page.venue_label }} · {{ page.address }}</span>
       <span class="small muted">Unclaimed public address. Koine does not know who trades it and does not try to find out.</span>
     </div>
+    {% if page.sample %}
+    <div class="manage"><button class="btn secondary sm" type="button" disabled>Save label</button><button class="btn danger sm" type="button" disabled>Remove from watchlist</button><span class="small muted">Sample page: editing is off in the demo.</span></div>
+    {% else %}
     <div class="manage">
       <form method="post" action="/watch/{{ page.watch_id }}/label" class="manage">
         <label class="field" style="gap:4px"><span class="label">Your label</span><input name="label" maxlength="60" value="{{ page.label }}" placeholder="Only you see this"></label>
@@ -41,6 +44,7 @@
       </form>
       <form method="post" action="/watch/{{ page.watch_id }}/remove"><button class="btn danger sm" type="submit" title="Also stops your paper tail of it">Remove from watchlist</button></form>
     </div>
+    {% endif %}
   </div>
   {% if page.tailing %}
   <div class="card tailcard"><div class="body" style="padding:20px 24px">

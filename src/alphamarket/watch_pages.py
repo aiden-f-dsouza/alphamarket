@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
-from alphamarket import ratelimit
+from alphamarket import demo, ratelimit
 from alphamarket.analytics import latest_stats
 from alphamarket.charts import polyline, window_x
 from alphamarket.config import get_settings
@@ -119,6 +119,7 @@ def _list(
         "watch.html",
         status_code=status_code,
         user=user,
+        demo=user.is_demo,  # a seeded demo investor's watchlist is sample data
         rows=rows,
         venues=venues,
         limit=get_settings().watch_max_per_user,
@@ -134,6 +135,23 @@ def _list(
 def watch_list(request: Request, notice: str = "", db: Session = Depends(get_db)):
     user = _user(request, db)
     if user is None:
+        if get_settings().demo_mode:  # the static demo: a visitor sees the sample list
+            return _render_private(
+                request,
+                "watch.html",
+                user=None,
+                demo=True,
+                private_watch=True,
+                sample=True,
+                rows=demo.watch_list(),
+                venues=[],
+                limit=get_settings().watch_max_per_user,
+                verified=False,
+                error=None,
+                listed_slug=None,
+                form={"venue": "", "address": "", "label": ""},
+                notice=None,
+            )
         return RedirectResponse(login_url("/watch"), status_code=303)
     return _list(request, db, user, notice=NOTICES.get(notice))  # fixed texts only
 
@@ -203,6 +221,27 @@ def _watch_page(db: Session, user: User, w: Watched) -> dict:
     return page
 
 
+@router.get("/watch/sample-{n}", response_class=HTMLResponse)
+def watch_sample(request: Request, n: int, db: Session = Depends(get_db)):
+    """The static demo's sample watch page (DEMO_MODE on, nobody logged in);
+    404 otherwise. Declared before the int-id route so "sample-1" never
+    reaches it."""
+    page = demo.watch_sample_page(f"sample-{n}") if get_settings().demo_mode else None
+    if page is None or _user(request, db) is not None:
+        raise HTTPException(status_code=404)
+    return _render_private(
+        request,
+        "watch_strategy.html",
+        user=None,
+        page=page,
+        charts=_charts(page["stats"], page["benchmarks"]),
+        watch=True,
+        private_watch=True,
+        demo=True,
+        notice=None,
+    )
+
+
 @router.get("/watch/{strategy_id}", response_class=HTMLResponse)
 def watch_page(request: Request, strategy_id: int, notice: str = "", db: Session = Depends(get_db)):
     user = _user(request, db)
@@ -214,6 +253,7 @@ def watch_page(request: Request, strategy_id: int, notice: str = "", db: Session
         request,
         "watch_strategy.html",
         user=user,
+        demo=user.is_demo,
         page=page,
         charts=_charts(page["stats"]),
         watch=True,
@@ -260,7 +300,9 @@ def watch_tail_page(request: Request, strategy_id: int, db: Session = Depends(ge
         raise HTTPException(status_code=404)
     w = watch_strategy_or_404(db, user, strategy_id)
     t = _watch_tail_ctx(db, w.strategy, user)
-    return _render_private(request, "tail.html", user=user, t=t, private_watch=True)
+    return _render_private(
+        request, "tail.html", user=user, t=t, private_watch=True, demo=user.is_demo
+    )
 
 
 @router.post("/watch/{strategy_id}/tail")

@@ -80,6 +80,7 @@ All users are `is_demo = true` (invariant 7, see below).
 | harbor | IBKR Flex (equities) | Dividend growth core | 10 months | daily-resolution venue ("daily verified") |
 | isobar | Kalshi | NYC & Chicago daily highs | 8 months | prediction markets, settled daily |
 | fedwatch | Kalshi | CPI & Fed path | 75 days | incubating |
+| koinelab | Kraken (spot) | Systematic BTC/ETH trend filter | 6 months | Koine-run (`is_house`): carries the "Run by Koine" badge, ranked like everyone else |
 
 Investors (password-only logins, no TOTP):
 
@@ -87,6 +88,20 @@ Investors (password-only logins, no TOTP):
   tidewater and lantern (with a tight 10% drawdown stop), started 50-60
   days ago; follows six strategies.
 - `analyst@demo.koine`: tails of harbor and northwind; follows four.
+
+Private watchlist (docs/copy_strategies_plan.md section 2): one synthetic
+Hyperliquid address, `0xde30de30...de30` (`de30` repeated, never a real
+person's), watched through the same shared-account path as a real watch. Its
+venue account belongs to `system@demo.koine`, a seeded system user
+(`is_system` and `is_demo`, unusable password hash `!`, no login); the account
+is never claimed and its strategy has kind `watch`, is not public and has slug
+`watch-{id}`. It is fed through the same pipeline as the Hyperliquid creator
+(fills, hourly funding, stats, signals, paper engine). It appears on no
+public surface and nobody follows it.
+
+- `investor@demo.koine` watches it as "Funding-aware perp whale" and also has
+  an active paper tail of it; open `/watch` to see it.
+- `analyst@demo.koine` watches it as "BTC momentum book to study" (no tail).
 
 Every creator can log in too (`<handle>@demo.koine`, e.g.
 `northwind@demo.koine`) to show the creator dashboard. The password for every

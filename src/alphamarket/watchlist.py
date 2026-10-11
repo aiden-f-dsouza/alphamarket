@@ -300,6 +300,8 @@ def add_watch(db: Session, user: User, payload: WatchIn, request: Request | None
     """Add an address to the user's watchlist. Raises HTTPException with a
     user-safe detail, or AlreadyListed when it is a public Koine strategy."""
     settings = get_settings()
+    if settings.demo_mode:  # before anything touches a venue or stores an unflagged address
+        raise HTTPException(status_code=403, detail="Adding addresses is off in the demo.")
     if user.email_verified_at is None:
         raise HTTPException(status_code=403, detail=VERIFY_FIRST)
     venue = payload.venue

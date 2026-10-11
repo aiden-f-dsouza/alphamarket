@@ -568,6 +568,11 @@ def _worst_periods(s: dict) -> list[tuple]:
     return [first]
 
 
+def _operator(s: dict) -> str:
+    """Who runs the sample: "creator" unless the sample says "koine"."""
+    return s.get("operator", "creator")
+
+
 def _venue(s: dict) -> str:
     return s.get("venue", "kalshi")
 
@@ -601,6 +606,7 @@ def _row(s: dict) -> dict:
         "paper_tails": s["paper_tails"],
         "score": s["score"],
         "demo": True,
+        "operator": _operator(s),
     }
 
 
@@ -783,11 +789,12 @@ def strategy_page(slug: str) -> dict | None:
     benchmark = (
         ("Bitcoin, buy and hold", bench, "Bitcoin") if crypto else ("S&P 500", spx, "S&P 500")
     )
-    c = _CREATORS[s["handle"]]
+    c = _CREATORS.get(s["handle"], {"followers": 0})  # Koine-run samples have no profile
     mine = [x for x in _STRATEGIES if x["handle"] == s["handle"]]
     curve_rows = [[d.isoformat(), v] for d, v in zip(dates, curve, strict=True)]
     page = {
         "demo": True,
+        "operator": _operator(s),
         "slug": s["slug"],
         "name": s["name"],
         "display_name": s["handle"],
@@ -1172,3 +1179,153 @@ def transparency() -> dict:
             ),
         ],
     }
+
+
+# ---- demo: Run by Koine sample (copy strategies) ----
+# One sample house strategy: Koine's own account, so the page says "Run by
+# Koine" and never links to a creator profile (there is none: `_CREATORS` has
+# no entry, so /u/koine-lab is a 404). The description is Koine's own text,
+# labelled unverified like every other description. Invented numbers (invariant 7).
+_STRATEGIES.append(
+    dict(
+        slug="koine-lab-funding-carry",
+        name="Koine Lab \u00b7 Funding carry",
+        handle="Koine Lab",
+        operator="koine",
+        venue="hyperliquid",
+        tags=["crypto", "perps"],
+        seed=29,
+        drift=0.0013,
+        vol=0.011,
+        days=97,
+        start=20000.0,
+        total_return=0.083,
+        max_drawdown=0.052,
+        sharpe=1.58,
+        sortino=2.02,
+        risk_score=4,
+        n_fills=412,
+        paper_tails=22,
+        score=6.8,
+        description="Koine runs this one in a Koine-owned account. Hold BTC spot-equivalent exposure and short the perp when funding is positive, so the position earns funding rather than price moves. Gross leverage stays under 1.5x.",
+        worst_periods=[
+            (
+                "Jul 14 to Jul 22",
+                -0.052,
+                "10 days",
+                "Funding flipped negative for a week while the hedge was still on.",
+            ),
+        ],
+        holdings=[
+            ("USDC", "cash", 1.0, None, None),
+            ("BTC-PERP", "perp", -0.55, 63405.0, "62,310.0"),
+        ],
+        signals=[
+            ("BTC-PERP", "2026-08-31T00:00:14", "sell", "0.060", "63,371.0", 0.12),
+            ("BTC-PERP", "2026-08-25T08:00:09", "buy", "0.030", "62,880.5", 0.06),
+            ("BTC-PERP", "2026-08-19T00:00:21", "sell", "0.045", "61,455.0", 0.09),
+        ],
+    )
+)
+
+
+# ---- demo: watchlist sample ----
+# The static demo's private watchlist (watch_pages.py serves it to a visitor
+# when DEMO_MODE is on and nobody is logged in). The addresses are invented:
+# well-formed, obviously fake, never anyone's real address. Only the first has
+# a full page (/watch/sample-1, built from the Hyperliquid sample record); the
+# rest are list rows. Adding an address is off in the demo.
+WATCH_BASE_SLUG = "funding-aware-btc-perps"
+_WATCH_SAMPLES = [
+    dict(n=1, address="0x5a3c000000000000000000000000000000c0ffee", label="Funding-carry desk"),
+    dict(
+        n=2,
+        address="0x7be1000000000000000000000000000000d15ea5",
+        label="Leaderboard BTC swing",
+        seed=61,
+        days=71,
+        total_return=0.094,
+        drift=0.0011,
+        vol=0.02,
+    ),
+    dict(
+        n=3,
+        address="0x9d04000000000000000000000000000000facade",
+        label="",
+        seed=62,
+        days=38,
+        total_return=-0.031,
+        drift=-0.0004,
+        vol=0.024,
+    ),
+]
+
+
+def _watch_short(address: str) -> str:
+    return f"{address[:6]}…{address[-4:]}"
+
+
+def watch_list() -> list[dict]:
+    """The sample /watch rows, same keys as `watch_pages.watch_row`."""
+    rows = []
+    for w in _WATCH_SAMPLES:
+        address = w["address"]
+        if w["n"] == 1:
+            base = _row(_by_slug(WATCH_BASE_SLUG))
+            stats = {
+                k: base[k] for k in ("track_days", "incubating", "total_return", "max_drawdown")
+            }
+            stats.update(spark=base["spark"], spark_dd=base["spark_dd"])
+        else:
+            curve = _walk(w["seed"], w["days"], w["drift"], w["vol"], start=100.0)
+            k = (1 + w["total_return"]) * 100.0 / curve[-1]
+            n = len(curve)
+            curve = [100.0 + (v - 100.0) * ((k - 1) * i / (n - 1) + 1) for i, v in enumerate(curve)]
+            window = curve[-_STRIP_SPARK:]
+            stats = {
+                "track_days": w["days"],
+                "incubating": w["days"] < 90,
+                "total_return": w["total_return"],
+                "max_drawdown": max(_drawdown(curve)),
+                "spark": polyline(window, 120, 32),
+                "spark_dd": window_x(window, 120),
+            }
+        rows.append(
+            {
+                "id": "sample-1" if w["n"] == 1 else None,  # only the first has a page
+                "name": w["label"] or _watch_short(address),
+                "label": w["label"],
+                "address": address,
+                "short_address": _watch_short(address),
+                "venue_label": _venue_label("hyperliquid"),
+                "tailing": w["n"] == 1,
+                "stats": stats,
+            }
+        )
+    return rows
+
+
+def watch_sample_page(sample_id: str) -> dict | None:
+    """The one full sample watch page, the shape `watch_pages._watch_page`
+    returns. Its tail card says "active": the sample is being paper-tailed."""
+    if sample_id != "sample-1":
+        return None
+    w = _WATCH_SAMPLES[0]
+    page = strategy_page(WATCH_BASE_SLUG)
+    page.update(
+        display_name=w["label"],
+        label=w["label"],
+        address=w["address"],
+        short_address=_watch_short(w["address"]),
+        watch_id=sample_id,
+        sample=True,
+        description_unverified="",
+        discussion=[],
+        creator=None,
+    )
+    page["verification"] = {
+        **(page["verification"] or {}),
+        "proof": "Public address, no key held; trades read from the venue's public history",
+    }
+    page["tailing"] = {**page["tailing"], "state": "active", "href": "/portfolio"}
+    return page
