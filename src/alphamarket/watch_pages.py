@@ -15,7 +15,7 @@ from alphamarket import demo, ratelimit
 from alphamarket.analytics import latest_stats
 from alphamarket.charts import polyline, window_x
 from alphamarket.config import get_settings
-from alphamarket.connectors.registry import get_profile
+from alphamarket.connectors.registry import build_connector, get_profile
 from alphamarket.db import get_db
 from alphamarket.models import Strategy, User
 from alphamarket.pages import (
@@ -244,6 +244,7 @@ def _optout_page(
     claim: OptoutClaim | None = None,
     result: OptoutResult | None = None,
     status_code: int = 200,
+    sample: bool = False,
 ) -> Response:
     venues = [(v, get_profile(v).display_name) for v in WATCHABLE_VENUES]
     return _render_private(
@@ -251,19 +252,57 @@ def _optout_page(
         "watch_optout.html",
         status_code=status_code,
         user=user,
-        demo=bool(user and user.is_demo),
+        demo=sample or bool(user and user.is_demo),
+        sample=sample,
         stage=stage,
         error=error,
         form=form or {"venue": venues[0][0], "address": ""},
         venues=venues,
         claim=claim,
         result=result,
-        verified=user is not None and user.email_verified_at is not None,
+        verified=sample or (user is not None and user.email_verified_at is not None),
     )
+
+
+def _sample_optout(request: Request, db: Session, stage: str) -> Response:
+    """The static demo's opt-out walkthrough (DEMO_MODE on): the three stages
+    with an invented address, code and counts, for anyone, logged in or not.
+    Nothing a visitor posts is read, nothing is written (no WatchOptout, Watch,
+    Allocation or audit row, no rate-limit row) and no venue is called: the
+    claim text is built by the connector from the sample code, offline."""
+    s = demo.OPTOUT_SAMPLE
+    user = _user(request, db)
+    form = {"venue": s["venue"], "address": s["address"]}
+    if stage == "start":
+        return _optout_page(request, user, form=form, sample=True)
+    if stage == "proof":
+        profile = get_profile(s["venue"])
+        connector = build_connector(
+            s["venue"], get_settings().venue_env(s["venue"]), s["address"], None
+        )
+        claim = OptoutClaim(
+            venue=s["venue"],
+            address=s["address"],
+            display_name=profile.display_name,
+            code=s["code"],
+            message=connector.claim_text(s["code"]),
+            already=False,
+        )
+        return _optout_page(request, user, stage="proof", claim=claim, sample=True)
+    result = OptoutResult(
+        s["venue"],
+        s["address"],
+        already=False,
+        watches_removed=s["watches_removed"],
+        tails_stopped=s["tails_stopped"],
+    )
+    return _optout_page(request, user, stage="done", result=result, sample=True)
 
 
 @router.get("/watch/optout", response_class=HTMLResponse)
 def watch_optout_page(request: Request, db: Session = Depends(get_db)):
+    if get_settings().demo_mode:
+        return _sample_optout(request, db, "start")
     user = _user(request, db)
     if user is None:
         return RedirectResponse(login_url("/watch/optout"), status_code=303)
@@ -278,6 +317,8 @@ def watch_optout_start(
     db: Session = Depends(get_db),
 ):
     """Step one: the venue and address, then the proof step (no venue call)."""
+    if get_settings().demo_mode:
+        return _sample_optout(request, db, "proof")
     user = _user(request, db)
     if user is None:
         return RedirectResponse(login_url("/watch/optout"), status_code=303)
@@ -306,6 +347,8 @@ def watch_optout_verify(
 ):
     """Step two: the proof. The code is re-derived server-side; only the
     venue, the address and the signature are read from the form."""
+    if get_settings().demo_mode:
+        return _sample_optout(request, db, "done")
     user = _user(request, db)
     if user is None:
         return RedirectResponse(login_url("/watch/optout"), status_code=303)

@@ -931,6 +931,9 @@ def tail_page(slug: str) -> dict | None:
         "min_usd": 100,
         "dd_limit": dd_limit,
         "stop_at": allocation * (1 - dd_limit),
+        # The sample portfolio's stopped stock tail is still closing: its tail
+        # page carries the same notice a real one does.
+        "closing": slug == CLOSING_TAIL_SLUG,
         "terms": paper_terms(page["venue"])["rows"],
         "pricing_rows": PRICING_ROWS,
     }
@@ -1065,51 +1068,186 @@ def feed() -> dict:
     }
 
 
+# Two stopped tails in the sample portfolio (copy strategies decisions 8 and 9:
+# a stop closes every crypto and stock position). Each is built from its book
+# (cash plus positions), so the numbers add up by construction and a test pins
+# the arithmetic. Prices are invented.
+#
+# Closed crypto tail (Coinbase, 0.90% paper taker fee, drawdown limit 10%):
+#   allocated 1,500.00; high 1,620.00. The stop recorded the pre-close equity:
+#   cash 120.00 + 0.20 ETH x 3,310.00 (662.00) + 4 SOL x 167.50 (670.00)
+#   = 1,452.00, a 10.37% drawdown from the high, past the limit. The close then
+#   sold at the bid: 0.20 ETH x 3,290.00 + 4 SOL x 165.50 = 658.00 + 662.00 =
+#   1,320.00, fee 1,320.00 x 0.90% = 11.88. Flat: equity is just cash,
+#   120.00 + 1,320.00 - 11.88 = 1,428.12 (return -4.79%, drawdown 11.84%).
+_CLOSED_CRYPTO = dict(
+    slug="large-cap-alt-rotation",
+    allocated=1500.00,
+    high=1620.00,
+    limit=0.10,
+    cash_before_close=120.00,
+    marks=[("ETH/USD", 0.20, 3310.00), ("SOL/USD", 4.0, 167.50)],
+    bids=[("ETH/USD", 0.20, 3290.00), ("SOL/USD", 4.0, 165.50)],
+    fee_rate=0.009,
+)
+# Closing stock tail (Alpaca): the user pressed Stop at 20:30 UTC on Aug 31,
+# after the close, so there is no fresh quote and the positions wait for the
+# next one. Book at the last close: cash 1,096.40 + 12 KO x 70.45 (845.40) +
+# 4 PG x 156.75 (627.00) = 2,568.80 on 2,500.00 allocated (+2.75%); high
+# 2,590.00, drawdown 0.82%. Its value still moves until the positions close.
+_CLOSING_STOCK = dict(
+    slug="quality-dividend-compounders",
+    allocated=2500.00,
+    high=2590.00,
+    limit=0.15,
+    cash=1096.40,
+    positions=[("KO", 12, 68.10, 70.45), ("PG", 4, 151.20, 156.75)],  # symbol, qty, entry, mark
+)
+
+# The closing tail's strategy: its sample tail page shows the "Closing" notice.
+CLOSING_TAIL_SLUG = _CLOSING_STOCK["slug"]
+
+
+def closed_crypto_book() -> dict:
+    """The stopped crypto tail's book: equity before the close, the sale, the
+    fee, and the cash it ends with (flat, so that is its whole value)."""
+    c = _CLOSED_CRYPTO
+    pre_close = c["cash_before_close"] + sum(q * m for _, q, m in c["marks"])
+    proceeds = sum(q * b for _, q, b in c["bids"])
+    fee = round(proceeds * c["fee_rate"], 2)
+    cash = round(c["cash_before_close"] + proceeds - fee, 2)
+    return {
+        "pre_close": round(pre_close, 2),
+        "proceeds": round(proceeds, 2),
+        "fee": fee,
+        "cash": cash,
+    }
+
+
+def closing_stock_book() -> dict:
+    """The closing stock tail's book at the last close: cash plus positions."""
+    s = _CLOSING_STOCK
+    rows = [
+        {
+            "symbol": sym,
+            "kind": "equity",
+            "side": "long",
+            "qty": str(qty),
+            "entry": entry,
+            "mark": mark,
+            "mark_source": "close",
+            "value": round(qty * mark, 2),
+            "unrealized": round(qty * (mark - entry), 2),
+        }
+        for sym, qty, entry, mark in s["positions"]
+    ]
+    equity = round(s["cash"] + sum(r["value"] for r in rows), 2)
+    return {"cash": s["cash"], "positions": rows, "equity": equity}
+
+
+def _stopped_allocations() -> list[dict]:
+    """The two stopped tails as rows shaped like pages.portfolio_view's
+    allocations (every key is a real one; a test pins that), so portfolio.html
+    renders them through the same branches as real data."""
+    crypto, stock = _CLOSED_CRYPTO, _CLOSING_STOCK
+    c_strat, s_strat = _by_slug(crypto["slug"]), _by_slug(stock["slug"])
+    c_value = closed_crypto_book()["cash"]  # flat: equity is just cash
+    book = closing_stock_book()
+    s_value = book["equity"]
+    return [
+        dict(
+            slug=crypto["slug"],
+            name=c_strat["name"],
+            handle=c_strat["handle"],
+            venue=_venue_label(_venue(c_strat)),
+            allocated=crypto["allocated"],
+            value=c_value,
+            ret=c_value / crypto["allocated"] - 1,
+            dd=1 - c_value / crypto["high"],  # past the 10% limit; the close cost a bit more
+            limit=crypto["limit"],
+            days=52,
+            status="stopped",
+            stop_reason="drawdown_limit",
+            closing=False,
+            positions=[],
+            copy_lag="2.1 min",
+        ),
+        dict(
+            slug=stock["slug"],
+            name=s_strat["name"],
+            handle=s_strat["handle"],
+            venue=_venue_label(_venue(s_strat)),
+            allocated=stock["allocated"],
+            value=s_value,
+            ret=s_value / stock["allocated"] - 1,
+            dd=1 - s_value / stock["high"],
+            limit=stock["limit"],
+            days=61,
+            status="stopped",
+            stop_reason="user",
+            closing=True,
+            positions=book["positions"],
+            copy_lag="3.4 min",
+        ),
+    ]
+
+
 def portfolio() -> dict:
-    """A sample paper portfolio: four paper tails across Kalshi and Kraken.
+    """A sample paper portfolio: six paper tails across Kalshi, Kraken,
+    Coinbase and Alpaca (four active, one crypto tail stopped by its drawdown
+    limit and closed, one stock tail stopped by the user and still closing).
     Costs are what the paper copies paid the venue (fees, and the spread
     against the creator's price), never a Koine fee."""
-    curve = _walk(19, 90, 0.0011, 0.007, start=8800.0)
-    curve = [v * (10423.90 / curve[-1]) for v in curve]
-    dates = _dates(90, AS_OF - timedelta(days=89))
     allocs = [
         ("weather-cpi-mean-reversion", 2000, 2318.40, 0.159, 0.021, 34, "1.8 min"),
         ("election-polling-arbitrage", 3000, 3187.20, 0.062, 0.008, 41, "2.4 min"),
         ("fed-path-both-directions", 2500, 2756.50, 0.103, 0.034, 46, "1.6 min"),
         ("btc-eth-weekly-trend", 2000, 2161.80, 0.081, 0.047, 29, "38 s"),
     ]
+    rows = [
+        dict(
+            slug=slug,
+            name=_by_slug(slug)["name"],
+            handle=_by_slug(slug)["handle"],
+            venue=_venue_label(_venue(_by_slug(slug))),
+            allocated=alloc,
+            value=value,
+            ret=ret,
+            dd=dd,
+            limit=0.15,
+            days=days,
+            status="active",
+            stop_reason=None,
+            closing=False,
+            copy_lag=lag,
+        )
+        for slug, alloc, value, ret, dd, days, lag in allocs
+    ] + _stopped_allocations()
+    # 10,423.90 (active) + 1,428.12 (closed) + 2,568.80 (closing) = 14,420.82
+    # on 13,500.00 allocated: +920.82.
+    value = round(sum(r["value"] for r in rows), 2)
+    allocated = sum(r["allocated"] for r in rows)
+    pnl = round(value - allocated, 2)
+    fees = round(61.84 + closed_crypto_book()["fee"], 2)
+    curve = _walk(19, 90, 0.0011, 0.007, start=8800.0)
+    curve = [v * (value / curve[-1]) for v in curve]
+    dates = _dates(90, AS_OF - timedelta(days=89))
     return {
         "demo": True,
-        "value": 10423.90,
-        "pnl": 923.90,
-        "pnl_pct": 923.90 / 9500,
+        "value": value,
+        "pnl": pnl,
+        "pnl_pct": pnl / allocated,
         "current_dd": 0.021,
         "worst_dd": 0.068,
-        "trading_costs": 61.84,
-        "accounts": len(allocs),
+        "trading_costs": fees,
+        "accounts": len(rows),
         "curve": polyline(curve, 900, 200),
         "curve_lo": min(curve),
         "curve_hi": max(curve),
         "x_labels": [dates[i].strftime("%b %-d") for i in (0, 30, 60, 89)],
-        "allocations": [
-            dict(
-                slug=slug,
-                name=_by_slug(slug)["name"],
-                handle=_by_slug(slug)["handle"],
-                venue=_venue_label(_venue(_by_slug(slug))),
-                allocated=alloc,
-                value=value,
-                ret=ret,
-                dd=dd,
-                limit=0.15,
-                days=days,
-                status="active",
-                copy_lag=lag,
-            )
-            for slug, alloc, value, ret, dd, days, lag in allocs
-        ],
+        "allocations": rows,
         "activity": [
-            ("Today 02:14", "Valued", "4 paper tails marked at the latest quotes", None),
+            ("Today 02:14", "Valued", "5 paper tails marked at the latest quotes", None),
             (
                 "Aug 31",
                 "Paper fill",
@@ -1120,16 +1258,29 @@ def portfolio() -> dict:
             ("Aug 30", "Paper fill", "Fed path: NO on Sept cut ×120 @ 0.31", -37.20),
             ("Aug 29", "Settled", "Weather & CPI: NYC high above 91°F settled NO", 41.20),
             ("Aug 28", "Paper allocation", "Added $500 of paper money to Fed path", None),
+            (
+                "Aug 27",
+                "Paper fill",
+                "Large-cap alt rotation (stopped): sell 0.2 ETH/USD @ 3,290.00 Coinbase bid",
+                None,
+            ),
+            (
+                "Aug 27",
+                "Paper fill",
+                "Large-cap alt rotation (stopped): sell 4 SOL/USD @ 165.50 Coinbase bid",
+                None,
+            ),
+            ("Aug 27", "Venue fee", "Coinbase taker fee on the stop close, 0.90%", -11.88),
         ],
         "risk": [
             ("Portfolio Sharpe, 90d", "1.92"),
             ("Current drawdown", "−2.1%"),
             ("Worst drawdown", "−6.8%"),
             ("Strategy correlation, avg", "0.18"),
-            ("Largest allocation", "31%"),
+            ("Largest allocation", f"{max(r['allocated'] for r in rows) / allocated:.0%}"),
             ("Median copy lag", "1.7 min"),
             ("Signals skipped", "2 (stale)"),
-            ("Simulated venue fees", "$61.84"),
+            ("Simulated venue fees", f"${fees:,.2f}"),
         ],
     }
 
@@ -1303,6 +1454,18 @@ def watch_list() -> list[dict]:
             }
         )
     return rows
+
+
+# The opt-out walkthrough (watch_pages, DEMO_MODE only): the same sample
+# address as /watch/sample-1, an invented code and invented counts. Nothing is
+# computed from a request and nothing is stored.
+OPTOUT_SAMPLE = dict(
+    venue="hyperliquid",
+    address=_WATCH_SAMPLES[0]["address"],
+    code="koine-optout-demo-sample",
+    watches_removed=3,
+    tails_stopped=1,
+)
 
 
 def watch_sample_page(sample_id: str) -> dict | None:
