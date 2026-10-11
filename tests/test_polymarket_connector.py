@@ -1,5 +1,6 @@
-"""Polymarket connector against public payloads captured 2026-09-06
-(tests/fixtures/polymarket_*.json), never live calls -- invariant #6."""
+"""Polymarket connector (Data API v2) against public payloads recorded
+2026-10-09 (tests/fixtures/polymarket/*.json; market/profile reads still use
+the 2026-09-06 polymarket_*.json), never live calls -- invariant #6."""
 
 import json
 from datetime import UTC, datetime
@@ -24,6 +25,9 @@ CLOB = "https://clob.polymarket.com"
 GAMMA = "https://gamma-api.polymarket.com"
 ADDRESS = "0x124628e686db22da39b6ee43ca786c8a074bd6f2"
 FIXTURES = Path(__file__).parent / "fixtures"
+TRADES = "polymarket/activity_trades_20261009.json"
+REDEEMS = "polymarket/activity_redeems_20261009.json"
+POSITIONS = "polymarket/positions_20261009.json"
 
 
 def _fixture(name: str):
@@ -34,16 +38,34 @@ def _connector() -> PolymarketConnector:
     return PolymarketConnector(ADDRESS, DATA, CLOB, GAMMA)
 
 
+def _rows(name: str) -> list[dict]:
+    return _fixture(name)["data"]
+
+
+def _envelope(rows, next_cursor=None) -> dict:
+    """The v2 `{data, pagination}` wrapper around `rows`."""
+    return {
+        "data": rows,
+        "pagination": {
+            "limit": 1000,
+            "offset": 0,
+            "has_more": next_cursor is not None,
+            "next_cursor": next_cursor,
+        },
+    }
+
+
 def _mock_activity(trades=None, redeems=None):
-    respx.get(f"{DATA}/activity", params__contains={"type": "TRADE"}).mock(
-        return_value=httpx.Response(200, json=_fixture("polymarket_activity_trades.json"))
-        if trades is None
-        else httpx.Response(200, json=trades)
-    )
-    respx.get(f"{DATA}/activity", params__contains={"type": "REDEEM"}).mock(
-        return_value=httpx.Response(200, json=_fixture("polymarket_activity_redeems.json"))
-        if redeems is None
-        else httpx.Response(200, json=redeems)
+    """`trades` / `redeems` are row lists; None replays the recorded v2 page."""
+    trades_body = _fixture(TRADES) if trades is None else _envelope(trades)
+    redeems_body = _fixture(REDEEMS) if redeems is None else _envelope(redeems)
+    return (
+        respx.get(f"{DATA}/v2/activity", params__contains={"type": "TRADE"}).mock(
+            return_value=httpx.Response(200, json=trades_body)
+        ),
+        respx.get(f"{DATA}/v2/activity", params__contains={"type": "REDEEM"}).mock(
+            return_value=httpx.Response(200, json=redeems_body)
+        ),
     )
 
 
@@ -87,7 +109,7 @@ def test_fetch_fills_derives_fee_from_net_cash():
 
 @respx.mock
 def test_identical_rows_in_one_transaction_get_ordinals():
-    row = _fixture("polymarket_activity_trades.json")[0]
+    row = _rows(TRADES)[0]
     _mock_activity(trades=[row, dict(row)])
     fills = _connector().fetch_fills()
     ids = sorted(f.venue_fill_id for f in fills)
@@ -97,8 +119,8 @@ def test_identical_rows_in_one_transaction_get_ordinals():
 
 @respx.mock
 def test_zero_fee_rounding_never_produces_a_negative_fee():
-    row = dict(_fixture("polymarket_activity_trades.json")[0])
-    row["usdcSize"] = 9.999998  # net one micro below the rounded gross
+    row = dict(_rows(TRADES)[0])
+    row["usdc_size"] = 9.999998  # net one micro below the rounded gross
     _mock_activity(trades=[row])
     (f,) = _connector().fetch_fills()
     assert f.fee_micros == 0
@@ -108,8 +130,8 @@ def test_zero_fee_rounding_never_produces_a_negative_fee():
 
 @respx.mock
 def test_sell_fee_is_gross_minus_net():
-    row = dict(_fixture("polymarket_activity_trades.json")[2])
-    row.update(side="SELL", size=19.6, price=0.81, usdcSize=15.72518)
+    row = dict(_rows(TRADES)[2])
+    row.update(side="SELL", size=19.6, price=0.81, usdc_size=15.72518)
     _mock_activity(trades=[row])
     (f,) = _connector().fetch_fills()
     assert f.action is Action.SELL
@@ -139,25 +161,115 @@ def test_redeems_become_settlements():
 
 @respx.mock
 def test_positions_carry_cost_basis_and_sign():
-    respx.get(f"{DATA}/positions").mock(
-        return_value=httpx.Response(200, json=_fixture("polymarket_positions.json"))
+    route = respx.get(f"{DATA}/v2/positions").mock(
+        return_value=httpx.Response(200, json=_fixture(POSITIONS))
     )
     positions = _connector().fetch_positions()
     assert len(positions) == 2
-    assert positions[0].ticker.startswith("0x941b674f")
-    assert positions[0].position_micros == 30_317_200  # YES, so positive
-    assert positions[0].market_exposure_micros == 9_999_900  # initialValue
+    # Both outcomes of one market: the first row holds outcome_index 1 (NO).
+    assert all(p.ticker.startswith("0xad08268a") for p in positions)
+    assert positions[0].position_micros == -21_199_700  # NO, so negative
+    assert positions[0].market_exposure_micros == 12_599_900  # entry_cost_usdc
+    assert positions[1].position_micros == 23_814_000  # YES, so positive
+    assert positions[1].market_exposure_micros == 8_599_900
+    params = route.calls[0].request.url.params
+    assert params["user"] == ADDRESS and params["status"] == "OPEN"
+
+
+@respx.mock
+def test_v2_request_shape_and_since_window():
+    trades_route, _ = _mock_activity()
+    _connector().fetch_fills()
+    params = trades_route.calls[0].request.url.params
+    assert params["user"] == ADDRESS and params["type"] == "TRADE"
+    assert params["sort_by"] == "TIMESTAMP" and params["sort_direction"] == "ASC"
+    assert params["limit"] == "1000"
+    assert params["start"] == "1"  # an omitted start is floored to 3 years on v2
+    assert "offset" not in params and "cursor" not in params
+    since = datetime(2026, 9, 5, 15, 15, 45, tzinfo=UTC)
+    _connector().fetch_fills(since)
+    assert trades_route.calls[1].request.url.params["start"] == str(int(since.timestamp()))
+
+
+@respx.mock
+def test_v1_fill_and_settlement_ids_are_preserved():
+    """Fills are append-only and unique on venue_fill_id, so the v2 mapping
+    must reproduce the ids history ingested from v1 already carries
+    (transactionHash:asset:side:price:size#n, the same values under the v2
+    names). Hand-spelled from the recorded rows, not computed by the code."""
+    _mock_activity()
+    c = _connector()
+    fills = c.fetch_fills()
+    assert fills[0].venue_fill_id == (
+        "0xcf6d1b3123e77c1f83fc8ac07884a02ac1771a767d82dd41c0d7488ec7814707:"
+        "93415506741081748396200975939257521410698376620584355147171598503949152127353:"
+        "buy:469606:21294467#0"
+    )
+    settlements = c.fetch_settlements()
+    assert settlements[0].venue_settlement_id.endswith(
+        ":74938643521125205475990578848537837441151693889010555507991371847249758717036"
+    )
+    assert settlements[0].venue_settlement_id.startswith(
+        "0xd68a6cd76337595ba7205e3043b7ae410d2e9a931b6e46a3e23c3b9e0e65e1dc:"
+    )
+
+
+@respx.mock
+def test_activity_follows_the_cursor_until_it_is_null():
+    rows = _rows(TRADES)
+    route = respx.get(f"{DATA}/v2/activity", params__contains={"type": "TRADE"})
+    route.side_effect = [
+        httpx.Response(200, json=_envelope(rows[:2], next_cursor="c1")),
+        httpx.Response(200, json=_envelope(rows[2:3], next_cursor="c2")),
+        httpx.Response(200, json=_envelope(rows[3:])),
+    ]
+    fills = _connector().fetch_fills()
+    assert len(fills) == 4 and len({f.venue_fill_id for f in fills}) == 4
+    assert [c.request.url.params.get("cursor") for c in route.calls] == [None, "c1", "c2"]
+    # Every page keeps the same anchor and direction (a cursor binds the sort).
+    assert all(c.request.url.params["sort_direction"] == "ASC" for c in route.calls)
+
+
+@respx.mock
+def test_positions_follow_the_cursor_and_keep_the_user_anchor():
+    rows = _rows(POSITIONS)
+    route = respx.get(f"{DATA}/v2/positions")
+    route.side_effect = [
+        httpx.Response(200, json=_envelope(rows[:1], next_cursor="p1")),
+        httpx.Response(200, json=_envelope(rows[1:])),
+    ]
+    assert len(_connector().fetch_positions()) == 2
+    second = route.calls[1].request.url.params
+    assert second["cursor"] == "p1" and second["user"] == ADDRESS
+
+
+@respx.mock
+def test_empty_or_null_data_is_no_rows_and_a_stuck_cursor_is_an_error():
+    respx.get(f"{DATA}/v2/activity").mock(
+        return_value=httpx.Response(
+            200, json={"data": None, "pagination": {"has_more": False, "next_cursor": None}}
+        )
+    )
+    assert _connector().fetch_fills() == []
+    respx.get(f"{DATA}/v2/activity").mock(
+        return_value=httpx.Response(200, json=_envelope(_rows(TRADES)[:1], next_cursor="same"))
+    )
+    with pytest.raises(ValueError, match="cursor did not advance"):
+        _connector().fetch_fills()
+    respx.get(f"{DATA}/v2/activity").mock(return_value=httpx.Response(200, json=[]))
+    with pytest.raises(ValueError, match="unexpected activity payload"):
+        _connector().fetch_fills()
 
 
 @respx.mock
 def test_outcome_index_missing_falls_back_to_market_tokens():
-    row = dict(_fixture("polymarket_activity_trades.json")[0])
-    row["outcomeIndex"] = 999
-    row["conditionId"] = "0xe8082eb2691a5d9288440f624241c0dcb9d53730d6b944413207797052efd808"
+    row = dict(_rows(TRADES)[0])
+    row["outcome_index"] = 999
+    row["condition_id"] = "0xe8082eb2691a5d9288440f624241c0dcb9d53730d6b944413207797052efd808"
     market = _fixture("polymarket_market.json")
-    row["asset"] = market["tokens"][1]["token_id"]  # the NO token
+    row["token_id"] = market["tokens"][1]["token_id"]  # the NO token
     _mock_activity(trades=[row])
-    route = respx.get(f"{CLOB}/markets/{row['conditionId']}").mock(
+    route = respx.get(f"{CLOB}/markets/{row['condition_id']}").mock(
         return_value=httpx.Response(200, json=market)
     )
     (f,) = _connector().fetch_fills()

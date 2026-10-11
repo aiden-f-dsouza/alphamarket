@@ -102,7 +102,7 @@ PROFILES: dict[str, VenueProfile] = {
         tick_micros=1_000,  # $0.001, the finest CLOB tick seen
         contract_step_micros=10_000,  # 0.01 token
         fee_rate_bps=500,  # 5% x size x p x (1-p), verified against activity rows
-        fee_rounding_micros=1,  # usdcSize carries six decimals
+        fee_rounding_micros=1,  # usdc_size carries six decimals
         ownership=OwnershipProof.PROFILE_CODE,
         asset_classes=("prediction",),  # wave2
     ),

@@ -1,0 +1,5 @@
+# polymarket fixtures
+
+- `activity_trades_20261009.json` -- recorded 2026-10-09 from public endpoint `GET https://data-api.polymarket.com/v2/activity` params={'user': '0x124628e686db22da39b6ee43ca786c8a074bd6f2', 'type': 'TRADE', 'limit': '1000', 'sort_direction': 'ASC', 'start': '1788621345', 'end': '1788621358'} by scripts/record_fixture.py; re-record from a real account when one exists.
+- `activity_redeems_20261009.json` -- recorded 2026-10-09 from public endpoint `GET https://data-api.polymarket.com/v2/activity` params={'user': '0x124628e686db22da39b6ee43ca786c8a074bd6f2', 'type': 'REDEEM', 'limit': '1000', 'sort_direction': 'ASC', 'start': '1788712054', 'end': '1788712174'} by scripts/record_fixture.py; re-record from a real account when one exists.
+- `positions_20261009.json` -- recorded 2026-10-09 from public endpoint `GET https://data-api.polymarket.com/v2/positions` params={'user': '0x6f09fbcaee0a468a4ad9e1174c88f1a90b456c6c', 'limit': '1000'} by scripts/record_fixture.py; re-record from a real account when one exists.

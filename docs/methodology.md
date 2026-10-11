@@ -33,7 +33,7 @@ weighted price across the maker fills of one order) but the cash that moved
 to six. Koine stores the price rounded to the micro, the venue's gross value
 (`size × price`, rounded to the micro) as the fill's notional, and the fee as
 `|gross − cash moved|`, so the ledger's cash flow reproduces the venue's
-`usdcSize` exactly. The rounding lands on the split between notional and fee,
+`usdc_size` exactly. The rounding lands on the split between notional and fee,
 never on cash. Checked against a captured trade: 21.294467 tokens at
 0.4696055083, $10.265189 out, fee $0.265190, which is Polymarket's 5% ×
 size × p × (1 − p) to within the price rounding.

@@ -267,7 +267,10 @@ Found along the way:
 
 - Polymarket retires Data API v1 on 2026-10-24; `connectors/polymarket.py`
   calls `/activity` and `/positions` (v1). Needs a port to `/v2/...` and
-  re-recorded fixtures before then, independent of this feature.
+  re-recorded fixtures before then, independent of this feature. Done
+  2026-10-08 on branch `polymarket-data-v2`: `/v2/activity` and `/v2/positions`
+  with cursor paging, fixtures re-recorded live, dedupe ids unchanged (checked
+  against v1 on a live wallet).
 - `/s/{slug}` returned a 500 for a public strategy with no stats yet
   (`_worst_periods(None)`); fixed and pinned in `tests/test_worst_periods.py`.
 
