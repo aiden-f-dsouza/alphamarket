@@ -7,7 +7,9 @@ its history, and the drawdown limit that stops it.
                     unmarked cost is reported alongside)
     drawdown      = 1 - equity / high_water
     stop rule     = drawdown > drawdown_limit  ->  status "stopped", no new
-                    mirrors; open positions run to settlement
+                    mirrors; prediction-market positions run to settlement,
+                    crypto/stock positions close at the next fresh quote
+                    (paper_lifecycle.close_stopped; "closing" until flat)
 
 Every valuation is stored as an AllocationSnapshot; the series of snapshots
 is the follower's curve. Nothing here is real money.
@@ -99,7 +101,9 @@ def snapshot_allocation(
 ) -> AllocationSnapshot:
     """Value, record, raise the high-water mark, and enforce the drawdown
     limit. Safe to call for stopped allocations (their curve keeps updating
-    while positions run off)."""
+    while positions run off). The drawdown stop records this (pre-close)
+    equity as the snapshot, commits the stop, then closes an asset book
+    inline (paper_lifecycle.close_now); the next snapshot shows the close."""
     value = value_allocation(db, allocation, marks)
     equity = value.equity_micros
     snap = AllocationSnapshot(
@@ -114,10 +118,16 @@ def snapshot_allocation(
     db.add(snap)
     allocation.high_water_micros = max(allocation.high_water_micros, equity)
     dd = drawdown_from_high(equity, allocation.high_water_micros)
+    stopped = False
     if allocation.status == AllocationStatus.ACTIVE and dd * 10_000 > allocation.drawdown_limit_bps:
         stop_allocation(db, allocation, "drawdown_limit", commit=False)
         logger.info("allocation %s stopped: drawdown %.4f", allocation.id, dd)
+        stopped = True
     db.commit()
+    if stopped:
+        from alphamarket.paper_lifecycle import close_now
+
+        close_now(db, allocation)
     return snap
 
 
@@ -176,6 +186,10 @@ def allocation_view(db: Session, allocation: Allocation) -> dict:
         ],
         "curve": [[s.as_of.isoformat(), micros_to_float(s.equity_micros)] for s in snaps],
         "paper": allocation.mode == "paper",
+        # Stopped with positions still open: an asset tail waiting for a fresh
+        # quote to close them (paper.asset_view_extras). Binary tails run to
+        # settlement and are never "closing".
+        "closing": False,
     }
     if is_asset_allocation(db, allocation):  # wave2: positions v2 and copy metrics
         from alphamarket.paper import asset_view_extras

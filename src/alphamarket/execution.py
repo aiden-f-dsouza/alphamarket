@@ -122,24 +122,43 @@ class AssetPaperExecutor:
         price,
         profile: VenueProfile,
     ) -> ExecutedAssetFill:
-        from alphamarket.connectors.base import Action
         from alphamarket.jobs import aware
-        from alphamarket.paper import asset_fee_micros
-        from alphamarket.paper_book import cost_micros_up, proceeds_micros_down
 
-        decimals = instrument.qty_decimals
-        if Action(action) is Action.BUY:
-            notional = cost_micros_up(qty_atoms, decimals, price.price)
-        else:
-            notional = proceeds_micros_down(qty_atoms, decimals, price.price)
+        return self.execute_at(
+            instrument,
+            action,
+            qty_atoms,
+            instrument.qty_decimals,
+            price,
+            profile,
+            aware(signal.observed_at) or aware(signal.filled_at),
+        )
+
+    def execute_at(
+        self,
+        instrument,
+        action,
+        qty_atoms: int,
+        decimals: int,
+        price,
+        profile: VenueProfile,
+        filled_at: datetime,
+    ) -> ExecutedAssetFill:
+        """Fill `qty_atoms` (at `decimals`) at `price` (paper.PaperPrice) at
+        `filled_at`: a copied signal (execute) or a stop close
+        (paper_lifecycle.close_stopped). Notional and fee: paper.fill_amounts."""
+        from alphamarket.connectors.base import Action
+        from alphamarket.paper import fill_amounts
+
+        notional, fee = fill_amounts(profile, Action(action), qty_atoms, decimals, price.price)
         return ExecutedAssetFill(
             qty_atoms=qty_atoms,
             qty_decimals=decimals,
             price=price.price,
             price_basis=price.basis,
             notional_micros=notional,
-            fee_micros=asset_fee_micros(profile, Action(action), qty_atoms, decimals, price.price),
-            filled_at=aware(signal.observed_at) or aware(signal.filled_at),
+            fee_micros=fee,
+            filled_at=filled_at,
             penalty_bps=price.penalty_bps,
             quote_at=price.quote_at,
         )
