@@ -131,6 +131,42 @@ def test_signed_optout_removes_watches_of_every_user_stops_tails_and_audits(
         )
 
 
+def test_optout_closes_each_stopped_tail_inline_and_survives_a_failed_close(
+    client, session_factory, info, monkeypatch
+):
+    """After the commit every stopped tail goes through close_now, as a manual
+    Stop does; a close that raises is left to the next mirror pass and the
+    opt-out stands."""
+    from alphamarket import paper_lifecycle
+
+    signup(client, "a@example.com")
+    sid = watched_id(add(client, ADDR))
+    tail(client, sid)
+    signup(client, "b@example.com")
+    add(client, ADDR)
+    tail(client, sid)
+    signup(client, "owner@example.com")
+
+    closed: list[tuple[int, str]] = []
+
+    def fake_close_now(db, allocation, now=None):
+        closed.append((allocation.id, allocation.status))
+        if len(closed) == 1:
+            raise RuntimeError("quote table locked")
+        return 0
+
+    monkeypatch.setattr(paper_lifecycle, "close_now", fake_close_now)
+    code = issued_code(start(client))
+    done = verify(client, signature=sign(WALLET, claim_message(ADDR, code)))
+    assert done.status_code == 200 and "Opted out." in done.text
+
+    with session_factory() as db:
+        ids = {a.id for a in db.scalars(select(Allocation)).all()}
+    assert {i for i, _ in closed} == ids and len(closed) == 2
+    assert {s for _, s in closed} == {AllocationStatus.STOPPED}  # stopped before closing
+    assert len(optouts(session_factory)) == 1
+
+
 def test_a_wrong_signature_or_a_replayed_code_opts_nothing_out(client, session_factory, info):
     signup(client, "a@example.com")
     sid = watched_id(add(client, ADDR))

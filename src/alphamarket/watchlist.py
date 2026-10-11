@@ -621,7 +621,11 @@ def perform_optout(
 ) -> OptoutResult:
     """Prove the address, then opt it out (idempotent: an address already opted
     out answers `already` without a venue call). One transaction for the
-    record, the watches, the tails and the audit row."""
+    record, the watches, the tails and the audit row. Then each stopped
+    crypto/stock tail closes inline, as a manual Stop does
+    (paper_lifecycle.close_now); a close that fails is retried by the next
+    mirror pass."""
+    from alphamarket.paper_lifecycle import close_now
     from alphamarket.portfolio import stop_allocation  # portfolio imports us
 
     claim = start_optout(db, user, venue, raw_address)
@@ -631,7 +635,8 @@ def perform_optout(
 
     optout = WatchOptout(venue=venue, address=claim.address, proved_by_user_id=user.id)
     db.add(optout)
-    watches_removed = tails_stopped = 0
+    watches_removed = 0
+    stopped: list[Allocation] = []
     account = watch_account(db, venue, claim.address)
     strategy = strategy_of(db, account) if account is not None else None
     if strategy is not None:
@@ -643,7 +648,7 @@ def perform_optout(
             )
         ).all():
             stop_allocation(db, allocation, "optout", commit=False)
-            tails_stopped += 1
+            stopped.append(allocation)
     try:
         db.flush()  # the unique (venue, address): a concurrent opt-out wins
     except IntegrityError:
@@ -658,8 +663,13 @@ def perform_optout(
         details={
             "venue": venue,
             "watches_removed": watches_removed,
-            "tails_stopped": tails_stopped,
+            "tails_stopped": len(stopped),
         },
     )
     db.commit()
-    return OptoutResult(venue, claim.address, False, watches_removed, tails_stopped)
+    for allocation in stopped:
+        try:
+            close_now(db, allocation)
+        except Exception:
+            logger.exception("opt-out: closing allocation %s deferred", allocation.id)
+    return OptoutResult(venue, claim.address, False, watches_removed, len(stopped))

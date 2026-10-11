@@ -280,9 +280,33 @@ Found along the way:
 - `/s/{slug}` returned a 500 for a public strategy with no stats yet
   (`_worst_periods(None)`); fixed and pinned in `tests/test_worst_periods.py`.
 
-Next: step 4 (slower cadence for untailed watches, dormant accounts skipped,
-creators outrank watches for stream slots), step 5 (opt-out), step 6
-(`trader_profile.py`).
+**Round 2 (2026-10-11, branch `copy-strategies-r2`):** step 4, step 5 and
+stream S of section 8 are done.
+
+- Step 4: watch accounts poll at the normal interval only while tailed,
+  hourly (`watch_idle_interval_seconds`) when watched but untailed, never
+  when dormant or opted out; `PRIORITY_SYNC_WATCH` (25) below every
+  creator sync; creators outrank watches for stream slots; backfills
+  skip dormant and opted-out watches (`tests/test_watch_schedule.py`).
+- Step 5: `/watch/optout` (Hyperliquid signature, Polymarket bio code).
+  The claim code is an HMAC of user, venue and address under
+  `secret_key`, re-derived server side (no table); rotating `secret_key`
+  reissues codes. Stopped tails close inline after the commit
+  (`tests/test_watch_optout.py`).
+- Stream S: every stop closes the crypto/stock book at the bid/ask after
+  fees, "Closing" until flat (`paper_lifecycle.close_stopped`,
+  `close_now`; methodology "When a tail stops"; `tests/test_stop_close.py`).
+
+Follow-ups from round 2:
+
+- [ ] `stream_max_accounts` (200) never evicts: if watches fill it, a new
+      creator waits. The per-IP Hyperliquid cap (10) binds first today
+- [ ] Stopped tails are quoted for 30 days (`prices.STOPPED_QUOTE_WINDOW`);
+      one still holding something after that stays "Closing"
+- [ ] A split that arrives after a stop close but dated before it leaves
+      the tail "Closing" (logged, not handled)
+
+Next: step 6 (`trader_profile.py` + the `/watch/{id}` section).
 
 ## 8. Next round plan (2026-10-11)
 
