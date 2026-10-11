@@ -50,6 +50,10 @@ class AuditAction(StrEnum):
     # ---- watchlist (watchlist.py) ----
     WATCH_ADD = "watch.add"  # target: the watched strategy; no address in details
     WATCH_REMOVE = "watch.remove"
+    # An address owner proved the address and opted out of the watchlist
+    # (watchlist.perform_optout); target: the watch_optouts row; details: venue,
+    # watches removed, tails stopped. No address in details.
+    WATCH_OPTOUT = "watch.optout"
 
 
 @dataclass(frozen=True)

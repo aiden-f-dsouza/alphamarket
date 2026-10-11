@@ -348,6 +348,18 @@ only, and the server always rebuilds the message from the code it stored, so
 a signature made for a different code or account is refused. Signing is not a
 transaction and Koine never asks for a seed phrase or private key.
 
+## Opting an address out of watchlists
+
+Signed-in members can privately watch any public Hyperliquid or Polymarket
+address. Only the member who added it sees it, and Koine never tries to find
+out who is behind an address. If the address is yours you can
+[opt it out](/watch/optout): you prove you control it the same way as above
+(a wallet signature for Hyperliquid, a code in your profile bio for
+Polymarket), and Koine then removes it from every watchlist, stops any paper
+tail of it, and refuses to add it again. Koine keeps an append-only record of
+the opt-out (venue and address, and the account that proved it) so that it
+stays in force, and writes an audit row for it.
+
 ## SnapTrade connections
 
 For brokers reached through SnapTrade, Koine registers a separate SnapTrade
