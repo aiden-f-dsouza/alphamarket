@@ -31,15 +31,21 @@ from alphamarket.pages import (
 from alphamarket.public import INCUBATION_DAYS, SPARKLINE_DAYS, is_v2, page_data
 from alphamarket.tail_terms import tailing_card
 from alphamarket.tails import active_allocation
+from alphamarket.venue_limits import get_web_limiter
 from alphamarket.watchlist import (
+    WATCHABLE_VENUES,
     AlreadyListed,
+    OptoutClaim,
+    OptoutResult,
     Watched,
     WatchIn,
     add_watch,
     open_venues,
+    perform_optout,
     remove_watch,
     rename_watch,
     short_address,
+    start_optout,
     watch_strategy_or_404,
     watched_for,
 )
@@ -219,6 +225,123 @@ def _watch_page(db: Session, user: User, w: Watched) -> dict:
     )
     page["tailing"] = card
     return page
+
+
+# ---- opt-out (B6) ---------------------------------------------------------------
+# Declared before /watch/{strategy_id} so "optout" is never read as an id. The
+# address owner needs no watchlist and no strategy page: just a logged-in user
+# with a verified email, the venue and the address. CSRF: the app-wide Origin
+# check covers these POSTs like every other form.
+
+
+def _optout_page(
+    request: Request,
+    user: User | None,
+    *,
+    stage: str = "start",
+    error: str | None = None,
+    form: dict | None = None,
+    claim: OptoutClaim | None = None,
+    result: OptoutResult | None = None,
+    status_code: int = 200,
+) -> Response:
+    venues = [(v, get_profile(v).display_name) for v in WATCHABLE_VENUES]
+    return _render_private(
+        request,
+        "watch_optout.html",
+        status_code=status_code,
+        user=user,
+        demo=bool(user and user.is_demo),
+        stage=stage,
+        error=error,
+        form=form or {"venue": venues[0][0], "address": ""},
+        venues=venues,
+        claim=claim,
+        result=result,
+        verified=user is not None and user.email_verified_at is not None,
+    )
+
+
+@router.get("/watch/optout", response_class=HTMLResponse)
+def watch_optout_page(request: Request, db: Session = Depends(get_db)):
+    user = _user(request, db)
+    if user is None:
+        return RedirectResponse(login_url("/watch/optout"), status_code=303)
+    return _optout_page(request, user)
+
+
+@router.post("/watch/optout")
+def watch_optout_start(
+    request: Request,
+    venue: str = Form(""),
+    address: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    """Step one: the venue and address, then the proof step (no venue call)."""
+    user = _user(request, db)
+    if user is None:
+        return RedirectResponse(login_url("/watch/optout"), status_code=303)
+    form = {"venue": venue, "address": address.strip()}
+    ratelimit.check(request, "watch_optout_user", user.id)
+    try:
+        claim = start_optout(db, user, venue, address)
+    except HTTPException as exc:
+        return _optout_page(
+            request, user, error=str(exc.detail), form=form, status_code=exc.status_code
+        )
+    if claim.already:
+        return _optout_page(
+            request, user, stage="done", result=OptoutResult(venue, claim.address, already=True)
+        )
+    return _optout_page(request, user, stage="proof", claim=claim)
+
+
+@router.post("/watch/optout/verify")
+def watch_optout_verify(
+    request: Request,
+    venue: str = Form(""),
+    address: str = Form(""),
+    signature: str | None = Form(None),
+    db: Session = Depends(get_db),
+):
+    """Step two: the proof. The code is re-derived server-side; only the
+    venue, the address and the signature are read from the form."""
+    user = _user(request, db)
+    if user is None:
+        return RedirectResponse(login_url("/watch/optout"), status_code=303)
+    ratelimit.check(request, "watch_optout_user", user.id)
+    try:
+        result = perform_optout(
+            db,
+            user,
+            venue,
+            address,
+            signature=signature,
+            limiter=get_web_limiter(request.app),
+        )
+    except HTTPException as exc:
+        try:  # back to the proof step with the reason (a busy venue says busy)
+            claim = start_optout(db, user, venue, address)
+        except HTTPException:
+            return _optout_page(
+                request,
+                user,
+                error=str(exc.detail),
+                form={"venue": venue, "address": address.strip()},
+                status_code=exc.status_code,
+            )
+        resp = _optout_page(
+            request,
+            user,
+            stage="proof",
+            claim=claim,
+            error=str(exc.detail),
+            status_code=exc.status_code,
+        )
+        if exc.status_code == 503 and exc.headers:
+            resp.headers["Retry-After"] = exc.headers.get("Retry-After", "60")
+        return resp
+    return _optout_page(request, user, stage="done", result=result)
 
 
 @router.get("/watch/sample-{n}", response_class=HTMLResponse)
