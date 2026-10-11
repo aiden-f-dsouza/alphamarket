@@ -95,6 +95,41 @@ phase is deterministic (the same on every process and restart) and uniform
 across accounts, so a 5-minute tick never sends every account to a venue in
 the same second. `next_sync_at` lives in `account_schedules`.
 
+### Watch accounts (private watchlist)
+
+A watched address is one shared `is_watch` account (see
+`docs/copy_strategies_implementation.md`). It is polled only while someone
+needs it. `jobs.watch_cadences` classifies every live watch account in one
+query, and `enqueue_due_syncs` applies it:
+
+| State | Condition | Sync interval | Sync priority |
+|---|---|---|---|
+| tailed | at least one ACTIVE paper allocation | `INGEST_INTERVAL_SECONDS` | `PRIORITY_SYNC_WATCH` (25) |
+| idle | a `Watch` row, no ACTIVE allocation | `WATCH_IDLE_INTERVAL_SECONDS` (3600) | `PRIORITY_SYNC_WATCH` |
+| dormant | no `Watch` row and no ACTIVE allocation | none: no sync, `next_sync_at` untouched | |
+| opted out | address in `watch_optouts` | none, whatever else is true | |
+
+- A STOPPED allocation never keeps an account alive: a tail that is still
+  closing its book needs quotes (the `prices` job), not syncs.
+- Priorities: lower runs first. Creators are 10 (followed) and 20 (plain),
+  watches 25, maintenance 30, so a watch sync is never claimed ahead of a
+  creator sync. This also holds for syncs the stream process nudges and the
+  `signals` job a sync queues (`jobs.sync_priority` returns the watch
+  priority for any `is_watch` account, tail or not).
+- Idle to tailed: a normal slot is always within one `INGEST_INTERVAL_SECONDS`
+  of the tick that set it, so a watch's `next_sync_at` further out than that
+  came from the idle cadence. Once the account is tailed such a slot counts
+  as due, so the first tail does not wait out the idle hour; the sync moves
+  `next_sync_at` onto a normal slot. Tailed to idle needs nothing: the
+  pending normal slot fires once, and the sync after it is an idle interval
+  out. A dormant account keeps its old slot, so one watched again later is
+  due on the next tick.
+- Dormant and opted-out watch accounts are also left out of the history
+  backfill tick. Adding a watch queues its own backfill directly.
+- Cost per tick: the account list, one query over the watch accounts (only if
+  there are any), and one over the due non-watch accounts for follower
+  priority.
+
 ## Failures, retries, dead letters
 
 - A failed run counts one attempt and retries after
@@ -249,6 +284,7 @@ history) and sets `account_schedules.backfill_done_at` when it finishes.
 | `WORKER_SYNC_TICK_SECONDS` | 30 | how often due syncs are enqueued |
 | `RATE_LIMITER_BACKEND` | `postgres` | `postgres` or `memory` |
 | `INGEST_INTERVAL_SECONDS` | 300 | sync interval per account |
+| `WATCH_IDLE_INTERVAL_SECONDS` | 3600 | sync interval of a watched address nobody is paper-tailing |
 
 <!-- wave2:market-data -->
 ## Market data jobs (wave 2)

@@ -54,6 +54,8 @@ from alphamarket.models import (
     Strategy,
     VenueAccount,
     VenueAccountStatus,
+    Watch,
+    WatchOptout,
 )
 from alphamarket.venue_limits import (
     VenueLimiter,
@@ -116,6 +118,11 @@ RUNS_ON_INACTIVE_ACCOUNT = frozenset({JobKind.AGGREGATOR_DELETE_USER})
 PRIORITY_URGENT = 5
 PRIORITY_SYNC_FOLLOWED = 10
 PRIORITY_SYNC = 20
+# A watched address's sync (private watchlist, copy_strategies B4) sits below
+# every creator sync, followed or not, so a watchlist can never delay a
+# creator's copy lag. Lower numbers are claimed first; still above
+# maintenance, so watches are not starved by nightly work.
+PRIORITY_SYNC_WATCH = 25
 PRIORITY_MAINTENANCE = 30
 PRIORITY_BACKFILL = 40
 
@@ -330,7 +337,93 @@ def has_active_followers(db: Session, account_id: int) -> bool:
 
 
 def sync_priority(db: Session, account_id: int) -> int:
+    """Claim priority of an account's sync. A watched address (`is_watch`)
+    is always PRIORITY_SYNC_WATCH, even with a paper tail on it: creators
+    outrank watches. Everyone else: followed creators first."""
+    if db.scalar(select(VenueAccount.is_watch).where(VenueAccount.id == account_id)):
+        return PRIORITY_SYNC_WATCH
     return PRIORITY_SYNC_FOLLOWED if has_active_followers(db, account_id) else PRIORITY_SYNC
+
+
+class WatchCadence(StrEnum):
+    """How often a shared watch account is polled (see watch_cadences)."""
+
+    TAILED = "tailed"  # an ACTIVE paper allocation: the normal interval
+    IDLE = "idle"  # watched, nobody tailing: watch_idle_interval_seconds
+    DORMANT = "dormant"  # no Watch row, no ACTIVE allocation: not polled
+    OPTED_OUT = "opted_out"  # the address's owner opted out: never polled
+
+
+def watch_cadences(db: Session) -> dict[int, WatchCadence]:
+    """The cadence of every live `is_watch` account, in one query (an
+    EXISTS per fact, over the small set of watch accounts only).
+
+    An opt-out wins over everything, including an ACTIVE allocation. Only an
+    ACTIVE allocation keeps a watch at the normal interval: a STOPPED tail
+    still closing its book needs quotes (prices job), not syncs. Watch rows
+    are looked up through the account's strategy."""
+    tailed = (
+        select(Allocation.id)
+        .join(Strategy, Strategy.id == Allocation.strategy_id)
+        .where(
+            Strategy.venue_account_id == VenueAccount.id,
+            Allocation.status == AllocationStatus.ACTIVE,
+        )
+        .exists()
+    )
+    watched = (
+        select(Watch.id)
+        .join(Strategy, Strategy.id == Watch.strategy_id)
+        .where(Strategy.venue_account_id == VenueAccount.id)
+        .exists()
+    )
+    opted_out = (
+        select(WatchOptout.id)
+        .where(
+            WatchOptout.venue == VenueAccount.venue,
+            WatchOptout.address == func.lower(VenueAccount.key_id),
+        )
+        .exists()
+    )
+    rows = db.execute(
+        select(VenueAccount.id, tailed, watched, opted_out).where(
+            VenueAccount.is_watch.is_(True),
+            VenueAccount.status.not_in(INACTIVE_ACCOUNT_STATUSES),
+        )
+    ).all()
+    out: dict[int, WatchCadence] = {}
+    for account_id, is_tailed, is_watched, is_opted_out in rows:
+        if is_opted_out:
+            out[account_id] = WatchCadence.OPTED_OUT
+        elif is_tailed:
+            out[account_id] = WatchCadence.TAILED
+        elif is_watched:
+            out[account_id] = WatchCadence.IDLE
+        else:
+            out[account_id] = WatchCadence.DORMANT
+    return out
+
+
+def followed_accounts(db: Session, account_ids: Iterable[int]) -> set[int]:
+    """Of these accounts, the creators whose strategy has a follower or an
+    ACTIVE allocation: has_active_followers for many accounts in one query."""
+    ids = list(account_ids)
+    if not ids:
+        return set()
+    return set(
+        db.scalars(
+            select(Strategy.venue_account_id).where(
+                Strategy.venue_account_id.in_(ids),
+                or_(
+                    exists().where(Follow.strategy_id == Strategy.id),
+                    exists().where(
+                        Allocation.strategy_id == Strategy.id,
+                        Allocation.status == AllocationStatus.ACTIVE,
+                    ),
+                ),
+            )
+        )
+    )
 
 
 # ---- queue operations -------------------------------------------------------------
@@ -848,27 +941,71 @@ def active_jobs(db: Session, kind: str) -> int:
 # ---- periodic enqueueing ------------------------------------------------------------
 
 
-def enqueue_due_syncs(db: Session, *, interval_seconds: int, now: datetime | None = None) -> int:
+def enqueue_due_syncs(
+    db: Session,
+    *,
+    interval_seconds: int,
+    now: datetime | None = None,
+    watch_idle_interval_seconds: int | None = None,
+) -> int:
     """One sync job per connected account whose next_sync_at has come, at
     follower-aware priority; next_sync_at moves to the account's next slot.
-    Idempotent across processes (dedupe key sync:<account>)."""
+    Idempotent across processes (dedupe key sync:<account>).
+
+    Watch accounts (`is_watch`, the private watchlist) follow watch_cadences:
+
+    - TAILED: the normal interval, at PRIORITY_SYNC_WATCH (below creators).
+    - IDLE: every `watch_idle_interval_seconds` (settings default 3600).
+    - DORMANT and OPTED_OUT: no sync, and next_sync_at is left untouched.
+
+    Idle -> tailed does not wait out the idle slot. A normal-interval slot
+    is always within `interval_seconds` of the tick that set it, so a
+    watch's stored next_sync_at further out than that was set by the idle
+    cadence; once the account is tailed such a slot counts as due now, the
+    sync runs on the next tick and moves next_sync_at to a normal slot.
+    The reverse (tailed -> idle) needs nothing: the pending slot is at most
+    one normal interval away, and the sync that fires there sets the next
+    one an idle interval out. A dormant account keeps whatever slot it had,
+    so one watched again after a long rest is due at once.
+
+    Queries per tick: the account list, one batch for the watch accounts (if
+    any), one batch for the followed creators among the DUE accounts."""
     now = now or utcnow()
+    if watch_idle_interval_seconds is None:
+        watch_idle_interval_seconds = get_settings().watch_idle_interval_seconds
     rows = db.execute(
-        select(VenueAccount.id, AccountSchedule.next_sync_at)
+        select(VenueAccount.id, VenueAccount.is_watch, AccountSchedule.next_sync_at)
         .outerjoin(AccountSchedule, AccountSchedule.venue_account_id == VenueAccount.id)
         .where(VenueAccount.status.not_in(INACTIVE_ACCOUNT_STATUSES))
     ).all()
-    queued = 0
-    for account_id, next_at in rows:
+    cadences = watch_cadences(db) if any(is_watch for _, is_watch, _ in rows) else {}
+    normal_horizon = now + timedelta(seconds=interval_seconds)
+    due: list[tuple[int, int, bool]] = []  # (account id, its interval, is watch)
+    for account_id, is_watch, next_at in rows:
         next_at = aware(next_at)
+        interval = interval_seconds
+        if is_watch:
+            cadence = cadences.get(account_id, WatchCadence.DORMANT)
+            if cadence in (WatchCadence.DORMANT, WatchCadence.OPTED_OUT):
+                continue
+            if cadence is WatchCadence.IDLE:
+                interval = watch_idle_interval_seconds
+            elif next_at is not None and next_at > normal_horizon:
+                next_at = None  # an idle-cadence slot: the tail starts now
         if next_at is not None and next_at > now:
             continue
-        if enqueue(
-            db, JobKind.SYNC, account_id=account_id, priority=sync_priority(db, account_id), now=now
-        ):
+        due.append((account_id, interval, bool(is_watch)))
+    followed = followed_accounts(db, (a for a, _, watch in due if not watch))
+    queued = 0
+    for account_id, interval, is_watch in due:
+        if is_watch:
+            priority = PRIORITY_SYNC_WATCH
+        else:
+            priority = PRIORITY_SYNC_FOLLOWED if account_id in followed else PRIORITY_SYNC
+        if enqueue(db, JobKind.SYNC, account_id=account_id, priority=priority, now=now):
             queued += 1
         sched = get_schedule(db, account_id)
-        sched.next_sync_at = next_sync_slot(account_id, now, interval_seconds)
+        sched.next_sync_at = next_sync_slot(account_id, now, interval)
         sched.updated_at = now
     db.commit()
     return queued

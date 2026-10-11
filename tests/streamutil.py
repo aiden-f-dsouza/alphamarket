@@ -171,6 +171,7 @@ def seed(
     backfilled=True,
     cursor=HL_CURSOR,
     status=VenueAccountStatus.ACTIVE,
+    is_watch=False,
 ) -> int:
     tag = uuid.uuid4().hex[:10]
     with sf() as db:
@@ -178,7 +179,12 @@ def seed(
         db.add(creator)
         db.flush()
         account = VenueAccount(
-            user_id=creator.id, venue=venue, venue_env="prod", key_id=key_id, status=status
+            user_id=creator.id,
+            venue=venue,
+            venue_env="prod",
+            key_id=key_id,
+            status=status,
+            is_watch=is_watch,
         )
         db.add(account)
         db.flush()
