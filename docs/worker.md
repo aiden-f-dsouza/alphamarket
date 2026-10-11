@@ -288,7 +288,9 @@ has no venue profile and cannot be connected.
 
 **Asset marks inside `prices`.** After the binary quotes, every `prices` job calls
 `prices.refresh_asset_marks`: for each instrument an active follower paper book
-holds (net non-zero in its ledger) it stores the venue's top of book in
+holds (net non-zero in its ledger), or a book stopped within
+`prices.STOPPED_QUOTE_WINDOW` (30 days) that is not flat yet (its stop close
+waits for a fresh quote), it stores the venue's top of book in
 `asset_quotes` and, for perpetuals, the funding rates since the newest stored one
 (the first fetch starts at the earliest open fill). A source that is out of
 budget, rate-limited or circuit-open is skipped for the rest of that pass; the

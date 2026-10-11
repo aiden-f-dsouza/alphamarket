@@ -20,10 +20,12 @@ per (allocation, ref, kind, asset)):
 | perp funding | fund:<instrument_id>:<epoch> | FUNDING +/- USD |
 | liquidation | liq:<instrument_id>:<epoch> | FILL_BASE -/+q <COIN>-PERP; LIQUIDATION +/- USD |
 |  |  | (P&L realized at the mark) |
+| stop close | stop:<instrument_id>:<allocation_id> | as the spot/equity sell or perp fill |
+|  |  | above, of the whole position, at the bid (ask to cover a short) |
 | split | ca:<corporate_action_id> | SPLIT +/-delta <base> |
 | cash dividend | ca:<corporate_action_id> | DIVIDEND +USD |
 
-Every perp position change (signal fill or liquidation) also has a
+Every perp position change (signal fill, liquidation or stop close) also has a
 mirror_asset_fills row: load_book derives the average-cost perp book from
 those rows, and valuation flags PERP_QTY_MISMATCH if they ever disagree
 with the FILL_BASE legs.
@@ -56,10 +58,12 @@ checkpoint is a cache, never the source of truth:
   instant `at`, when everything it folded is at or before `at`;
 - otherwise, or when a newer perp fill predates its last one (fills are
   order-dependent), book_state replays in full and logs why;
-- only save_checkpoint writes it, at the end of paper.process_asset_allocation,
-  in the same transaction as the legs it folded. The worker runs that under
-  the allocation's FOR UPDATE SKIP LOCKED row lock, so one pass per
-  allocation writes at a time; a writer without the lock (the "run now"
+- only save_checkpoint writes it, at the end of paper.process_asset_allocation
+  (and of paper_lifecycle.close_now, the inline stop close), in the same
+  transaction as the legs it folded. The worker runs that under the
+  allocation's FOR UPDATE SKIP LOCKED row lock, and close_now under a
+  waiting FOR UPDATE on the same row, so one pass per allocation writes at
+  a time; a writer without the lock (the "run now"
   API) can at worst lose the insert race (caught, the pass still commits)
   or store a checkpoint whose counts no longer match, which the check above
   rejects and the next pass rebuilds;

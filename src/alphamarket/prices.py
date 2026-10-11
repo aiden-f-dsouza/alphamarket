@@ -16,7 +16,13 @@ run_daily(ctx) -> None
 
 refresh_asset_marks(db, limiter) -> int
     asset_quotes (and funding_rates for perps) for instruments in open
-    follower books. Returns quotes written.
+    follower books: ACTIVE allocations, and STOPPED ones that are not flat
+    yet (their stop close needs a fresh quote; STOPPED_QUOTE_WINDOW).
+    Returns quotes written.
+
+fresh_side(db, instrument_id, now, side) -> Quoted | None
+    The bid or the ask of the freshest asset_quotes row that has that side,
+    no older than settings.quote_max_age_seconds (paper stop closes).
 
 capture_quote(db, venue, venue_env, instrument, limiter) -> AssetQuote | None
     One quote now, through the instrument's pricing venue
@@ -53,7 +59,7 @@ from decimal import Decimal, localcontext
 from fractions import Fraction
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -110,6 +116,16 @@ MIN_DEFER_SECONDS = 5.0
 # the source never publishes (weekends, holidays, before listing).
 LATE_CLOSE_GRACE_DAYS = 4
 FUNDING_LOOKBACK = timedelta(days=1)  # first funding fetch when no fill is known
+
+
+@dataclass(frozen=True)
+class Quoted:
+    """One side of a stored quote (prices.fresh_side)."""
+
+    instrument_id: int
+    price: str  # decimal string, quote asset per unit
+    side: str  # "bid" | "ask"
+    as_of: datetime
 
 
 @dataclass(frozen=True)
@@ -809,10 +825,9 @@ def capture_quote(
         return None
 
 
-def latest_mark(db: Session, instrument_id: int, now: datetime) -> Mark | None:
-    """The freshest usable quote no older than quote_max_age_seconds: the mid
-    of bid and ask when both are quoted, else the last price. A quote with
-    neither is skipped. None when nothing fresh exists."""
+def _fresh_quotes(db: Session, instrument_id: int, now: datetime) -> list[AssetQuote]:
+    """The newest asset_quotes rows (at most 10) no older than
+    quote_max_age_seconds at `now`, newest first."""
     now = aware(now)
     oldest = now - timedelta(seconds=get_settings().quote_max_age_seconds)
     rows = db.scalars(
@@ -821,9 +836,15 @@ def latest_mark(db: Session, instrument_id: int, now: datetime) -> Mark | None:
         .order_by(AssetQuote.as_of.desc(), AssetQuote.id.desc())
         .limit(10)
     ).all()
-    for row in rows:
-        if aware(row.as_of) < oldest:  # SQLite compares naive values; check again aware
-            continue
+    # SQLite compares naive values; check again aware.
+    return [row for row in rows if aware(row.as_of) >= oldest]
+
+
+def latest_mark(db: Session, instrument_id: int, now: datetime) -> Mark | None:
+    """The freshest usable quote no older than quote_max_age_seconds: the mid
+    of bid and ask when both are quoted, else the last price. A quote with
+    neither is skipped. None when nothing fresh exists."""
+    for row in _fresh_quotes(db, instrument_id, now):
         if _positive(row.bid) and _positive(row.ask):
             with localcontext() as ctx:
                 ctx.prec = 80
@@ -834,9 +855,37 @@ def latest_mark(db: Session, instrument_id: int, now: datetime) -> Mark | None:
     return None
 
 
-def _open_instruments(db: Session) -> list[Instrument]:
-    """Instruments some ACTIVE allocation holds a non-zero amount of (the
-    ledger's net legs, so a position closed by a split or a sell is not open)."""
+def fresh_side(db: Session, instrument_id: int, now: datetime, side: str) -> Quoted | None:
+    """One side ("bid" or "ask") of the freshest quote that has it, no older
+    than quote_max_age_seconds at `now`. Never the last price or a mid, and
+    never a stale row: None means wait for a fresh quote (a stop close)."""
+    if side not in ("bid", "ask"):
+        raise ValueError(f"side must be bid or ask, got {side!r}")
+    for row in _fresh_quotes(db, instrument_id, now):
+        value = getattr(row, side)
+        if _positive(value):
+            return Quoted(instrument_id, value.strip(), side, aware(row.as_of))
+    return None
+
+
+# A stopped allocation is quoted while its book is not flat (its positions
+# close at the first fresh quote, paper_lifecycle.close_stopped), but only
+# for this long after it stopped: the query stays bounded instead of scanning
+# every stopped allocation in history. One still open after it closes only
+# when a quote arrives some other way (another book holding the instrument).
+STOPPED_QUOTE_WINDOW = timedelta(days=30)
+
+
+def _open_instruments(db: Session, now: datetime | None = None) -> list[Instrument]:
+    """Instruments some ACTIVE allocation, or some allocation STOPPED within
+    STOPPED_QUOTE_WINDOW (a tail still closing), holds a non-zero amount of
+    (the ledger's net legs, so a position closed by a split, a sell or the
+    stop close is not open, and a stopped tail that is flat drops out)."""
+    cutoff = aware(now or utcnow()) - STOPPED_QUOTE_WINDOW
+    quoted = or_(
+        Allocation.status == AllocationStatus.ACTIVE,
+        and_(Allocation.status == AllocationStatus.STOPPED, Allocation.stopped_at >= cutoff),
+    )
     held = db.execute(
         select(
             MirrorLedgerEntry.allocation_id,
@@ -844,7 +893,7 @@ def _open_instruments(db: Session) -> list[Instrument]:
             func.sum(MirrorLedgerEntry.delta_atoms),
         )
         .join(Allocation, Allocation.id == MirrorLedgerEntry.allocation_id)
-        .where(Allocation.status == AllocationStatus.ACTIVE, MirrorLedgerEntry.asset != CASH_ASSET)
+        .where(quoted, MirrorLedgerEntry.asset != CASH_ASSET)
         .group_by(MirrorLedgerEntry.allocation_id, MirrorLedgerEntry.asset)
     ).all()
     open_pairs = {(alloc, asset) for alloc, asset, total in held if total}
@@ -919,7 +968,8 @@ def _refresh_funding(db: Session, source, inst: Instrument, now: datetime) -> No
 
 def refresh_asset_marks(db: Session, limiter) -> int:
     """Quotes (and, for perps, funding rates) of every instrument an active
-    follower book holds. A source that is out of budget, rate limited or
+    follower book holds, or a recently stopped one that is still closing
+    (_open_instruments). A source that is out of budget, rate limited or
     circuit-open is skipped for the rest of the call (the next tick retries).
     Returns the number of quotes written."""
     open_instruments = _open_instruments(db)

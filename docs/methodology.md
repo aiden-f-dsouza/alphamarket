@@ -277,6 +277,8 @@ stop        : drawdown > the follower's limit  ->  no further mirrors;
               open positions run to settlement and the curve keeps updating
 ```
 
+(Crypto and stock tails close their positions instead: "When a tail stops".)
+
 Each valuation is stored, and the series of valuations is the follower's
 curve. Live mirroring into a real account is not offered: it requires a
 licensed party in the loop, and the platform refuses it structurally rather
@@ -1130,6 +1132,71 @@ portfolio: the position stays under the old symbol at its last price, and
 the creator's trades in the new symbol cannot reduce it. When two data
 sources report the same action (same symbol, kind and ex-date) it is applied
 once.
+
+## When a tail stops
+
+A paper tail stops when its drawdown passes the follower's limit, when the
+follower presses Stop, when the follower removes a watched trader they were
+tailing, or when the trader opts out of being watched. From then on no new
+trade is copied, and every crypto and stock position is closed: the follower
+sees what the tail actually ended with, not a paper position left open
+forever. Prediction-market positions are not sold: they run to settlement,
+as described under "Paper tailing".
+
+**Price.** Each position closes at the venue's public quote, on the side a
+real order would take:
+
+```
+spot or shares (sell)   price = bid
+long perp (sell)        price = bid
+short perp (buy back)   price = ask
+```
+
+The quote is the freshest one no older than 15 minutes that has that side.
+A last trade or a mid is never used for a close, and neither is an older
+quote. If there is none (a stock after the market closed, or market data
+down), the tail is already stopped and shows "Closing": that position closes
+at the first fresh quote, on a later pass, while positions that do have a
+quote close at once. Nothing is ever closed at a stale price.
+
+**Fees and P&L.** Exactly as for a copied sale, with the same formulas
+("Paper copying v2: sizing, fill price, fees"); the close is never skipped
+for a venue minimum or for cash:
+
+```
+spot / shares:  cash += qty x bid (rounded down) - fee
+                fee   = qty x bid x taker rate, half up to the venue's precision (crypto)
+                      = SEC fee + FINRA TAF, each up to the cent (US shares)
+perp:           realized = qty x (price - entry) x side   (side +1 long, -1 short;
+                           a gain rounds down, a loss up)
+                cash += realized - fee,  fee = qty x price x taker rate
+```
+
+The close is dated when it happens. Each instrument closes once per tail:
+if a liquidation already closed the perps, the stop has nothing left to
+close, and a stop that has run never runs again. The drawdown stop records
+the equity that crossed the limit (before the close) as that day's value;
+the next value shows the close. Once flat, a stopped tail's value stops
+moving, apart from funding or a dividend already owed for the time it held
+the position.
+
+**Worked example (Kraken, crypto).** 0.01 BTC bought at 60,030, cash
+394.8976. Stopped with the bid at 60,990.5: proceeds 0.01 x 60,990.5 =
+609.905, fee 609.905 x 0.80% = 4.87924, rounded to 4.8792. Cash 394.8976 +
+609.905 - 4.8792 = 999.9234.
+
+**Worked example (Hyperliquid, short perp).** 0.19943 BTC short at an entry
+of 60,990, cash 993.918382. Stopped with the ask at 60,500.5: realized
+0.19943 x (60,500.5 - 60,990) x (-1) = 97.620985; fee 0.19943 x 60,500.5 =
+12,065.614715 x 0.05% = 6.0328073575, rounded to 6.032807. Cash 993.918382
++ 97.620985 - 6.032807 = 1,085.50656.
+
+**Worked example (US shares, after hours).** 20 shares, cash 8,400, stopped
+at 20:30 UTC after the close: the last quote is 40 minutes old, so the tail
+shows "Closing" overnight. The next morning's first quote has the bid 81.25:
+proceeds 1,625.00; at an SEC rate of $27.80 per million the SEC fee is
+1,625 x 27.80 / 1,000,000 = 0.045175, up to 0.05, and the FINRA TAF 20 x
+0.000166 = 0.00332, up to 0.01. Cash 8,400 + 1,625 - 0.06 = 10,024.94.
 
 <!-- wave2:p8-pages -->
 

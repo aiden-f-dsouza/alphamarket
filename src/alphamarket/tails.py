@@ -21,6 +21,7 @@ from alphamarket.db import get_db
 from alphamarket.mirror import process_allocation
 from alphamarket.models import Allocation, AllocationMode, AllocationStatus, Signal, User
 from alphamarket.money import to_micros
+from alphamarket.paper_lifecycle import close_now, is_closing
 from alphamarket.portfolio import (
     allocation_view,
     portfolio_summary,
@@ -146,11 +147,31 @@ def get_allocation(
 
 
 def stop_by_user(db: Session, row: Allocation) -> None:
-    """The follower stops a tail (JSON route and the /portfolio form). A tail
+    """The follower stops a tail (JSON route, the /portfolio form, removing a
+    tailed watch). A crypto/stock book closes inline at the freshest quotes
+    (paper_lifecycle.close_now: database only, no venue call), so the
+    snapshot after it usually shows the final result; an instrument with no
+    fresh quote closes on a later mirror pass ("closing" until then). A tail
     that already stopped stays as it is."""
     if row.status == AllocationStatus.ACTIVE:
         stop_allocation(db, row, "user")
+        close_now(db, row)
         snapshot_allocation(db, row)
+
+
+def closing_allocation(db: Session, user_id: int, strategy_id: int) -> Allocation | None:
+    """The user's stopped tail of this strategy that is still closing
+    (paper_lifecycle.is_closing), if any: the tail page says so."""
+    stopped = db.scalars(
+        select(Allocation)
+        .where(
+            Allocation.user_id == user_id,
+            Allocation.strategy_id == strategy_id,
+            Allocation.status == AllocationStatus.STOPPED,
+        )
+        .order_by(Allocation.id.desc())
+    ).all()
+    return next((a for a in stopped if is_closing(db, a)), None)
 
 
 @router.post("/allocations/{allocation_id}/stop")
