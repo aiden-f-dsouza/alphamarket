@@ -658,11 +658,12 @@ Wave 3 follow-ups and open decisions:
       grant, Hyperliquid cap error text; measure p50 copy lag (< 30 s target)
 - [ ] Static binary sample pages: headline worst drawdown does not match the
       drawn curve (sample numbers predate the chart generator)
-- [ ] Drawdown stop on crypto/stock paper tails stops copying but keeps the
+- [x] Drawdown stop on crypto/stock paper tails stops copying but keeps the
       positions open, so a stopped tail keeps moving with the market (the
       seeded investor's stopped alt-rotation tail shows +41.7%). Proposed:
       close every position at the bid at the stop, after fees (Aiden to
       confirm; prediction markets keep running to settlement)
+      Done 2026-10-11: every stop closes the book (copy_strategies_implementation section 8, stream S).
 - [ ] Still linear per pass: `prices._open_instruments` (global sum each
       prices tick) and `analytics_v2`'s full `account_inputs` (daily series)
 - [ ] `single_asset_concentration` flags a book that is mostly a broad-market
@@ -676,8 +677,8 @@ Wave 3 follow-ups and open decisions:
 - [x] Polymarket Data API v1 -> v2 (v1 retires 2026-10-24): cursor paging,
       snake_case fields, fixtures re-recorded; ids unchanged.
       Open [VERIFY] items are in `docs/venues/polymarket.md`
-- [ ] Dependencies: nine dependabot bumps combined in one PR, incl.
-      SQLAlchemy 2.1 (first Postgres run is in CI)
+- [x] Dependencies: nine dependabot bumps combined in one PR, incl.
+      SQLAlchemy 2.1 (first Postgres run is in CI) Merged (#20).
 
 Needs the founder / outside the repo:
 

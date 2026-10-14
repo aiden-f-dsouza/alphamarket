@@ -206,6 +206,10 @@ class Settings(BaseSettings):
     # Addresses tracked across all users: protects the venues' outbound budget
     # (Hyperliquid's weight limits and 10 websocket users per IP) for creators.
     watch_max_tracked: int = 500
+    # Poll interval of a watched address nobody is paper-tailing. With an
+    # ACTIVE tail it syncs every ingest_interval_seconds; with no watcher and
+    # no tail it is not polled at all (jobs.enqueue_due_syncs).
+    watch_idle_interval_seconds: int = 3600
 
 
 @lru_cache

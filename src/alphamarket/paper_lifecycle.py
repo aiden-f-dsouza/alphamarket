@@ -27,13 +27,42 @@ apply_lifecycle(db, allocation, now) -> int
       holding at end of ex-date minus one day x cash_per_share, credited on
       pay_date (floor); symbol_change -> not applied in v2; the follower
       sees it on /portfolio (paper.symbol_change_notices).
+    - the stop close (decisions 8 and 9; close_stopped), last: a STOPPED
+      allocation whose book is not flat closes every crypto/stock position
+      at a fresh quote. Spot and equity holdings sell at the bid; a long
+      perp sells at the bid, a short perp buys at the ask. The side comes
+      from the freshest asset_quotes row that has it, no older than
+      settings.quote_max_age_seconds (prices.fresh_side); with none, that
+      instrument waits for a later pass (never a stale mark, never the
+      last price) while the others close. One mirror_asset_fills row
+      (reason "stop_close", price_basis "bid"/"ask", signal_id None) and
+      one paper_book group (ref "stop:<instrument_id>:<allocation_id>")
+      per instrument, priced, charged and booked by the same code as a
+      copied signal (execution.AssetPaperExecutor.execute_at,
+      paper.fill_amounts, paper.realized_pnl_micros, paper.record_asset_fill);
+      the close is never skipped for minimums or cash. Dated at `now`, or
+      the newest event already in the book if later. A flat book, an
+      ACTIVE allocation, or an instrument whose ref is booked adds nothing,
+      so a liquidation (which already flattened the perps) followed by a
+      stop never closes twice. Binary allocations never reach this module.
     Returns the number of events applied.
+
+close_now(db, allocation, now=None) -> int
+    close_stopped inline, right after a stop (tails.stop_by_user,
+    portfolio.snapshot_allocation's drawdown stop): database only, no venue
+    call. Takes the allocation's row lock (FOR UPDATE: it waits for a mirror
+    pass holding it, so the two never close twice), runs the stage, writes
+    the book checkpoint under that lock like process_asset_allocation, and
+    COMMITS. A non-asset or non-stopped allocation is left alone (0).
 
 Implementation notes (methodology "Paper copying v2: funding, liquidation,
 corporate actions"; tests/test_paper_lifecycle.py pins every number):
 
 - Order within a pass: funding, then corporate actions, then the
-  liquidation check, so the check sees the cash funding just moved.
+  liquidation check, so the check sees the cash funding just moved, then
+  the stop close, so funding and splits due before the close are booked on
+  the position they applied to, and a perp the liquidation just closed is
+  flat (not closed twice).
 - Every USD amount is computed exactly (Fraction) and then FLOORED to the
   micro: a credit rounds down, a debit rounds up in magnitude (against the
   follower, paper_book's rule).
@@ -52,7 +81,7 @@ corporate actions"; tests/test_paper_lifecycle.py pins every number):
   times alone; the positions at the unbooked rows come from one forward
   pass over the perp fills, _PositionsAt; the book itself from
   paper_book.book_state, which equals load_book.)
-- Each stage (funding, corporate actions, liquidation) runs in its own
+- Each stage (funding, corporate actions, liquidation, stop close) runs in its own
   savepoint: a stage that raises is rolled back and logged, and the next
   stage still runs, so a funding bug never stops the liquidation check.
 - Liquidation is checked only when EVERY open perp has a fresh mark
@@ -76,8 +105,9 @@ corporate actions"; tests/test_paper_lifecycle.py pins every number):
   cash per share) is skipped and logged, never guessed, and never allowed
   to fail the pass (the caller commits signals and lifecycle together).
 
-Flushes, never commits: the caller (paper.process_asset_allocation)
-commits with the rest of the pass.
+apply_lifecycle flushes, never commits: the caller
+(paper.process_asset_allocation) commits with the rest of the pass.
+close_now is the one entry point here that commits.
 """
 
 import logging
@@ -93,7 +123,7 @@ from sqlalchemy.orm import Session
 
 from alphamarket import paper_book, prices
 from alphamarket.config import get_settings
-from alphamarket.connectors.base import CorporateActionKind, InstrumentType, LegKind
+from alphamarket.connectors.base import Action, CorporateActionKind, InstrumentType, LegKind
 from alphamarket.jobs import aware
 from alphamarket.models import (
     Allocation,
@@ -103,14 +133,16 @@ from alphamarket.models import (
     Instrument,
     MirrorAssetFill,
     MirrorLedgerEntry,
+    utcnow,
 )
 from alphamarket.paper_book import CASH_ASSET, CASH_DECIMALS, LegSpec
-from alphamarket.valuation import PERP_SUFFIX, LedgerFold, PerpPosition, parse_price
+from alphamarket.valuation import CASH_AT_PAR, PERP_SUFFIX, LedgerFold, PerpPosition, parse_price
 
 logger = logging.getLogger(__name__)
 
 MICROS = 1_000_000
 LIQUIDATED = "liquidated"
+STOP_CLOSE = "stop_close"  # mirror_asset_fills.reason of a stop close
 _EPSILON = timedelta(microseconds=1)
 # How long a funding row that has no mark yet is retried (a close for D-1, or
 # a quote near `at`, can arrive later) before it is given up.
@@ -122,7 +154,7 @@ def apply_lifecycle(db: Session, allocation: Allocation, now: datetime) -> int:
         raise ValueError("now must be timezone-aware (invariant 2)")
     now = now.astimezone(UTC)
     applied = 0
-    for stage in (apply_funding, apply_corporate_actions, check_liquidation):
+    for stage in (apply_funding, apply_corporate_actions, check_liquidation, close_stopped):
         applied += _stage_isolated(db, allocation, stage, now)
     return applied
 
@@ -668,3 +700,146 @@ def _apply_action(
         db, allocation, ref=f"ca:{row.id}", legs=legs, occurred_at=occurred_at
     )
     return bool(rows)
+
+
+# ---- stop close (decisions 8 and 9) ------------------------------------------------
+
+
+def stop_ref(instrument_id: int, allocation_id: int) -> str:
+    """The stop close's paper_book ref: one close per instrument per allocation."""
+    return f"stop:{instrument_id}:{allocation_id}"
+
+
+def is_flat(book) -> bool:
+    """No non-cash holding left (spot, equity or perp): a paper_book state."""
+    return not book.holdings
+
+
+def is_closing(db: Session, allocation: Allocation) -> bool:
+    """Stopped and not flat yet: the read side's "Closing" (derived, no
+    status of its own). Binary allocations are never closing."""
+    from alphamarket.mirror import is_asset_allocation
+
+    if allocation.status != AllocationStatus.STOPPED or not is_asset_allocation(db, allocation):
+        return False
+    return not is_flat(paper_book.book_state(db, allocation))
+
+
+def _close_qty(allocation: Allocation, inst: Instrument, held, book):
+    """The signed quantity the stop close trades back to zero, or None (logged)
+    when it cannot be closed safely: perps from the average-cost perp book
+    (like liquidation), spot and equity from the holding."""
+    if inst.type == InstrumentType.PERP:
+        position = book.perps.get(inst.base_asset)
+        if position is None or position.entry is None:
+            logger.warning(
+                "allocation %s: %s has no perp entry; stop close skipped",
+                allocation.id,
+                inst.base_asset,
+            )
+            return None
+        return position.qty
+    if held.atoms < 0:
+        logger.warning(
+            "allocation %s: negative %s holding; stop close skipped", allocation.id, inst.base_asset
+        )
+        return None
+    return held
+
+
+def close_stopped(db: Session, allocation: Allocation, now: datetime) -> int:
+    """See the module docstring (the stop close). Returns instruments closed."""
+    if allocation.status != AllocationStatus.STOPPED:
+        return 0
+    book = paper_book.book_state(db, allocation)
+    if is_flat(book):
+        return 0
+    from alphamarket import paper
+    from alphamarket.execution import get_asset_executor
+
+    executor = get_asset_executor(allocation.mode)  # paper only: live raises
+    profile = paper._profile_of(db, allocation)
+    instruments = paper._instruments_by_asset(db, allocation)
+    booked = paper_book.booked_through(db, allocation)
+    filled_at = max(now, booked) if booked is not None else now
+    applied = 0
+    for asset, held in sorted(book.holdings.items()):
+        inst = instruments.get(asset)
+        if inst is None or inst.quote_asset not in CASH_AT_PAR:
+            logger.warning(
+                "allocation %s: %s has no USD instrument; stop close skipped", allocation.id, asset
+            )
+            continue
+        qty = _close_qty(allocation, inst, held, book)
+        if qty is None:
+            continue
+        ref = stop_ref(inst.id, allocation.id)
+        if paper_book.has_group(db, allocation, ref):
+            logger.warning(
+                "allocation %s: %s closed at the stop but still held (%s); left as is",
+                allocation.id,
+                asset,
+                qty.units,
+            )
+            continue
+        action = Action.SELL if qty.atoms > 0 else Action.BUY
+        side = "bid" if action is Action.SELL else "ask"
+        quote = prices.fresh_side(db, inst.id, now, side)
+        if quote is None:
+            logger.info(
+                "allocation %s: no fresh %s for %s; the stop close waits",
+                allocation.id,
+                side,
+                asset,
+            )
+            continue
+        price = paper.PaperPrice(quote.price, side, None, quote.as_of)
+        size = abs(qty.atoms)
+        realized = 0
+        if inst.type == InstrumentType.PERP:
+            realized = paper.realized_pnl_micros(book, inst, size, quote.price, qty.decimals)
+        executed = executor.execute_at(inst, action, size, qty.decimals, price, profile, filled_at)
+        row = paper.record_asset_fill(
+            db,
+            allocation,
+            inst,
+            action,
+            executed,
+            ref=ref,
+            realized_micros=realized,
+            signal_id=None,
+            reason=STOP_CLOSE,
+        )
+        if row is not None:
+            applied += 1
+    if applied:
+        logger.info("allocation %s: stop closed %d instruments", allocation.id, applied)
+    return applied
+
+
+def close_now(db: Session, allocation: Allocation, now: datetime | None = None) -> int:
+    """See the module docstring. Commits."""
+    from alphamarket.mirror import is_asset_allocation
+
+    if allocation.status != AllocationStatus.STOPPED or not is_asset_allocation(db, allocation):
+        return 0
+    now = aware(now) if now is not None else utcnow()
+    try:
+        # The mirror pass's lock (worker.handle_mirror), but waiting for it:
+        # once we hold it, a pass that already closed is visible, and a new
+        # one skips this allocation until we commit.
+        locked = db.scalars(
+            select(Allocation)
+            .where(Allocation.id == allocation.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).first()
+        applied = 0
+        if locked is not None and locked.status == AllocationStatus.STOPPED:
+            applied = _stage_isolated(db, locked, close_stopped, now)
+            paper_book.save_checkpoint_safely(db, locked)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return applied

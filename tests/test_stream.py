@@ -116,6 +116,21 @@ def test_only_creators_with_active_allocations_on_streaming_venues_are_candidate
     assert got == [(top, 3, 0), (kraken, 2, 0), (tied_more_follows, 1, 2), (tied, 1, 0)]
 
 
+def test_creators_always_outrank_watched_addresses(sf):
+    heavy_watch = seed(sf, key_id="0x" + "a1" * 20, allocations=9, follows=9, is_watch=True)
+    creator = seed(sf, key_id="0x" + "b2" * 20, allocations=1)
+    light_watch = seed(sf, key_id="0x" + "c3" * 20, allocations=2, is_watch=True)
+    creator_2 = seed(sf, key_id="0x" + "d4" * 20, allocations=3)
+    with sf() as db:
+        got = [(c.account_id, c.is_watch) for c in streamable_accounts(db)]
+    assert got == [
+        (creator_2, False),
+        (creator, False),  # one allocation still beats a watch with nine
+        (heavy_watch, True),
+        (light_watch, True),
+    ]
+
+
 def test_no_stream_is_opened_for_an_account_without_active_followers(sf):
     seed(sf, allocations=0, follows=3)
     seed(sf, key_id=OTHER, allocations=0, stopped=1)
@@ -543,6 +558,32 @@ def test_hyperliquid_cap_streams_the_most_followed_and_hands_slots_over(sf, monk
         assert len(slots) == 2
         await p1.shutdown()
         await p2.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_a_claimed_creator_takes_a_stream_slot_from_a_watch(sf, monkeypatch):
+    profile = registry.PROFILES["hyperliquid"]
+    monkeypatch.setitem(
+        registry.PROFILES, "hyperliquid", dataclasses.replace(profile, stream_users_per_ip=2)
+    )
+    watch_a = seed(sf, key_id="0x" + "a1" * 20, allocations=5, is_watch=True)
+    watch_b = seed(sf, key_id="0x" + "b2" * 20, allocations=4, is_watch=True)
+    server = FakeServer()
+
+    async def scenario():
+        p = supervisor(sf, server, holder="P1")
+        await p.refresh()
+        assert set(p.streams) == {watch_a, watch_b}  # both IP slots held by watches
+        # A creator with a single paper copy appears (it finished its backfill).
+        creator = seed(sf, key_id="0x" + "c3" * 20, allocations=1)
+        await p.refresh()  # the creator is starved and outranks the worst watch
+        assert set(p.streams) == {watch_a}
+        await p.refresh()  # and takes the freed slot
+        assert set(p.streams) == {watch_a, creator}
+        with sf() as db:
+            assert len(jobs.live_leases(db, "stream:slot:hyperliquid:")) == 2
+        await p.shutdown()
 
     asyncio.run(scenario())
 

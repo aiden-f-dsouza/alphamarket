@@ -84,6 +84,8 @@ RULES: dict[str, Rule] = {
         Rule("snaptrade_picker_user", 30, 600),
         # watchlist: each add of a new address is a venue call and an import
         Rule("watch_user", 20, 3600),
+        # watchlist opt-out: the proof step is a venue call (signature or bio check)
+        Rule("watch_optout_user", 20, 3600),
     )
 }
 

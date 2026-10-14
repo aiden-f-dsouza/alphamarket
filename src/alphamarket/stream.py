@@ -78,7 +78,6 @@ from alphamarket.connectors.base import (
 from alphamarket.connectors.registry import get_profile, streaming_venues
 from alphamarket.jobs import (
     INACTIVE_ACCOUNT_STATUSES,
-    PRIORITY_SYNC_FOLLOWED,
     JobKind,
     acquire_lease,
     enqueue_fresh,
@@ -86,6 +85,7 @@ from alphamarket.jobs import (
     make_worker_id,
     release_lease,
     renew_lease,
+    sync_priority,
 )
 from alphamarket.models import (
     AccountSchedule,
@@ -131,11 +131,14 @@ class Candidate:
     venue: str
     allocations: int  # active paper allocations of the creator's strategy
     follows: int
+    is_watch: bool = False  # a watched address: ranks below every creator
 
 
 def streamable_accounts(db: Session) -> list[Candidate]:
-    """Creators on a streaming venue with at least one ACTIVE paper
-    allocation, most-followed first (allocations, then follows, then id).
+    """Accounts on a streaming venue with at least one ACTIVE paper
+    allocation, best first: creators always before watched addresses
+    (`is_watch`; a creator's copy lag outranks a private tail of an
+    arbitrary address), then most allocations, then follows, then id.
     Accounts that are disconnected, suspended or pending are left out, and
     so are accounts whose history backfill has not finished.
 
@@ -169,6 +172,7 @@ def streamable_accounts(db: Session) -> list[Candidate]:
             allocs.c.n,
             follow_n,
             AccountSchedule.resume_cursors,
+            VenueAccount.is_watch,
         )
         .join(allocs, allocs.c.account_id == VenueAccount.id)
         .outerjoin(follows, follows.c.account_id == VenueAccount.id)
@@ -178,11 +182,11 @@ def streamable_accounts(db: Session) -> list[Candidate]:
             VenueAccount.status.not_in(INACTIVE_ACCOUNT_STATUSES),
             AccountSchedule.backfill_done_at.is_not(None),
         )
-        .order_by(allocs.c.n.desc(), follow_n.desc(), VenueAccount.id)
+        .order_by(VenueAccount.is_watch.asc(), allocs.c.n.desc(), follow_n.desc(), VenueAccount.id)
     ).all()
     return [
-        Candidate(int(a), str(v), int(n), int(f))
-        for a, v, n, f, cursors in rows
+        Candidate(int(a), str(v), int(n), int(f), bool(w))
+        for a, v, n, f, cursors, w in rows
         if venues[v].stream_mode is not StreamMode.FILLS
         or (cursors or {}).get(ingest.STREAM_ASSET_FILLS)
     ]
@@ -206,10 +210,11 @@ def sync_running(db: Session, account_id: int) -> bool:
 
 
 def nudge_sync(db: Session, account_id: int, *, now: datetime | None = None) -> str:
-    """Queue the account's sync at copy-lag priority so the poller ingests
-    what the stream just saw. Coalesces with a pending sync. Commits."""
+    """Queue the account's sync at copy-lag priority (a watched address's at
+    PRIORITY_SYNC_WATCH, below every creator) so the poller ingests what the
+    stream just saw. Coalesces with a pending sync. Commits."""
     _, outcome = enqueue_fresh(
-        db, JobKind.SYNC, account_id=account_id, priority=PRIORITY_SYNC_FOLLOWED, now=now
+        db, JobKind.SYNC, account_id=account_id, priority=sync_priority(db, account_id), now=now
     )
     db.commit()
     return outcome
@@ -255,7 +260,11 @@ def ingest_streamed_fills(
         result = write()
     if result.new:
         enqueue_fresh(
-            db, JobKind.SIGNALS, account_id=account_id, priority=PRIORITY_SYNC_FOLLOWED, now=now
+            db,
+            JobKind.SIGNALS,
+            account_id=account_id,
+            priority=sync_priority(db, account_id),
+            now=now,
         )
         db.commit()
     return result

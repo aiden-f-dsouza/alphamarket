@@ -90,6 +90,7 @@ from alphamarket.tails import (
     AllocationIn,
     active_allocation,
     active_tail_count,
+    closing_allocation,
     create_allocation,
     owned_allocation,
     stop_by_user,
@@ -743,6 +744,8 @@ def _tail_ctx(
         "error": error,
         "own": strategy.user_id == user.id,
         "active": active_allocation(db, user.id, strategy.id) is not None,
+        # A stopped tail of this strategy still selling its positions.
+        "closing": closing_allocation(db, user.id, strategy.id) is not None,
     }
 
 
@@ -876,7 +879,10 @@ def stop_tail_form(request: Request, allocation_id: int, db: Session = Depends(g
 PORTFOLIO_NOTICES = {
     "started": "Paper tail started. It copies the creator's trades from their next one; "
     "nothing earlier is replayed.",
-    "stopped": "Paper tail stopped. No new trades are copied; its history stays here.",
+    "stopped": "Paper tail stopped. No new trades are copied. Crypto and stock positions are "
+    "sold at the current quote (one with no fresh quote, such as a stock after hours, closes "
+    "when the market quotes it again); prediction-market positions run to settlement. Its "
+    "history stays here.",
 }
 
 
@@ -1041,6 +1047,7 @@ def portfolio_view(
                 "limit": v["drawdown_limit"],
                 "status": v["status"],
                 "stop_reason": v["stop_reason"],
+                "closing": v.get("closing", False),
                 "positions": rows,
                 "copy_lag": _age(v.get("copy_lag_median_seconds")),
                 "skipped": sorted(skipped.items()),

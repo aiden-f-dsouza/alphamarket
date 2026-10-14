@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{# Watchlist opt-out (docs/copy_strategies_implementation.md B6). Three stages:
+   start (venue + address), proof (the claim.html pieces: a signature over the
+   exact claim_text for Hyperliquid via /static/claim.js, or a code in the
+   profile bio for Polymarket), done. The code shown is derived on the server
+   for this user and address; the forms post only venue, address and signature. #}
+{% block title %}Opt an address out of the watchlist · Koine{% endblock %}
+{% block nav_active %}{% endblock %}
+{% block style %}
+  .claim { display:grid; grid-template-columns:minmax(0, 620px) minmax(0, 1fr); gap:48px; }
+  .claim-message { white-space:pre-wrap; word-break:break-word; margin:0; padding:14px 16px; border:1px solid var(--line2); border-radius:6px; background:var(--surface); font:13px/1.55 var(--mono); }
+  .claim-code { font-size:18px; padding:8px 14px; border:1px solid var(--line2); border-radius:6px; }
+  @media (max-width:1000px) { .claim { grid-template-columns:1fr; } }
+{% endblock %}
+{% block content %}
+<div class="claim">
+  <div class="stack" style="gap:24px">
+    {% if stage == "done" %}
+    <span class="label">Watchlist opt-out</span>
+    <div class="stack"><h1 style="font-size:40px">{{ "Already opted out." if result.already else "Opted out." }}</h1>
+      <p class="text2" style="font-size:16px">
+        {% if result.already %}
+        This address has already been opted out of the watchlist. Nobody can add it, and nothing more is needed.
+        {% else %}
+        Done. Nobody can add this address to a watchlist any more. We removed it from {{ result.watches_removed }} watchlist{{ "" if result.watches_removed == 1 else "s" }} and stopped {{ result.tails_stopped }} paper tail{{ "" if result.tails_stopped == 1 else "s" }} of it. Koine stops polling the address once nothing follows it.
+        {% endif %}
+      </p>
+    </div>
+    <span class="mono small muted">{{ result.venue }} · {{ result.address }}</span>
+    <a class="small muted" href="/security">Back to security &amp; privacy</a>
+
+    {% else %}
+    <span class="label">Watchlist opt-out{% if claim %} · {{ claim.display_name }} · <span class="mono">{{ claim.address }}</span>{% endif %}</span>
+    <div class="stack">
+      <h1 style="font-size:40px">{{ "Prove this address is yours." if stage == "proof" else "Ask not to be watched." }}</h1>
+      {% if stage == "proof" %}
+        {% if claim.message %}
+        <p class="text2" style="font-size:16px">Anyone can type an address, so we only act on it when you show you control it. Sign this Koine message with the wallet that controls the address (for a vault or sub-account, the leader or master wallet). Signing is not a transaction: it cannot trade, move funds or approve anything, and it costs nothing.</p>
+        {% else %}
+        <p class="text2" style="font-size:16px">Anyone can type an address, so we only act on it when we see this code in your {{ claim.display_name }} profile bio. Add it, save the bio on {{ claim.display_name }}, then press the button. You can remove the code afterwards.</p>
+        {% endif %}
+      {% else %}
+      <p class="text2" style="font-size:16px">Koine lets signed-in members watch any public Hyperliquid or Polymarket address privately. If the address is yours, you can ask us to stop. We will remove it from everyone's watchlist, stop any paper tail of it, and refuse to add it again. Nothing is ever shown publicly, and we never try to find out who is behind an address.</p>
+      {% endif %}
+    </div>
+    {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+
+    {% if stage == "start" %}
+      {% if not verified %}
+      <span class="small text2">Verify your email address first. <a href="/dashboard/security" style="text-decoration:underline">Account security</a></span>
+      {% else %}
+      <form method="post" action="/watch/optout" class="card" autocomplete="off">
+        <div class="body" style="padding:28px;gap:18px">
+          <label class="field"><span class="label">Venue</span><select name="venue">{% for v, label in venues %}<option value="{{ v }}" {{ "selected" if form.venue == v }}>{{ label }}</option>{% endfor %}</select></label>
+          <label class="field"><span class="label">Address</span><input class="mono" name="address" required pattern="0[xX][0-9a-fA-F]{40}" maxlength="42" autocomplete="off" spellcheck="false" placeholder="0x…" value="{{ form.address }}"></label>
+          <div class="spread" style="align-items:center"><span></span><button class="btn" type="submit">Continue</button></div>
+        </div>
+      </form>
+      {% endif %}
+
+    {% elif claim.message %}
+    <form method="post" action="/watch/optout/verify" class="card" autocomplete="off" data-claim-form data-claim-address="{{ claim.address }}">
+      <input type="hidden" name="venue" value="{{ claim.venue }}">
+      <input type="hidden" name="address" value="{{ claim.address }}">
+      <div class="body" style="padding:28px;gap:20px">
+        <div class="stack" style="gap:8px">
+          <span class="label">Message to sign</span>
+          <pre class="claim-message" data-claim-message="{{ claim.message }}">{{ claim.message }}</pre>
+        </div>
+        <div class="stack" style="gap:8px">
+          <button class="btn" type="button" data-claim-sign hidden>Sign with my wallet</button>
+          <span class="small muted" data-claim-status aria-live="polite"></span>
+        </div>
+        <label class="field"><span class="label">Signature</span><textarea class="mono" name="signature" rows="3" spellcheck="false" placeholder="0x… (filled in when you sign with a browser wallet)" data-claim-signature></textarea>
+          <span class="note">No browser wallet? Sign the exact message above with your wallet's "sign message" tool (personal_sign / EIP-191) and paste the 0x signature here.</span></label>
+        <div class="spread" style="align-items:center">
+          <span class="mono small muted">Code {{ claim.code }}</span>
+          <button class="btn" type="submit">Check signature and opt out</button>
+        </div>
+      </div>
+    </form>
+    <script src="/static/claim.js" defer></script>
+    {% else %}
+    <div class="card"><div class="body" style="padding:28px;gap:18px">
+      <span class="label">Your code</span>
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <code class="mono claim-code">{{ claim.code }}</code>
+        <form class="inline" method="post" action="/watch/optout/verify">
+          <input type="hidden" name="venue" value="{{ claim.venue }}">
+          <input type="hidden" name="address" value="{{ claim.address }}">
+          <button class="btn" type="submit">Check my bio and opt out</button>
+        </form>
+      </div>
+    </div></div>
+    {% endif %}
+    <a class="small muted" href="/security">Back to security &amp; privacy</a>
+    {% endif %}
+  </div>
+
+  <div class="stack" style="gap:0;padding-top:4px">
+    <span class="label" style="padding-bottom:8px;border-bottom:1px solid var(--line2)">What opting out does</span>
+    <div class="hairline-list">
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Removes the address from every watchlist</span><span class="small muted">Everyone who watched it loses the entry, and any paper tail of it is stopped.</span></div></div>
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Refuses it from now on</span><span class="small muted">Koine keeps an append-only record of the opt-out (venue and address) so the address cannot be added again.</span></div></div>
+      <div>{{ m.icon("check", 18, "var(--good)", 2) }}<div class="stack" style="gap:4px"><span>Proof is checked with the venue</span><span class="small muted">The code is issued for your account and this address only; a signature or bio code made for anything else does not count.</span></div></div>
+    </div>
+  </div>
+</div>
+{% endblock %}

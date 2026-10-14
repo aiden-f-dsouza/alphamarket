@@ -59,7 +59,8 @@ asset_view_extras(db, allocation, value) -> dict
     unrealized float, entry str|None}), "venue", "asset_class",
     "copy_lag_median_seconds" (int|None), "skipped" ({reason: count}),
     "symbol_changes" (symbol_change_notices: held equities whose symbol
-    changed, which paper books do not convert yet). Per kind: spot/equity
+    changed, which paper books do not convert yet), "closing" (stopped and
+    not flat: the stop close is waiting for a fresh quote). Per kind: spot/equity
     cost = average cost of the holding (cash paid, fees excluded), value =
     qty x mark (or cost), unrealized = value - cost, entry None. Perps:
     cost = |qty| x entry (the notional at entry), value = unrealized =
@@ -260,6 +261,20 @@ def asset_fee_micros(
             raise ValueError(f"{profile.venue}: us_equity_regulatory needs regulatory_fees")
         return regulatory_fee_micros(profile.regulatory_fees, action, qty_atoms, decimals, price)
     raise ValueError(f"{profile.venue}: {model} is not an asset paper fee model")
+
+
+def fill_amounts(
+    profile: VenueProfile, action: Action, qty_atoms: int, decimals: int, price: str
+) -> tuple[int, int]:
+    """(notional_micros, fee_micros) of one paper fill: qty x price rounded UP
+    for a buy (what the follower pays) and DOWN for a sell (what it
+    receives), and asset_fee_micros. The one place both are computed, for a
+    copied signal and for a stop close alike (execution.AssetPaperExecutor)."""
+    if action is Action.BUY:
+        notional = cost_micros_up(qty_atoms, decimals, price)
+    else:
+        notional = paper_book.proceeds_micros_down(qty_atoms, decimals, price)
+    return notional, asset_fee_micros(profile, action, qty_atoms, decimals, price)
 
 
 # ---- sizing (plan D8/D9, decision E6) -----------------------------------------------------
@@ -519,12 +534,16 @@ def _legs(
     notional_micros: int,
     fee_micros: int,
     realized_micros: int,
+    decimals: int | None = None,
 ) -> list[LegSpec]:
+    """One paper fill's legs (paper_book's table). `decimals` is the scale of
+    qty_atoms: the instrument's qty_decimals unless given (a stop close sells
+    the holding at its own scale)."""
     sign = 1 if action is Action.BUY else -1
     base = LegSpec(
         instrument.base_asset,
         sign * qty_atoms,
-        instrument.qty_decimals,
+        instrument.qty_decimals if decimals is None else decimals,
         LegKind.FILL_BASE,
         instrument.id,
     )
@@ -541,10 +560,17 @@ def _legs(
     ]
 
 
-def realized_pnl_micros(book: BookState, instrument: Instrument, close_atoms: int, price: str):
-    """Perp P&L realized by closing `close_atoms` of the follower's position at
-    `price`: close_qty x (price - entry) x side, floored to the micro (a gain
-    rounds down, a loss rounds up)."""
+def realized_pnl_micros(
+    book: BookState,
+    instrument: Instrument,
+    close_atoms: int,
+    price: str,
+    decimals: int | None = None,
+):
+    """Perp P&L realized by closing `close_atoms` (at `decimals`, default the
+    instrument's qty_decimals) of the follower's position at `price`:
+    close_qty x (price - entry) x side, floored to the micro (a gain rounds
+    down, a loss rounds up)."""
     if close_atoms <= 0:
         return 0
     position = book.perps[instrument.base_asset]
@@ -552,7 +578,7 @@ def realized_pnl_micros(book: BookState, instrument: Instrument, close_atoms: in
         raise ValueError(f"{instrument.base_asset}: follower entry unknown")
     side = _sign(position.qty.atoms)
     exact = (
-        _units(close_atoms, instrument.qty_decimals)
+        _units(close_atoms, instrument.qty_decimals if decimals is None else decimals)
         * (parse_price(price) - position.entry)
         * side
         * MICROS_PER_UNIT
@@ -625,10 +651,57 @@ def mirror_asset_signal(
         # event instead, so no booked event is ever recomputed against a
         # position it did not see.
         executed = replace(executed, filled_at=booked)
-    row = MirrorAssetFill(
-        allocation_id=allocation.id,
+    return record_asset_fill(
+        db,
+        allocation,
+        instrument,
+        action,
+        executed,
+        ref=ref,
+        realized_micros=realized,
         signal_id=signal.id,
         reason="signal",
+    )
+
+
+def record_asset_fill(
+    db: Session,
+    allocation: Allocation,
+    instrument: Instrument,
+    action: Action,
+    executed,
+    *,
+    ref: str,
+    realized_micros: int,
+    signal_id: int | None,
+    reason: str,
+) -> MirrorAssetFill | None:
+    """Book one executed paper fill (execution.ExecutedAssetFill): its
+    paper_book group under `ref` (legs from _legs) and its mirror_asset_fills
+    row. A copied signal ("signal") and a stop close ("stop_close") both
+    come through here. None, writing nothing, when `ref` is already booked.
+    Flushes; the caller commits."""
+    legs = paper_book.append_group(
+        db,
+        allocation,
+        ref=ref,
+        occurred_at=executed.filled_at,
+        legs=_legs(
+            instrument,
+            action,
+            executed.qty_atoms,
+            executed.notional_micros,
+            executed.fee_micros,
+            realized_micros,
+            executed.qty_decimals,
+        ),
+    )
+    if not legs:
+        return None
+    row = MirrorAssetFill(
+        allocation_id=allocation.id,
+        signal_id=signal_id,
+        reason=reason,
         mode=allocation.mode,
         instrument_id=instrument.id,
         action=action.value,
@@ -644,20 +717,7 @@ def mirror_asset_signal(
         filled_at=executed.filled_at,
     )
     db.add(row)
-    paper_book.append_group(
-        db,
-        allocation,
-        ref=ref,
-        occurred_at=executed.filled_at,
-        legs=_legs(
-            instrument,
-            action,
-            executed.qty_atoms,
-            executed.notional_micros,
-            executed.fee_micros,
-            realized,
-        ),
-    )
+    db.flush()
     return row
 
 
@@ -1021,4 +1081,6 @@ def asset_view_extras(db: Session, allocation: Allocation, value) -> dict:
         "copy_lag_median_seconds": copy_lag_median_seconds(db, allocation),
         "skipped": skipped_counts(db, allocation),
         "symbol_changes": symbol_change_notices(db, allocation),
+        # paper_lifecycle.is_closing, from the positions already valued.
+        "closing": allocation.status == AllocationStatus.STOPPED and bool(value.asset_positions),
     }

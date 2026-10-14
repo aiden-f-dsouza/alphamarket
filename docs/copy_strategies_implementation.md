@@ -230,6 +230,12 @@ different templates except `_macros.html`, where A only adds a macro).
 6. Address already connected by a Koine creator but unclaimed: separate shared
    watch account (default, not re-asked).
 7. This session builds steps 0-3; steps 4-7 follow.
+8. A stop closes the paper book (answered 2026-10-11): every stop (drawdown
+   limit, the follower's Stop, removing a tailed watch, an opt-out) closes
+   every crypto/stock position. Prediction markets still run to settlement.
+9. No fresh quote at the stop (stocks after hours, market data down): the
+   tail is stopped at once and shows "closing"; positions close at the first
+   fresh quote. Never a stale mark (same rule as liquidation).
 
 ## 7. Status (2026-10-07, branch `copy-strategies`)
 
@@ -274,6 +280,92 @@ Found along the way:
 - `/s/{slug}` returned a 500 for a public strategy with no stats yet
   (`_worst_periods(None)`); fixed and pinned in `tests/test_worst_periods.py`.
 
-Next: step 4 (slower cadence for untailed watches, dormant accounts skipped,
-creators outrank watches for stream slots), step 5 (opt-out), step 6
-(`trader_profile.py`).
+**Round 2 (2026-10-11, branch `copy-strategies-r2`):** step 4, step 5 and
+stream S of section 8 are done.
+
+- Step 4: watch accounts poll at the normal interval only while tailed,
+  hourly (`watch_idle_interval_seconds`) when watched but untailed, never
+  when dormant or opted out; `PRIORITY_SYNC_WATCH` (25) below every
+  creator sync; creators outrank watches for stream slots; backfills
+  skip dormant and opted-out watches (`tests/test_watch_schedule.py`).
+- Step 5: `/watch/optout` (Hyperliquid signature, Polymarket bio code).
+  The claim code is an HMAC of user, venue and address under
+  `secret_key`, re-derived server side (no table); rotating `secret_key`
+  reissues codes. Stopped tails close inline after the commit
+  (`tests/test_watch_optout.py`).
+- Stream S: every stop closes the crypto/stock book at the bid/ask after
+  fees, "Closing" until flat (`paper_lifecycle.close_stopped`,
+  `close_now`; methodology "When a tail stops"; `tests/test_stop_close.py`).
+
+Follow-ups from round 2:
+
+- [ ] `stream_max_accounts` (200) never evicts: if watches fill it, a new
+      creator waits. The per-IP Hyperliquid cap (10) binds first today
+- [ ] Stopped tails are quoted for 30 days (`prices.STOPPED_QUOTE_WINDOW`);
+      one still holding something after that stays "Closing"
+- [ ] A split that arrives after a stop close but dated before it leaves
+      the tail "Closing" (logged, not handled)
+
+Next: step 6 (`trader_profile.py` + the `/watch/{id}` section).
+
+## 8. Next round plan (2026-10-11)
+
+Three streams run in parallel (worktree agents), then step 6. Haiku agents
+commit, tick this status and open the PRs; the main session reviews each
+diff and integrates. Branches: `wip/stop-close`, `wip/watch-schedule`,
+`wip/watch-optout`, then `wip/trader-profile`. No migrations expected.
+
+### S. Stop closes the paper book (decisions 8, 9). Opus: ledger money.
+
+- `paper_lifecycle.close_stopped(db, allocation, now)`: a new last stage in
+  `apply_lifecycle` (it already runs for stopped allocations). For a STOPPED
+  asset allocation with a non-flat book: every spot holding sells at the bid,
+  every perp closes at the bid (long) or ask (short), from the freshest
+  `asset_quotes` row no older than `quote_max_age_seconds`. One instrument
+  with no fresh quote waits; the others close. Fees: `paper.asset_fee_micros`
+  plus `paper.regulatory_fee_micros` on stock sells. Perp P&L:
+  `paper.realized_pnl_micros`. Legs through `paper_book.append_group` with
+  ref `stop:{instrument}:{allocation}` (idempotent); `MirrorAssetFill`
+  reason `"stop_close"`, `price_basis` bid/ask, `signal_id` None.
+- Reuse, do not fork: the fill price, fee and leg code paths `mirror_asset_signal`
+  uses (extract a shared helper if needed); liquidation's loop is the model.
+- `prices._open_instruments`: include STOPPED allocations whose book is not
+  flat, or the close never gets a quote. Same for anything else that filters
+  on ACTIVE before quoting.
+- `tails.stop_by_user`: run the close inline after stopping (DB only, no
+  venue call), so a manual Stop usually shows the final result at once.
+- `snapshot_allocation`: a stopped and flat tail's equity stops moving; the
+  drawdown stop records the pre-close equity as today, then the close.
+- Read side: `allocation_view` / portfolio / tail page show "Closing" while
+  stopped and not flat (derived, no new status).
+- Methodology section ("When a tail stops") + hand-computed tests: spot at
+  bid after fees, short perp at ask, stock after hours waits then closes at
+  the open, idempotent rerun, prediction-market tail untouched, liquidation
+  then stop does not double-close.
+
+### 4. B4 scheduling. Sonnet.
+
+As section 3 B4, plus: an account whose only reason to poll is an opted-out
+address (step 5's `watch_optouts`) is never scheduled. Dormant (no `Watch`,
+no ACTIVE allocation) skips the sync entirely; a stopped tail still closing
+needs quotes, not syncs, so it does not keep the account alive. Files:
+`jobs.py`, `stream.py`, `config.py`, tests. Do not touch `watchlist.py`.
+
+### 5. B6 opt-out. Sonnet.
+
+As section 3 B6. Stopping the allocations goes through `stop_allocation` /
+`stop_by_user`, so stream S's close applies with no extra work. Reuse the
+Hyperliquid claim verification in `venues._verify_claim` (through the
+outbound limiter; a busy venue says busy). Polymarket opt-out ships even
+though Polymarket watches are off (`watch_venues`). Files: `watchlist.py`,
+`watch_pages.py`, new `watch_optout.html`, footer in `base.html`,
+`docs/security.md`. Do not touch `jobs.py`, `stream.py`, `paper*.py`.
+
+### 6. B5 trader profile. Sonnet, after S/4/5 merge.
+
+As section 3 B5. Pure `trader_profile.py` first (metrics + hand-computed
+tests), then the `/watch/{id}` section (inline SVG). Split into two agents
+if the metrics module alone is large.
+
+Overlap to watch at merge: `tails.py` (S edits `stop_by_user`; 5 only calls
+it), `docs/methodology.md` (S only), `base.html` (5 only).

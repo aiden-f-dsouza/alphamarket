@@ -53,6 +53,7 @@ from alphamarket.jobs import (
     JobContext,
     JobKind,
     JobRunner,
+    WatchCadence,
     active_jobs,
     aware,
     enqueue,
@@ -64,6 +65,7 @@ from alphamarket.jobs import (
     run_page_streams,
     sync_priority,
     utcnow,
+    watch_cadences,
 )
 from alphamarket.marketdata import open_tickers_by_venue, refresh_prices
 from alphamarket.mirror import process_allocation
@@ -368,7 +370,12 @@ def tick_syncs(session_factory: sessionmaker = SessionLocal) -> None:
     settings = get_settings()
     now = utcnow()
     with session_factory() as db:
-        n = enqueue_due_syncs(db, interval_seconds=settings.ingest_interval_seconds, now=now)
+        n = enqueue_due_syncs(
+            db,
+            interval_seconds=settings.ingest_interval_seconds,
+            now=now,
+            watch_idle_interval_seconds=settings.watch_idle_interval_seconds,
+        )
         enqueue(db, JobKind.MIRROR, now=now)
         if PAGE_RUNNERS:
             _enqueue_backfills(db, now)
@@ -378,13 +385,19 @@ def tick_syncs(session_factory: sessionmaker = SessionLocal) -> None:
 
 
 def _enqueue_backfills(db: Session, now) -> None:
-    """Paged venues get one full-history backfill until it completes."""
+    """Paged venues get one full-history backfill until it completes. A
+    watch account nobody watches or tails, or whose owner opted out, is not
+    fetched (jobs.watch_cadences)."""
     rows = db.execute(
         select(VenueAccount, AccountSchedule.backfill_done_at)
         .outerjoin(AccountSchedule, AccountSchedule.venue_account_id == VenueAccount.id)
         .where(VenueAccount.status.not_in(INACTIVE_ACCOUNT_STATUSES))
     ).all()
+    unscheduled = {WatchCadence.DORMANT, WatchCadence.OPTED_OUT}
+    cadences = watch_cadences(db) if any(a.is_watch for a, _ in rows) else {}
     for account, done_at in rows:
+        if account.is_watch and cadences.get(account.id, WatchCadence.DORMANT) in unscheduled:
+            continue
         if done_at is None and _is_paged(account):
             enqueue(db, JobKind.BACKFILL, account_id=account.id, now=now)
 
