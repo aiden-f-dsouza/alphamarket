@@ -195,4 +195,6 @@
 </div>
 {% endif %}
 
+{% if watch %}{% include "_trader_profile.html" %}{% endif %}
+
 <p class="mono small muted" style="line-height:1.6">Every number on this page is computed by Koine from venue data{% if watch %}, read from the address's public history{% elif not page.is_asset %} pulled with a read-only key{% endif %}. Nothing here was entered by {{ 'anyone' if watch else 'the creator' }}. Past performance is not a guarantee of future results{% if st %}; a {{ st.track_days }}-day record is short{% endif %}. <a href="/verification" class="text2" style="text-decoration:underline">What this page proves and what it does not.</a>{% if st and st.price_sources and "coingecko" in st.price_sources %} Some prices are provided by <a href="https://www.coingecko.com/" rel="noopener" class="text2" style="text-decoration:underline">CoinGecko</a>.{% endif %}</p>
