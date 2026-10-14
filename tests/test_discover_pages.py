@@ -110,6 +110,31 @@ def test_sort_by_roi_and_bad_params(client, session_factory, on):
     assert "first leaderboard refresh hasn't run yet" in empty.text
 
 
+def numbers(html: str) -> list[str]:
+    return re.findall(r'<span class="mono small muted">(\d+)</span>\s*<div class="stack"', html)
+
+
+def test_rows_are_numbered_by_list_position_not_venue_rank(client, session_factory, on):
+    # The venue's #1 is filtered out (zero volume, opt-out...): the list must
+    # still start at 1, and under ROI sort the venue's pnl rank means nothing.
+    rows = [
+        discover.snapshot_row(
+            LeaderboardEntry(address=addr(n), rank=n, pnl=str(1_000 - n), roi=f"0.0{n}")
+        )
+        for n in (2, 3, 5)
+    ]
+    with session_factory() as db:
+        discover.store_snapshot(db, "hyperliquid", "day", rows, datetime.now(UTC))
+        db.commit()
+    signup(client, "a@example.com")
+    assert numbers(client.get("/watch/discover").text) == ["1", "2", "3"]
+    html = client.get("/watch/discover?sort=roi").text
+    assert order(html) == [addr(5), addr(3), addr(2)] and numbers(html) == ["1", "2", "3"]
+    # The JSON API keeps the venue's own rank.
+    api = client.get("/api/watch/discover").json()
+    assert [r["rank"] for r in api["rows"]] == [2, 3, 5]
+
+
 def test_opted_out_address_not_shown(client, session_factory, on):
     snap(session_factory)
     signup(client, "a@example.com")

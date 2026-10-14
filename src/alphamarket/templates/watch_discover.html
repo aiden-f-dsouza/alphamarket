@@ -52,7 +52,7 @@
   <div class="dgrid head"><span class="label">#</span><span class="label">Address</span><span class="label r">PnL</span><span class="label r hide">ROI</span><span class="label r hide">Volume</span><span class="label r hide">Account value</span><span class="label r">&nbsp;</span></div>
   {% for r in view.rows %}
   <div class="dgrid">
-    <span class="mono small muted">{{ r.rank }}</span>
+    <span class="mono small muted">{{ loop.index }}</span>
     <div class="stack" style="gap:2px;min-width:0"><span class="mono" title="{{ r.address }}" style="font-size:14px">{{ r.short }}</span><span class="mono small muted only-m">ROI {{ m.pct(r.roi) }}</span></div>
     <span class="mono r" style="font-size:14px">{{ m.usd(r.pnl_micros / 1000000, 0) }}</span>
     <span class="mono r hide" style="font-size:14px">{{ m.pct(r.roi) }}</span>
