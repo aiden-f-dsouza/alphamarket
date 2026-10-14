@@ -191,6 +191,10 @@ class VenueProfile:
     max_copy_lag_seconds: int = 6 * 3600
     regulatory_fees: RegulatoryFees | None = None  # US_EQUITY_REGULATORY only
     asset_classes: tuple[str, ...] = ()  # "prediction" | "crypto" | "equities"
+    # ---- copy strategies step 7 (discover.py) ----
+    # LeaderboardPeriod values the venue's public leaderboard offers; () = none.
+    # MarketDataSource.fetch_leaderboards serves them.
+    leaderboard_periods: tuple[str, ...] = ()
     # ---- P7 streaming (stream.py) ----
     # None: the venue is polled only. Otherwise how its private stream feeds
     # the ledger (StreamMode); the connector's stream_source() builds it.
@@ -863,6 +867,37 @@ class MarketDataSource(_Throttled, ABC):
     def fetch_margin_tiers(self, symbol: str) -> list[MarginTier]:
         """Perp maintenance-margin tiers, ascending by lower_bound (wave2)."""
         return []
+
+    # ---- copy strategies step 7: public leaderboards (discover.py) ----
+
+    def fetch_leaderboards(
+        self, periods: "tuple[LeaderboardPeriod, ...]"
+    ) -> "dict[LeaderboardPeriod, list[LeaderboardEntry]]":
+        """The venue's public leaderboard for each period, best first. One
+        call may serve every period (Hyperliquid publishes all windows in one
+        document); a venue without a leaderboard returns {}."""
+        return {}
+
+
+class LeaderboardPeriod(StrEnum):
+    DAY = "day"
+    WEEK = "week"
+    MONTH = "month"
+    ALL = "all"
+
+
+class LeaderboardEntry(BaseModel):
+    """One row of a venue's public leaderboard: an address and the venue's own
+    figures for the period. Deliberately no display name, username, avatar or
+    any other identity field (copy_strategies_plan: never link an address to
+    an identity); a connector drops them before building this."""
+
+    address: str  # lowercased 0x address
+    rank: int  # the venue's 1-based rank in its own ordering for the period
+    pnl: str  # decimal string in the venue's quote asset (USD/USDC)
+    roi: str | None = None  # decimal fraction: "0.1234" = 12.34%
+    volume: str | None = None  # decimal string, quote asset
+    account_value: str | None = None  # decimal string, quote asset, at fetch time
 
 
 class AssetMarketData(MarketDataSource):

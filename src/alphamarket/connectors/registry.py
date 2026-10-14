@@ -105,6 +105,7 @@ PROFILES: dict[str, VenueProfile] = {
         fee_rounding_micros=1,  # usdc_size carries six decimals
         ownership=OwnershipProof.PROFILE_CODE,
         asset_classes=("prediction",),  # wave2
+        leaderboard_periods=("day", "week", "month", "all"),  # step 7 [VERIFY]
     ),
     # ---- venue-kraken ----
     "kraken": VenueProfile(
@@ -201,6 +202,7 @@ PROFILES: dict[str, VenueProfile] = {
         rate_budgets=(hyperliquid.RATE_BUDGET,),
         paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
         asset_classes=("crypto",),  # wave2
+        leaderboard_periods=("day", "week", "month", "all"),  # step 7 [VERIFY]
         # P7: `userFills` frames are the REST fill objects, ingested directly.
         stream_mode=StreamMode.FILLS,
         stream_users_per_ip=hyperliquid.WS_USERS_PER_IP,

@@ -1336,6 +1336,27 @@ class WatchOptout(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class LeaderboardSnapshot(Base):
+    """A CACHE of one venue's public leaderboard for one period, refreshed by
+    the watch_discover job (discover.py) and read by /watch/discover. Mutable:
+    each refresh replaces `rows`. Never a Koine page, never public, never
+    indexed; the venue's own figures, not Koine-computed ones. `rows` holds
+    discover.snapshot_row dicts: address + integer micros, no identity
+    fields (invariant 1 for the money, plan "never link an address to an
+    identity" for the rest)."""
+
+    __tablename__ = "leaderboard_snapshots"
+    __table_args__ = (
+        UniqueConstraint("venue", "period", name="uq_leaderboard_snapshots_venue_period"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    venue: Mapped[str] = mapped_column(String(40))
+    period: Mapped[str] = mapped_column(String(10))  # connectors.base.LeaderboardPeriod
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    rows: Mapped[list] = mapped_column(JSON, default=list)
+
+
 @event.listens_for(Session, "before_flush")
 def _enforce_append_only_watch(session: Session, flush_context, instances) -> None:
     """Same guard as _enforce_append_only for watch_optouts; the Postgres
