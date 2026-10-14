@@ -18,6 +18,7 @@
     <span class="label">Private watchlist · {{ rows|length }} of {{ limit }} addresses</span>
     <h1 style="font-size:44px">Watch a public trader</h1>
     <p class="text2" style="font-size:16px;line-height:1.6;max-width:640px">Paste a public {% for v, label in venues %}{{ label }}{{ " or " if not loop.last }}{% endfor %} address. Koine reads its public trades, computes the same statistics it computes for verified creators, and lets you paper-tail it. <strong>Only you see it.</strong> It never appears on the marketplace, on any public page or in the API, and Koine never tries to find out who is behind an address.</p>
+    {% if discover_on %}<a href="/watch/discover" class="small text2" style="text-decoration:underline">Discover addresses from the venue leaderboards</a>{% endif %}
     <span class="small muted" style="display:inline-flex;align-items:center;gap:6px">{{ m.icon("lock", 12, "var(--muted)") }}Not a verified Koine record: the trader has not connected or claimed the address.</span>
   </div>
   <div class="card"><div class="body" style="padding:20px 24px;gap:14px">
@@ -63,7 +64,7 @@
   {% endfor %}
 </div>
 {% else %}
-<div class="card plain"><div class="body"><span class="muted">Nothing on your watchlist yet. Leaderboard addresses are a good place to start: paste one above.</span></div></div>
+<div class="card plain"><div class="body"><span class="muted">Nothing on your watchlist yet. {% if discover_on %}<a href="/watch/discover" style="text-decoration:underline">Discover leaderboard addresses</a> to start, or paste one above.{% else %}Leaderboard addresses are a good place to start: paste one above.{% endif %}</span></div></div>
 {% endif %}
 
 <p class="mono small muted" style="line-height:1.6">Numbers come from the venue's public data for the address, computed the way <a href="/verification" class="text2" style="text-decoration:underline">verified records</a> are, from the moment you first add it plus the history the venue returns.</p>

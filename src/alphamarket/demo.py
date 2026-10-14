@@ -1460,6 +1460,109 @@ def watch_list() -> list[dict]:
     return rows
 
 
+# ---- demo: discover sample ----
+# /watch/discover for a visitor in the static demo: invented leaderboard rows
+# for both watchable venues (prod opens only Hyperliquid; the demo shows the
+# full capability). The rows are built through `discover.snapshot_row` so the
+# money path is the real one. The first sample watch address shows as being
+# watched, one row as a verified Koine strategy; Add is disabled in the template.
+_DISCOVER_SUFFIXES = [
+    "c0ffee",
+    "d15ea5",
+    "facade",
+    "decade",
+    "feeded",
+    "b00b1e",
+    "ba5eba",
+    "bedded",
+    "f1a7ed",
+    "dec0de",
+    "accede",
+    "ab1e5e",
+    "5eeded",
+    "c0def0",
+    "d0decc",
+]
+_DISCOVER_SCALE = {"day": 0.012, "week": 0.06, "month": 0.22, "all": 1.0}
+_DISCOVER_ROWS = 15
+
+
+def _discover_address(venue: str, i: int) -> str:
+    prefix = f"{(0x2000 + i * 0x0B3D + (7 if venue == 'polymarket' else 0)) % 0x10000:04x}"
+    return "0x" + prefix + "0" * 30 + _DISCOVER_SUFFIXES[i % len(_DISCOVER_SUFFIXES)]
+
+
+def discover_sample(venue: str | None, period: str | None, sort: str):
+    """The sample `discover.DiscoverView` (same bad-param fallbacks as the real one)."""
+    from alphamarket import discover
+    from alphamarket.connectors.base import LeaderboardEntry
+
+    venues = ("hyperliquid", "polymarket")
+    periods = tuple(_DISCOVER_SCALE)
+    venue = venue if venue in venues else venues[0]
+    period = period if period in periods else periods[0]
+    sort = sort if sort in discover.SORTS else "pnl"
+    rng = random.Random(f"discover-{venue}-{period}")
+    base = _DISCOVER_SCALE[period] * (1.0 if venue == "hyperliquid" else 0.4)
+    stored = []
+    for i in range(_DISCOVER_ROWS):
+        pnl = round(2_400_000 * base * (0.86**i) * rng.uniform(0.85, 1.15), 2)
+        value = round(rng.uniform(0.4, 6.0) * 1_000_000, 2)
+        roi = round(pnl / value * rng.uniform(0.5, 1.5), 4)
+        stored.append(
+            discover.snapshot_row(
+                LeaderboardEntry(
+                    address=_discover_address(venue, i),
+                    rank=i + 1,
+                    pnl=f"{pnl:.2f}",
+                    roi=f"{roi:.4f}",
+                    volume=f"{round(value * rng.uniform(3, 40), 2):.2f}",
+                    account_value=f"{value:.2f}",
+                )
+            )
+        )
+    stored.sort(key=lambda r: r["pnl_micros"], reverse=True)  # the venue ranks by PnL
+    for i, r in enumerate(stored):
+        r["rank"] = i + 1
+    if sort == "roi":
+        stored.sort(key=lambda r: Decimal(r["roi"]), reverse=True)
+    watched = _WATCH_SAMPLES[0]["address"]
+    rows = []
+    for r in stored:
+        state, slug = discover.RowState.ADD, None
+        if venue == "hyperliquid" and r["rank"] == 3:
+            r = {**r, "address": watched}
+            state = discover.RowState.WATCHING
+        elif venue == "hyperliquid" and r["rank"] == 6:
+            state, slug = discover.RowState.LISTED, WATCH_BASE_SLUG
+        rows.append(
+            discover.DiscoverRow(
+                venue=venue,
+                address=r["address"],
+                short=_watch_short(r["address"]),
+                rank=r["rank"],
+                pnl_micros=r["pnl_micros"],
+                roi=float(r["roi"]),
+                volume_micros=r["volume_micros"],
+                account_value_micros=r["account_value_micros"],
+                state=state,
+                watch_strategy_id=1 if state == discover.RowState.WATCHING else None,
+                listed_slug=slug,
+            )
+        )
+    return discover.DiscoverView(
+        venue=venue,
+        period=period,
+        sort=sort,
+        venues=venues,
+        periods=periods,
+        fetched_at=datetime.now(UTC) - timedelta(minutes=23),
+        rows=rows,
+        watch_count=len(_WATCH_SAMPLES),
+        watch_max=get_settings().watch_max_per_user,
+    )
+
+
 # The opt-out walkthrough (watch_pages, DEMO_MODE only): the same sample
 # address as /watch/sample-1, an invented code and invented counts. Nothing is
 # computed from a request and nothing is stored.

@@ -127,6 +127,13 @@ def test_small_seed_through_the_real_pipeline(demo_db, demo_on):
         investor = db.scalar(select(User).where(User.email == f"investor@{seed_demo.EMAIL_DOMAIN}"))
         assert investor.is_demo
 
+        # Discover: one synthetic Hyperliquid snapshot per period.
+        from alphamarket.models import LeaderboardSnapshot
+
+        assert {s.period for s in db.scalars(select(LeaderboardSnapshot))} == set(
+            seed_demo.LEADERBOARD_PERIODS
+        )
+
         # The seeded watch: owned by a demo system user, stats from the real
         # pipeline, on the investor's watchlist with an active paper tail.
         owner = db.get(User, watched[0].user_id)

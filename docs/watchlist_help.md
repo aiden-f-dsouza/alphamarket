@@ -128,3 +128,29 @@ that far behind. A trade opened and closed faster than that cannot be copied.
 
 Neither figure measures Koine's own observation delay beyond the sync
 interval, or whether the venue would have filled a copy at the same price.
+
+## Discover addresses
+
+`/watch/discover` (when it is switched on) lists addresses from a venue's own
+public leaderboard so you have somewhere to start. It is private, like the
+rest of the watchlist: only you see it.
+
+**Where the numbers come from.** Profit and loss, ROI, volume and account
+value are the venue's own figures for the period you pick (day, week, month
+or all time). They are not Koine-verified and Koine does not recompute them.
+Koine's own record of an address starts when you add it: the same statistics
+verified creators get, computed from the address's public trades.
+
+**How fresh.** A background job copies each leaderboard about once an hour
+(the setting `watch_discover_refresh_minutes`; the page says how long ago it
+last ran). Opening the page never calls the venue, so it can lag the venue's
+own board by up to that long. Very small accounts are left out.
+
+**Why only addresses.** The venue's display names and avatars are never
+fetched into Koine, shown or stored, and Koine does not try to find out who is
+behind an address. A leaderboard rank is also not a forecast: past results
+say little about what an address will do next.
+
+**Opting out.** The owner of an address can ask not to be tracked at
+`/watch/optout`. An opted-out address disappears from this page and from
+everyone's watchlist.
