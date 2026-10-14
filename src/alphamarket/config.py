@@ -210,6 +210,12 @@ class Settings(BaseSettings):
     # ACTIVE tail it syncs every ingest_interval_seconds; with no watcher and
     # no tail it is not polled at all (jobs.enqueue_due_syncs).
     watch_idle_interval_seconds: int = 3600
+    # --- r2 follow-ups ---
+    # A stopped tail still "Closing" (no fresh quote for a position) this many
+    # days after its stop is logged nightly, naming the instrument
+    # (housekeeping.report_stuck_closes). A stock over a long weekend waits
+    # about 3.5 days, so a week means the quotes really stopped.
+    stop_close_alert_days: int = 7
 
 
 @lru_cache

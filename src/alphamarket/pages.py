@@ -56,9 +56,11 @@ from alphamarket.models import (
     StrategyStatus,
     User,
     VenueAccount,
+    utcnow,
 )
 from alphamarket.money import format_atoms
 from alphamarket.numfmt import fmt_num
+from alphamarket.paper_lifecycle import closing_waits
 from alphamarket.portfolio import portfolio_summary
 from alphamarket.public import (
     ASSET_CLASS_LABELS,
@@ -730,6 +732,7 @@ def _tail_ctx(
 ) -> dict:
     page = page_data(db, strategy)
     venue = page["venue"]
+    closing = closing_allocation(db, user.id, strategy.id)
     return {
         "real": True,
         "strategy": page,
@@ -745,8 +748,22 @@ def _tail_ctx(
         "own": strategy.user_id == user.id,
         "active": active_allocation(db, user.id, strategy.id) is not None,
         # A stopped tail of this strategy still selling its positions.
-        "closing": closing_allocation(db, user.id, strategy.id) is not None,
+        "closing": closing is not None,
+        # Which of its positions wait for a fresh quote (none: closing next pass).
+        "closing_waits": _waits(db, closing) if closing is not None else [],
     }
+
+
+def _waits(db: Session, allocation: Allocation) -> list[dict]:
+    """A closing tail's positions that wait for a fresh quote, for the notice."""
+    return [
+        {
+            "label": w.label,
+            "side": w.side,
+            "last": w.last_quote_at.strftime("%Y-%m-%d %H:%M UTC") if w.last_quote_at else None,
+        }
+        for w in closing_waits(db, allocation, utcnow())
+    ]
 
 
 def _render_tail(request: Request, t: dict, user: User, status_code: int = 200) -> HTMLResponse:

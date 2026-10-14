@@ -299,12 +299,26 @@ stream S of section 8 are done.
 
 Follow-ups from round 2:
 
-- [ ] `stream_max_accounts` (200) never evicts: if watches fill it, a new
-      creator waits. The per-IP Hyperliquid cap (10) binds first today
-- [ ] Stopped tails are quoted for 30 days (`prices.STOPPED_QUOTE_WINDOW`);
-      one still holding something after that stays "Closing"
-- [ ] A split that arrives after a stop close but dated before it leaves
-      the tail "Closing" (logged, not handled)
+- [x] `stream_max_accounts` (200) never evicts: if watches fill it, a new
+      creator waits. The per-IP Hyperliquid cap (10) binds first today.
+      Done (`wip/r2-followups`): a full process gives up its worst-ranked
+      watch (one per pass, the per-IP rule's shape, shared `_evict_worst`)
+      for a creator no process streams; never creator for creator
+      (`tests/test_stream.py`, "per-process cap").
+- [x] Stopped tails are quoted for 30 days (`prices.STOPPED_QUOTE_WINDOW`);
+      one still holding something after that stays "Closing". Done: a
+      stopped tail is quoted until flat at any age; the window now only
+      bounds the scan cost (past it, a tail whose book checkpoint is flat
+      and current is skipped). The tail page names each position waiting
+      and its last quote; housekeeping logs one still closing after
+      `stop_close_alert_days` (7). No `alerts` hook: it is security-only.
+- [x] A split that arrives after a stop close but dated before it leaves
+      the tail "Closing" (logged, not handled). Done: the split's delta
+      closes at the stop close's own price and time (ref
+      `stop:<inst>:<alloc>:ca:<id>`), cash and fee as the difference to one
+      close of the whole, so the book equals "split, then close"; reverse
+      splits buy back and refund fee (`paper_lifecycle.correct_late_splits`,
+      methodology worked example, `tests/test_stop_close_followups.py`).
 
 **Step 6 (2026-10-11, branch `wip/trader-profile`):** done. Pure
 `trader_profile.py` (FIFO round trips, holding buckets, weekday x hour

@@ -643,11 +643,13 @@ def _held(db, alloc, inst, atoms, when, ref):
     db.flush()
 
 
-def test_open_instruments_include_a_stopped_tail_until_it_is_flat(db):
+def test_open_instruments_include_a_stopped_tail_until_it_is_flat_at_any_age(db):
     now = at(D, 14)
+    window = prices.STOPPED_QUOTE_WINDOW
     btc = _instrument(db, "kraken", "XXBTZUSD", "BTC")
     eth = _instrument(db, "kraken", "XETHZUSD", "ETH")
     sol = _instrument(db, "kraken", "SOLUSD", "SOL")
+    ada = _instrument(db, "kraken", "ADAUSD", "ADA")
     closing = _allocation(db, "kraken", "1000", "-closing")
     _held(db, closing, btc, 1_000_000, at(D), "sig:1")
     flat = _allocation(db, "kraken", "1000", "-flat")
@@ -655,17 +657,41 @@ def test_open_instruments_include_a_stopped_tail_until_it_is_flat(db):
     _held(db, flat, eth, -5_000_000, at(D, 13), "stop:x")
     old = _allocation(db, "kraken", "1000", "-old")
     _held(db, old, sol, 7, at(D) - timedelta(days=40), "sig:1")
+    old_flat = _allocation(db, "kraken", "1000", "-old-flat")
+    _held(db, old_flat, ada, 9, at(D) - timedelta(days=50), "sig:1")
+    _held(db, old_flat, ada, -9, at(D) - timedelta(days=45), "stop:z")
     _stop(db, closing, now - timedelta(days=1))
     _stop(db, flat, at(D, 13))
-    _stop(db, old, now - prices.STOPPED_QUOTE_WINDOW - timedelta(seconds=1))
+    _stop(db, old, now - window - timedelta(seconds=1))
+    _stop(db, old_flat, now - timedelta(days=45))
+    # The mirror pass writes every asset book's checkpoint (a cache).
+    for alloc in (old, old_flat):
+        assert paper_book.save_checkpoint(db, alloc)
+    db.commit()
 
-    # The closing tail's BTC is quoted; the flat one drops out; one stopped
-    # longer than the window is not scanned at all.
-    assert [i.id for i in prices._open_instruments(db, now)] == [btc.id]
-    # Once its close is booked, the stopped tail is flat and drops out too.
+    # The closing tail's BTC is quoted, and so is the SOL of the tail stopped
+    # longer than the window ago: still holding, so still closing. Flat tails
+    # drop out; the old flat one is not even summed (its checkpoint is flat).
+    assert [i.id for i in prices._open_instruments(db, now)] == [btc.id, sol.id]
+    assert prices._stopped_maybe_open(db, now - window) == {old.id}
+    assert prices.closing_allocation_ids(db, now) == {closing.id, old.id}
+    # A row after the old flat tail's checkpoint (a late split, say) puts it
+    # back in the sum until the next pass folds it: the ledger decides.
+    _held(db, old_flat, ada, 9, at(D) - timedelta(days=48), "ca:1")
+    db.commit()
+    assert prices._stopped_maybe_open(db, now - window) == {old.id, old_flat.id}
+    assert [i.id for i in prices._open_instruments(db, now)] == [btc.id, sol.id, ada.id]
+    # A tail with no checkpoint at all is summed too (the cache only prunes).
+    db.delete(db.get(PaperBookCheckpoint, old.id))
+    db.commit()
+    assert old.id in prices._stopped_maybe_open(db, now - window)
+    # Once their closes are booked, the stopped tails are flat and drop out.
     _held(db, closing, btc, -1_000_000, at(D, 13, 30), "stop:y")
+    _held(db, old, sol, -7, now - window, "stop:w")
+    _held(db, old_flat, ada, -9, at(D) - timedelta(days=45), "stop:z:ca:1")
     db.commit()
     assert prices._open_instruments(db, now) == []
+    assert prices.closing_allocation_ids(db, now) == set()
 
 
 def test_fresh_side_is_the_freshest_row_with_that_side_never_stale(db):

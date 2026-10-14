@@ -1157,7 +1157,12 @@ A last trade or a mid is never used for a close, and neither is an older
 quote. If there is none (a stock after the market closed, or market data
 down), the tail is already stopped and shows "Closing": that position closes
 at the first fresh quote, on a later pass, while positions that do have a
-quote close at once. Nothing is ever closed at a stale price.
+quote close at once. Nothing is ever closed at a stale price. A closing
+tail keeps asking for quotes for as long as it holds something, however
+long ago it stopped, and its tail page names each position still waiting
+and when it was last quoted. One still waiting a week after the stop (an
+instrument the venue stopped quoting, say) is flagged to Koine to look at;
+it is still never closed at an old price.
 
 **Fees and P&L.** Exactly as for a copied sale, with the same formulas
 ("Paper copying v2: sizing, fill price, fees"); the close is never skipped
@@ -1197,6 +1202,38 @@ shows "Closing" overnight. The next morning's first quote has the bid 81.25:
 proceeds 1,625.00; at an SEC rate of $27.80 per million the SEC fee is
 1,625 x 27.80 / 1,000,000 = 0.045175, up to 0.05, and the FINRA TAF 20 x
 0.000166 = 0.00332, up to 0.01. Cash 8,400 + 1,625 - 0.06 = 10,024.94.
+
+**A split Koine hears of after the close.** A stock split takes effect at
+the open of its ex-date, so a close after that date takes a post-split
+quote. If the split's data reaches Koine only after the close, the close
+sold the pre-split number of shares at that post-split price, and the
+split, booked on the shares held before its ex-date, puts the difference
+back in the book. Those shares are closed at the stop close's own price
+and time (the quote that was fresh then, never a later or an older one),
+and the cash and fee are corrected so that the whole stop close equals
+one sale of the right number of shares:
+
+```
+correction cash = proceeds(shares after split) - proceeds already booked
+correction fee  = fee(shares after split) - fees already booked
+```
+
+A reverse split works the other way: the extra shares the close sold are
+bought back at the same price, and the fee they paid is refunded. Fees do
+not simply add up share by share (each fee is rounded up to the cent per
+sale, and FINRA's TAF is capped), which is why the correction is the
+difference, not a second sale.
+
+**Worked example (late split).** 20 shares bought at 80, cash 8,400. A 2:1
+split goes ex on Friday; the tail stops Monday with the bid at 40.60, and
+the split's data arrives Tuesday. Monday's close sold 20 at 40.60: proceeds
+812.00, SEC fee 812 x 27.80 / 1,000,000 = 0.0225736, up to 0.03, TAF 20 x
+0.000166 = 0.00332, up to 0.01; cash 8,400 + 812 - 0.04 = 9,211.96. Split,
+then closed, the tail would have sold 40 at 40.60: proceeds 1,624.00, SEC
+0.0451472 up to 0.05, TAF 0.00664 up to 0.01, cash 8,400 + 1,624 - 0.06 =
+10,023.94. The correction sells the 20 split shares at 40.60, dated Monday:
+cash 1,624.00 - 812.00 = 812.00, fee 0.06 - 0.04 = 0.02 (a separate sale
+of 20 would have paid 0.04). Cash 9,211.96 + 812 - 0.02 = 10,023.94.
 
 <!-- wave2:p8-pages -->
 
