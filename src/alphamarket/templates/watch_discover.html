@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Discover addresses · Koine{% endblock %}
+{% block nav_active %}watch{% endblock %}
+{% block style %}
+  .dgrid { display:grid; grid-template-columns:44px minmax(0,1fr) 120px 80px 120px 120px 150px; gap:16px; align-items:center; padding:12px 20px; border-bottom:1px solid var(--line); }
+  .dgrid:last-child { border-bottom:0; }
+  .dgrid.head { padding-top:10px; padding-bottom:10px; }
+  .dgrid .r { text-align:right; }
+  .dgrid .act { display:flex; justify-content:flex-end; }
+  .dgrid .act form { margin:0; }
+  .only-m { display:none; }
+  .filters { display:flex; flex-wrap:wrap; gap:16px 28px; align-items:center; }
+  .filters .seg { flex-wrap:wrap; }
+  @media (max-width:1000px) {
+    .dgrid { grid-template-columns:20px minmax(0,1fr) 68px 72px; padding:12px 12px; gap:8px; }
+    .dgrid .mono { white-space:nowrap; } .dgrid .btn.sm { padding:0 10px; } .dgrid .act a { font-size:12px; line-height:1.3; }
+    .dgrid .hide { display:none; }
+    .only-m { display:block; }
+  }
+{% endblock %}
+{% macro tab_url(venue, period, sort) -%}/watch/discover?venue={{ venue }}&amp;period={{ period }}&amp;sort={{ sort }}{%- endmacro %}
+{% macro period_name(p) -%}{{ {"day": "Day", "week": "Week", "month": "Month", "all": "All time"}.get(p, p) }}{%- endmacro %}
+{% block content %}
+{% if notice %}<div class="notice" role="status" style="border-color:var(--brand);color:var(--text)">{{ notice }}</div>{% endif %}
+{% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+
+<div class="stack" style="gap:14px">
+  <span class="label">Private · <a href="/watch" class="text2" style="text-decoration:underline">{{ view.watch_count }} of {{ view.watch_max }} on your watchlist</a></span>
+  <h1 style="font-size:44px">Discover addresses</h1>
+  <p class="text2" style="font-size:16px;line-height:1.6;max-width:680px">Public leaderboard addresses to start your watchlist from. Pick one and Koine reads its public trades and builds a record you can check yourself. <strong>Only you see this page.</strong> Addresses only, never names: Koine does not look up who is behind one.</p>
+</div>
+
+{% if view.venue is none %}
+<div class="card plain"><div class="body"><span class="muted">No venue is open for watching right now, so there is nothing to browse.</span></div></div>
+{% else %}
+<div class="filters">
+  {% if view.venues|length > 1 %}
+  <nav class="seg" aria-label="Venue">{% for v in view.venues %}<a href="{{ tab_url(v, view.period, view.sort) }}" class="{{ 'on' if v == view.venue }}">{{ venue_labels[v] }}</a>{% endfor %}</nav>
+  {% endif %}
+  <nav class="seg" aria-label="Period">{% for p in view.periods %}<a href="{{ tab_url(view.venue, p, view.sort) }}" class="{{ 'on' if p == view.period }}">{{ period_name(p) }}</a>{% endfor %}</nav>
+  <nav class="seg" aria-label="Sort by">{% for s, name in [("pnl", "PnL"), ("roi", "ROI")] %}<a href="{{ tab_url(view.venue, view.period, s) }}" class="{{ 'on' if s == view.sort }}">{{ name }}</a>{% endfor %}</nav>
+</div>
+
+<p class="small text2" style="line-height:1.6;max-width:760px">These are {{ venue_labels[view.venue] }}'s own leaderboard figures for the period, not Koine-verified. Koine starts its own record of an address when you add it.
+  {% if updated %}<span class="mono muted">Updated {{ updated }}.</span>{% endif %}</p>
+
+{% if view.fetched_at is none or not view.rows %}
+<div class="card plain"><div class="body"><span class="muted">{% if view.fetched_at is none %}The first leaderboard refresh hasn't run yet. Check back soon.{% else %}No addresses to show for this period.{% endif %}</span></div></div>
+{% else %}
+<div class="card">
+  <div class="dgrid head"><span class="label">#</span><span class="label">Address</span><span class="label r">PnL</span><span class="label r hide">ROI</span><span class="label r hide">Volume</span><span class="label r hide">Account value</span><span class="label r">&nbsp;</span></div>
+  {% for r in view.rows %}
+  <div class="dgrid">
+    <span class="mono small muted">{{ r.rank }}</span>
+    <div class="stack" style="gap:2px;min-width:0"><span class="mono" title="{{ r.address }}" style="font-size:14px">{{ r.short }}</span><span class="mono small muted only-m">ROI {{ m.pct(r.roi) }}</span></div>
+    <span class="mono r" style="font-size:14px">{{ m.usd(r.pnl_micros / 1000000, 0) }}</span>
+    <span class="mono r hide" style="font-size:14px">{{ m.pct(r.roi) }}</span>
+    <span class="mono r hide" style="font-size:14px">{% if r.volume_micros is not none %}{{ m.usd(r.volume_micros / 1000000, 0) }}{% endif %}</span>
+    <span class="mono r hide" style="font-size:14px">{% if r.account_value_micros is not none %}{{ m.usd(r.account_value_micros / 1000000, 0) }}{% endif %}</span>
+    <div class="act">
+      {% if r.state == "watching" %}
+      <a href="{{ '/watch/sample-1' if sample else '/watch/' ~ r.watch_strategy_id }}" class="small text2" style="text-decoration:underline;text-align:right">On your watchlist</a>
+      {% elif r.state == "listed" %}
+      <a href="/s/{{ r.listed_slug }}" class="small text2" style="text-decoration:underline;text-align:right">Verified on Koine</a>
+      {% elif r.state == "full" %}
+      <button class="btn sm" type="button" disabled>Watchlist full</button>
+      {% elif sample %}
+      <button class="btn sm" type="button" disabled title="Adding addresses is off in the demo">{{ m.icon("plus", 12) }}Add</button>
+      {% else %}
+      <form method="post" action="/watch">
+        <input type="hidden" name="venue" value="{{ r.venue }}"><input type="hidden" name="address" value="{{ r.address }}"><input type="hidden" name="label" value="">
+        <input type="hidden" name="return_to" value="discover"><input type="hidden" name="d_venue" value="{{ view.venue }}"><input type="hidden" name="d_period" value="{{ view.period }}"><input type="hidden" name="d_sort" value="{{ view.sort }}">
+        <button class="btn sm secondary" type="submit">{{ m.icon("plus", 12) }}Add</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endif %}
+
+<p class="mono small muted" style="line-height:1.6">Addresses only: the venue's display names are never shown or stored. If one of these is yours and you would rather not be tracked, <a href="/watch/optout" class="text2" style="text-decoration:underline">opt it out</a>. <a href="/watch/help" class="text2" style="text-decoration:underline">How this page works</a>.</p>
+{% endblock %}

@@ -438,6 +438,50 @@ def list_watches(db: Session = Depends(get_db), user: User = Depends(current_use
     }
 
 
+@router.get("/discover")
+def discover_watches(
+    venue: str = "",
+    period: str = "",
+    sort: str = "pnl",
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """The /watch/discover view as JSON: the venue's own leaderboard figures for
+    the period (not Koine-verified), with the user's state per address."""
+    from alphamarket import discover  # discover imports this module
+
+    if not discover.enabled():
+        raise HTTPException(status_code=404)
+    view = discover.discover_view(db, user, venue, period, sort)
+    rows = []
+    for r in view.rows:
+        row = {
+            "address": r.address,
+            "rank": r.rank,
+            "pnl_micros": r.pnl_micros,
+            "roi": r.roi,
+            "volume_micros": r.volume_micros,
+            "account_value_micros": r.account_value_micros,
+            "state": r.state,
+        }
+        if r.watch_strategy_id is not None:
+            row["watch_strategy_id"] = r.watch_strategy_id
+        if r.listed_slug is not None:
+            row["listed_slug"] = r.listed_slug
+        rows.append(row)
+    return {
+        "venue": view.venue,
+        "period": view.period,
+        "sort": view.sort,
+        "venues": list(view.venues),
+        "periods": list(view.periods),
+        "fetched_at": view.fetched_at.isoformat() if view.fetched_at else None,
+        "watch_count": view.watch_count,
+        "watch_max": view.watch_max,
+        "rows": rows,
+    }
+
+
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,

@@ -14,6 +14,7 @@ Rules:
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
+from decimal import ROUND_HALF_EVEN, Decimal
 from enum import StrEnum
 from typing import Protocol
 
@@ -191,6 +192,10 @@ class VenueProfile:
     max_copy_lag_seconds: int = 6 * 3600
     regulatory_fees: RegulatoryFees | None = None  # US_EQUITY_REGULATORY only
     asset_classes: tuple[str, ...] = ()  # "prediction" | "crypto" | "equities"
+    # ---- copy strategies step 7 (discover.py) ----
+    # LeaderboardPeriod values the venue's public leaderboard offers; () = none.
+    # MarketDataSource.fetch_leaderboards serves them.
+    leaderboard_periods: tuple[str, ...] = ()
     # ---- P7 streaming (stream.py) ----
     # None: the venue is polled only. Otherwise how its private stream feeds
     # the ledger (StreamMode); the connector's stream_source() builds it.
@@ -863,6 +868,54 @@ class MarketDataSource(_Throttled, ABC):
     def fetch_margin_tiers(self, symbol: str) -> list[MarginTier]:
         """Perp maintenance-margin tiers, ascending by lower_bound (wave2)."""
         return []
+
+    # ---- copy strategies step 7: public leaderboards (discover.py) ----
+
+    def fetch_leaderboards(
+        self, periods: "tuple[LeaderboardPeriod, ...]"
+    ) -> "dict[LeaderboardPeriod, list[LeaderboardEntry]]":
+        """The venue's public leaderboard for each period, best first. One
+        call may serve every period (Hyperliquid publishes all windows in one
+        document); a venue without a leaderboard returns {}."""
+        return {}
+
+
+class LeaderboardPeriod(StrEnum):
+    DAY = "day"
+    WEEK = "week"
+    MONTH = "month"
+    ALL = "all"
+
+
+class LeaderboardEntry(BaseModel):
+    """One row of a venue's public leaderboard: an address and the venue's own
+    figures for the period. Deliberately no display name, username, avatar or
+    any other identity field (copy_strategies_plan: never link an address to
+    an identity); a connector drops them before building this."""
+
+    address: str  # lowercased 0x address
+    rank: int  # the venue's 1-based rank in its own ordering for the period
+    pnl: str  # decimal string in the venue's quote asset (USD/USDC)
+    roi: str | None = None  # decimal fraction: "0.1234" = 12.34%
+    volume: str | None = None  # decimal string, quote asset
+    account_value: str | None = None  # decimal string, quote asset, at fetch time
+
+
+LEADERBOARD_QUANTUM = Decimal("0.000001")
+
+
+def leaderboard_figure(value: str | Decimal) -> str:
+    """A venue's leaderboard money figure (pnl, volume, account value) as a
+    plain decimal string of at most 6 dp, rounded half-even.
+
+    These are DISPLAY figures the venue computed and Koine labels as the
+    venue's own, never ledger money: Hyperliquid prints up to 10 dp and
+    Polymarket sends floats, and money.to_micros rightly refuses anything
+    finer than 1e-6. So connectors round here, once, explicitly, and
+    discover.snapshot_row stores the result as integer micros (invariant 1).
+    A ledger value must never come through this function."""
+    rounded = Decimal(value).quantize(LEADERBOARD_QUANTUM, rounding=ROUND_HALF_EVEN)
+    return format(rounded, "f")
 
 
 class AssetMarketData(MarketDataSource):

@@ -2324,6 +2324,39 @@ def migrate(url: str) -> None:
         settings.database_url = original
 
 
+LEADERBOARD_PERIODS = ("day", "week", "month", "all")
+
+
+def seed_leaderboards(db, fetched_at: datetime) -> None:
+    """Synthetic Hyperliquid leaderboard snapshots for /watch/discover (it needs
+    WATCH_DISCOVER_ENABLED=true to show). Invented addresses ("c0de" repeated,
+    never a real person's), plus the seeded watched address so the investor sees
+    one row on their watchlist. Written through the real money path."""
+    from alphamarket import discover
+    from alphamarket.connectors.base import LeaderboardEntry
+
+    scale = {"day": 0.012, "week": 0.06, "month": 0.22, "all": 1.0}
+    for period in LEADERBOARD_PERIODS:
+        rows = []
+        for i in range(24):
+            address = WATCH_ADDRESS if i == 2 else "0x" + f"c0de{i:04x}" + "c0de" * 8
+            pnl = 3_100_000 * scale[period] * (0.88**i)
+            value = 1_500_000 * (0.9**i) + 40_000
+            rows.append(
+                discover.snapshot_row(
+                    LeaderboardEntry(
+                        address=address,
+                        rank=i + 1,
+                        pnl=f"{pnl:.2f}",
+                        roi=f"{pnl / value * (1 + (i % 5) * 0.15):.4f}",
+                        volume=f"{value * (6 + i % 7):.2f}",
+                        account_value=f"{value:.2f}",
+                    )
+                )
+            )
+        discover.store_snapshot(db, "hyperliquid", period, rows, fetched_at)
+
+
 def seed(
     sf: sessionmaker,
     *,
@@ -2355,6 +2388,9 @@ def seed(
         summary = Sim(sf, world, traveller, password, log).run()
     from alphamarket import public
 
+    with sf() as db:
+        seed_leaderboards(db, end)
+        db.commit()
     with sf() as db:
         summary.strategies = public.list_visible(db, include_incubating=True)
     return summary

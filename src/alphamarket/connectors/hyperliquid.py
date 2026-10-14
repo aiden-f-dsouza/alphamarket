@@ -44,9 +44,13 @@ fields print 6, spot and transfers print up to 8). A value finer than that
 
 from __future__ import annotations
 
+import bisect
 import hashlib
+import heapq
 import json
+import logging
 import re
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
@@ -64,6 +68,8 @@ from alphamarket.connectors.base import (
     DailyClose,
     FundingRate,
     InstrumentType,
+    LeaderboardEntry,
+    LeaderboardPeriod,
     LegKind,
     MarginTier,
     NormalizedAssetFill,
@@ -83,8 +89,11 @@ from alphamarket.connectors.base import (
     StreamingSource,
     StreamProtocolError,
     StreamUnavailable,
+    leaderboard_figure,
 )
-from alphamarket.money import MAX_DECIMALS, MICROS_PER_UNIT, to_atoms
+from alphamarket.money import MAX_DECIMALS, MICROS_PER_UNIT, to_atoms, to_micros
+
+logger = logging.getLogger(__name__)
 
 INFO_URLS = {
     "prod": "https://api.hyperliquid.xyz/info",
@@ -99,6 +108,27 @@ WS_URLS = {
 # Docs "Rate limits and user limits" (checked 2026-09-26): "at most 10 unique
 # users" across user-specific websocket subscriptions, per IP.
 WS_USERS_PER_IP = 10
+# Copy strategies step 7 (discover.py): the public leaderboard that the app's
+# /leaderboard page loads. VERIFIED 2026-10-14: the app bundle fetches
+# `https://stats-data.hyperliquid.xyz/${chain}/leaderboard` (chain "Mainnet"
+# or "Testnet"). A static JSON document on S3 behind CloudFront, regenerated
+# every few minutes, ~39 MB uncompressed (no gzip offered), ~47,000 rows, all
+# windows in one document. The API docs do not list it (they name stats-data
+# only for builder_fills); docs/venues/hyperliquid.md "Leaderboard".
+LEADERBOARD_URLS = {
+    "prod": "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard",
+    "testnet": "https://stats-data.hyperliquid.xyz/Testnet/leaderboard",
+}
+# windowPerformances names -> LeaderboardPeriod.
+LEADERBOARD_WINDOWS = {
+    "day": LeaderboardPeriod.DAY,
+    "week": LeaderboardPeriod.WEEK,
+    "month": LeaderboardPeriod.MONTH,
+    "allTime": LeaderboardPeriod.ALL,
+}
+# Rows fetch_leaderboards returns per period and ordering when no caller says
+# (see HyperliquidMarketData.fetch_leaderboards "Bounded output").
+LEADERBOARD_KEEP = 1000
 
 FILLS_PAGE_LIMIT = 2000  # userFillsByTime: "at most 2000 fills per response"
 TIME_RANGE_PAGE_LIMIT = 500  # userFunding / ledger updates / fundingHistory
@@ -126,6 +156,13 @@ RATE_BUDGET = RateBudget(
         ("spotClearinghouseState", 2),
         ("exchangeStatus", 2),
         ("userRole", 60),
+        # The leaderboard document lives on stats-data (S3/CloudFront), not on
+        # the info API this budget is documented for, so no published limit
+        # covers it. It is charged as one ordinary info request (the default
+        # 20, written out so it is a decision, not an accident) with no
+        # per-item weight: once an hour it costs the shared IP budget almost
+        # nothing, and it still goes through the breaker and the 429 path.
+        ("leaderboard", 20),
     ),
     default_cost=20,
 )
@@ -1034,6 +1071,111 @@ def spot_instrument(pair: SpotPair) -> NormalizedInstrument:
     )
 
 
+# ---- public leaderboard (copy strategies step 7) -------------------------------------
+
+_LEADERBOARD_HEAD = re.compile(r'\s*\{\s*"leaderboardRows"\s*:\s*\[')
+_HEAD_PROBE_CHARS = 4096  # the head is ~20 chars; past this the shape changed
+
+
+def iter_leaderboard_rows(chunks: Iterable[str]) -> Iterator[dict[str, Any]]:
+    """Each row of `{"leaderboardRows": [{...}, ...]}`, decoded one at a time
+    from streamed text. The document is ~39 MB: json.loads on all of it
+    peaks around 300 MB, more than a 512 MB worker VM can spare, while this
+    holds one chunk and one row at a time. A document of any other shape
+    (keys reordered, wrapped) falls back to a full parse rather than failing."""
+    decoder = json.JSONDecoder()
+    it = iter(chunks)
+    buf, pos = "", 0
+
+    def more() -> bool:
+        nonlocal buf, pos
+        chunk = next(it, None)
+        if chunk is None:
+            return False
+        buf, pos = buf[pos:] + chunk, 0
+        return True
+
+    while (head := _LEADERBOARD_HEAD.match(buf)) is None:
+        if len(buf) > _HEAD_PROBE_CHARS or not more():
+            yield from json.loads(buf + "".join(it)).get("leaderboardRows") or []
+            return
+    pos = head.end()
+    while True:
+        while pos < len(buf) and buf[pos] in " \t\r\n,":
+            pos += 1
+        if pos == len(buf):
+            if not more():
+                raise ValueError("leaderboard document ended inside leaderboardRows")
+            continue
+        if buf[pos] == "]":
+            return
+        try:
+            row, end = decoder.raw_decode(buf, pos)
+        except json.JSONDecodeError:
+            if not more():  # a row cut short by the end of the body
+                raise
+            continue
+        pos = end
+        yield row
+
+
+class _BoardCut:
+    """One period's single pass over the document: every row's sort key
+    (-pnl micros, document position) for its rank, and bounded min-heaps of
+    the best `keep` eligible rows by pnl and by roi. Heap items compare on
+    (value, -position) only, which is unique, so the row fields never are."""
+
+    def __init__(self, keep: int) -> None:
+        self.keep = keep
+        self.order: list[tuple[int, int]] = []
+        self.by_pnl: list[tuple[int, int, tuple[str, ...]]] = []
+        self.by_roi: list[tuple[Decimal, int, tuple[str, ...]]] = []
+
+    def _offer(self, heap: list, item: tuple) -> None:
+        if len(heap) < self.keep:
+            heapq.heappush(heap, item)
+        elif item[:2] > heap[0][:2]:
+            heapq.heapreplace(heap, item)
+
+    def add(
+        self, position: int, pnl_micros: int, roi: Decimal, fields: tuple[str, ...], eligible: bool
+    ) -> None:
+        self.order.append((-pnl_micros, position))
+        if eligible and self.keep > 0:
+            self._offer(self.by_pnl, (pnl_micros, -position, fields))
+            self._offer(self.by_roi, (roi, -position, fields))
+
+    def entries(self) -> list[LeaderboardEntry]:
+        self.order.sort()
+        picked = {-neg: (pnl, fields) for pnl, neg, fields in self.by_pnl}
+        for _, neg, fields in self.by_roi:
+            picked.setdefault(-neg, (to_micros(fields[1]), fields))
+        out = []
+        for position, (pnl_micros, fields) in picked.items():
+            address, pnl, roi, volume, account_value = fields
+            rank = bisect.bisect_left(self.order, (-pnl_micros, position)) + 1
+            out.append(
+                LeaderboardEntry(
+                    address=address,
+                    rank=rank,
+                    pnl=pnl,
+                    roi=roi,
+                    volume=volume,
+                    account_value=account_value,
+                )
+            )
+        out.sort(key=lambda e: e.rank)
+        return out
+
+
+def leaderboard_url_for(info_url: str) -> str:
+    """The leaderboard document of an info endpoint's chain (else prod's)."""
+    for env, url in INFO_URLS.items():
+        if info_url == url:
+            return LEADERBOARD_URLS[env]
+    return LEADERBOARD_URLS["prod"]
+
+
 # ---- public market data ------------------------------------------------------------
 
 
@@ -1049,8 +1191,18 @@ class HyperliquidMarketData(_Info, AssetMarketData):
     # collateral list against perpDexs before launch].
     STABLECOINS_AT_PAR = AssetMarketData.STABLECOINS_AT_PAR | frozenset({"USDT0", "USDH"})
 
-    def __init__(self, info_url: str = INFO_URL, client: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        info_url: str = INFO_URL,
+        client: httpx.Client | None = None,
+        leaderboard_url: str | None = None,
+        leaderboard_keep: int = LEADERBOARD_KEEP,
+        leaderboard_min_account_value: str | None = None,
+    ) -> None:
         self._init_info(info_url, client)
+        self.leaderboard_url = leaderboard_url or leaderboard_url_for(info_url)
+        self.leaderboard_keep = leaderboard_keep
+        self.leaderboard_min_account_value = leaderboard_min_account_value
 
     def fetch_instruments(self) -> list[NormalizedInstrument]:
         perps = self.perp_dex("")
@@ -1158,6 +1310,86 @@ class HyperliquidMarketData(_Info, AssetMarketData):
                 break
             cursor = int(rows[-1]["time"]) + 1  # one row per coin per time
         return out
+
+    def fetch_leaderboards(
+        self, periods: tuple[LeaderboardPeriod, ...]
+    ) -> dict[LeaderboardPeriod, list[LeaderboardEntry]]:
+        """The top of the public leaderboard per requested period, in rank
+        order. One GET serves every window.
+
+        Row shape (VERIFIED 2026-10-14; tests/fixtures/hyperliquid/README.md):
+        ethAddress (lowercase), accountValue (decimal string, USD, now),
+        windowPerformances [["day"|"week"|"month"|"allTime", {pnl, roi, vlm}]]
+        (decimal strings: pnl and vlm in USD, roi a fraction), plus
+        displayName and prize, which are DROPPED here: no identity field ever
+        leaves the connector. The document is in no particular order and has
+        no rank, so rank = 1-based position among ALL rows after sorting the
+        period by pnl descending (ties keep document order), as the app's own
+        page does. The app also hides vault and treasury addresses; we do not,
+        so a rank can sit a few places below the app's.
+
+        Bounded output: the document has ~47,000 rows per period and a
+        LeaderboardEntry costs about 1 KB, so all four periods in full would
+        take ~200 MB. Each period returns only the rows that can reach a
+        snapshot: the best `leaderboard_keep` by pnl plus the best
+        `leaderboard_keep` by roi, among rows whose account value is at least
+        `leaderboard_min_account_value` (the registry passes the discover
+        settings). Ranks are still taken over every row.
+
+        Money figures are rounded to 6 dp (leaderboard_figure); roi stays
+        verbatim (a display fraction, never money). A malformed row is
+        skipped, not fatal."""
+        wanted = {w: p for w, p in LEADERBOARD_WINDOWS.items() if p in periods}
+        if not wanted:
+            return {}
+        endpoint = "leaderboard"
+        self.throttle(endpoint)
+        floor = (
+            to_micros(self.leaderboard_min_account_value)
+            if self.leaderboard_min_account_value is not None
+            else None
+        )
+        cuts = {p: _BoardCut(self.leaderboard_keep) for p in wanted.values()}
+        skipped = 0
+        with self.http.stream("GET", self.leaderboard_url) as resp:
+            if resp.status_code in (429, 418):
+                raise RateLimited(_retry_after(resp), endpoint)
+            resp.raise_for_status()
+            for position, row in enumerate(iter_leaderboard_rows(resp.iter_text())):
+                try:
+                    address = _s(row["ethAddress"]).lower()
+                    if not is_address(address):
+                        raise ValueError("not an address")
+                    account_value = leaderboard_figure(_s(row["accountValue"]))
+                    eligible = floor is None or to_micros(account_value) >= floor
+                    parsed = []
+                    for window, perf in row.get("windowPerformances") or []:
+                        period = wanted.get(window)
+                        if period is None:
+                            continue
+                        pnl = leaderboard_figure(_s(perf["pnl"]))
+                        roi = _s(perf["roi"])
+                        volume = leaderboard_figure(_s(perf["vlm"]))
+                        parsed.append(
+                            (
+                                period,
+                                to_micros(pnl),
+                                Decimal(roi),
+                                (address, pnl, roi, volume, account_value),
+                            )
+                        )
+                except (KeyError, TypeError, ValueError, ArithmeticError):
+                    skipped += 1
+                    continue
+                for period, pnl_micros, roi_key, fields in parsed:
+                    # No volume in the period: not a trader to copy (vaults,
+                    # treasuries and genesis holders top the board on mark-
+                    # to-market alone; the app hides them, we cannot tell).
+                    traded = to_micros(fields[3]) > 0
+                    cuts[period].add(position, pnl_micros, roi_key, fields, eligible and traded)
+        if skipped:
+            logger.warning("hyperliquid leaderboard: skipped %d malformed rows", skipped)
+        return {period: cut.entries() for period, cut in cuts.items()}
 
 
 # ---- P7: public websocket (StreamMode.FILLS) ------------------------------------

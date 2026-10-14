@@ -71,3 +71,26 @@ Findings worth knowing:
   margin in use: spot totals are the cash.
 - USDC prints 6 dp in perp fields and up to 8 dp in spot/transfer fields
   (weiDecimals 8); UETH transfers print 9 dp (weiDecimals 9).
+
+## Leaderboard (copy strategies step 7)
+
+`leaderboard_2026-10-14.json`: one GET of the public leaderboard document
+`https://stats-data.hyperliquid.xyz/Mainnet/leaderboard` on **2026-10-14**
+(the URL the app's /leaderboard page loads; 38,686,933 bytes, 47,097 rows,
+no gzip, served from S3 via CloudFront). Trimmed to 27 rows and
+**anonymised**:
+
+- Rows chosen: the 8 best week pnl among trading accounts >= $10k, 6 rows
+  that had a `displayName`, the 5 small (< $10k) accounts with the highest
+  week roi, the 4 worst week pnl >= $10k, and 4 more with 10-dp account
+  values.
+- Every `ethAddress` is replaced by a synthetic `0x00..0N` (N = row number,
+  1-based); every non-null `displayName` by `placeholder-name-N`. The
+  fields stay so tests prove the connector drops them. Every other value
+  (`accountValue`, `windowPerformances`, `prize`) is verbatim.
+
+Shape: `{"leaderboardRows": [{ethAddress, accountValue, windowPerformances:
+[["day", {pnl, roi, vlm}], ["week", ...], ["month", ...], ["allTime", ...]],
+prize, displayName}]}`; all figures are decimal strings (pnl, vlm and
+accountValue up to 10 dp, roi up to 10 dp), `prize` an int, `displayName`
+null or a string. The document is unordered and carries no rank.

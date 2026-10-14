@@ -199,6 +199,16 @@ class Settings(BaseSettings):
     quote_retention_days: int = 30  # asset_quotes kept this long
     # ---- private watchlist (watchlist.py) ----
     watch_max_per_user: int = 10
+    # ---- watch discover (/watch/discover, discover.py; copy strategies step 7) ----
+    # Off by default: the page and the refresh job exist only where this is
+    # set (fly.toml [env] turns it on in prod; vault it there). DEMO_MODE shows
+    # the static sample regardless.
+    watch_discover_enabled: bool = False
+    watch_discover_refresh_minutes: int = 60  # leaderboard snapshot refresh cadence
+    watch_discover_rows: int = 200  # rows kept per (venue, period) snapshot
+    # Rows below this account value (USD) are dropped when the venue reports
+    # one: tiny accounts dominate any ROI ordering.
+    watch_discover_min_account_value: int = 10_000
     # Venues whose public addresses can be watched (comma-separated, from
     # watchlist.WATCHABLE_VENUES). Polymarket stays off until counsel answers
     # the data clause in its terms (docs/venues/polymarket.md).

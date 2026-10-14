@@ -103,6 +103,13 @@ public surface and nobody follows it.
   an active paper tail of it; open `/watch` to see it.
 - `analyst@demo.koine` watches it as "BTC momentum book to study" (no tail).
 
+Discover (`/watch/discover`): the seed stores synthetic Hyperliquid leaderboard
+snapshots for every period (invented `c0de...` addresses, one of them the
+watched address, so the investor sees it as "On your watchlist"). The page is
+off unless `WATCH_DISCOVER_ENABLED=true` is set on the web process (step 3
+below). Do not run the worker against the demo database: its refresh would
+replace the invented rows with the real leaderboard.
+
 Every creator can log in too (`<handle>@demo.koine`, e.g.
 `northwind@demo.koine`) to show the creator dashboard. The password for every
 login is printed at the end of the run (default `koine-demo-2026`, change it
@@ -123,7 +130,7 @@ uv run python scripts/seed_demo.py --reset
 
 # 3. Serve it
 DATABASE_URL=postgresql+psycopg://alphamarket:alphamarket@localhost:5432/alphamarket_demo \
-DEMO_MODE=true \
+DEMO_MODE=true WATCH_DISCOVER_ENABLED=true \
 uv run uvicorn alphamarket.main:app --reload
 ```
 

@@ -85,7 +85,10 @@ deliberately out of scope).
   `watchlist.py` + `watch_pages.py` (private watchlist: public Hyperliquid
   addresses, one shared system-owned `is_watch` account per address, its
   strategy of kind "watch" never public; `/watch`, `/api/watch`; plan in
-  docs/copy_strategies_*.md),
+  docs/copy_strategies_*.md), `discover.py` (`/watch/discover`: venues'
+  public leaderboards cached in `leaderboard_snapshots` by the
+  `watch_discover` job, addresses only, never names; behind
+  `WATCH_DISCOVER_ENABLED`, on in prod via fly.toml `[env]`),
   `consent.py` + `connect_pages.py` + `pending.py` (consent screens,
   Hyperliquid signed claim, SnapTrade portal and PENDING accounts),
   `rotate.py` (replace a key on an existing account), `oauth_jobs.py`
@@ -132,7 +135,8 @@ deliberately out of scope).
   asset book, market data, consent, activity flags; 0014 market data
   coverage, 0015 `users.is_demo`, 0016 paper book checkpoints (a cache,
   not append-only) and mirror ledger indexes; 0017 `users.is_house` /
-  `is_system`, `strategies.kind`, `watches`, `watch_optouts`)
+  `is_system`, `strategies.kind`, `watches`, `watch_optouts`; 0018
+  `leaderboard_snapshots`, a mutable cache)
 - `docs/methodology.md` — public methodology page source; every ledger/stats
   formula lands here alongside its unit test. `docs/security.md` (served at
   /security), `docs/launch.md` (M5 outreach), `docs/deploy.md` + `Dockerfile`

@@ -7,12 +7,14 @@ tail through the same handler as a public strategy's tail form. Every
 response is `Cache-Control: private, no-store` and carries a noindex meta.
 """
 
+from datetime import UTC, datetime
+
 import markdown
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
-from alphamarket import demo, ratelimit
+from alphamarket import demo, discover, ratelimit
 from alphamarket.analytics import latest_stats
 from alphamarket.charts import polyline, window_x
 from alphamarket.config import get_settings
@@ -61,6 +63,7 @@ NOTICES = {
     "removed": "Removed from your watchlist. Any paper tail of it was stopped.",
     "renamed": "Label saved.",
 }
+DISCOVER_NOTICES = {"added": "Added to your watchlist. Its history is being imported."}
 
 
 def _private(resp: Response) -> Response:
@@ -137,7 +140,12 @@ def _list(
         listed_slug=listed_slug,
         form=form or {"venue": venues[0][0] if venues else "", "address": "", "label": ""},
         notice=notice,
+        discover_on=_discover_on(),
     )
+
+
+def _discover_on() -> bool:
+    return discover.enabled() or get_settings().demo_mode
 
 
 @router.get("/watch", response_class=HTMLResponse)
@@ -160,6 +168,7 @@ def watch_list(request: Request, notice: str = "", db: Session = Depends(get_db)
                 listed_slug=None,
                 form={"venue": "", "address": "", "label": ""},
                 notice=None,
+                discover_on=True,
             )
         return RedirectResponse(login_url("/watch"), status_code=303)
     return _list(request, db, user, notice=NOTICES.get(notice))  # fixed texts only
@@ -171,18 +180,38 @@ def watch_add_form(
     venue: str = Form(""),
     address: str = Form(""),
     label: str = Form(""),
+    return_to: str = Form(""),
+    d_venue: str = Form(""),
+    d_period: str = Form(""),
+    d_sort: str = Form(""),
     db: Session = Depends(get_db),
 ):
     user = _user(request, db)
     if user is None:
         return RedirectResponse(login_url("/watch"), status_code=303)
     form = {"venue": venue, "address": address.strip(), "label": label}
+    # From /watch/discover (exactly "discover", nothing else): the outcome goes
+    # back there with the view's own params; the target is built here, never
+    # taken from the form, so it cannot be an open redirect.
+    back = return_to == "discover" and _discover_on()
     try:
         ratelimit.check(request, "watch_user", user.id)  # the JSON route's limit
         watched = add_watch(
             db, user, WatchIn(venue=venue, address=address, label=label[:60]), request
         )
     except AlreadyListed as exc:
+        if back:
+            return _discover_page(
+                request,
+                db,
+                user,
+                d_venue,
+                d_period,
+                d_sort,
+                error="This address is a verified Koine strategy. Follow or tail it on its "
+                "public page.",
+                status_code=409,
+            )
         return _list(
             request,
             db,
@@ -194,10 +223,110 @@ def watch_add_form(
             status_code=409,
         )
     except HTTPException as exc:
+        if back:
+            return _discover_page(
+                request,
+                db,
+                user,
+                d_venue,
+                d_period,
+                d_sort,
+                error=str(exc.detail),
+                status_code=exc.status_code,
+            )
         return _list(
             request, db, user, error=str(exc.detail), form=form, status_code=exc.status_code
         )
+    if back:
+        view = discover.discover_view(db, user, d_venue, d_period, d_sort)
+        return RedirectResponse(_discover_url(view, notice="added"), status_code=303)
     return RedirectResponse(f"/watch/{watched.strategy.id}?notice=added", status_code=303)
+
+
+# ---- discover ---------------------------------------------------------------------
+# Declared before /watch/{strategy_id}. Reads snapshots only (discover.py).
+
+
+def _discover_url(view: discover.DiscoverView, notice: str | None = None) -> str:
+    """/watch/discover with the view's validated params (never a raw form value)."""
+    q = f"venue={view.venue}&period={view.period}&sort={view.sort}" if view.venue else ""
+    if notice:
+        q += ("&" if q else "") + f"notice={notice}"
+    return "/watch/discover" + (f"?{q}" if q else "")
+
+
+def _ago(at: datetime | None) -> str | None:
+    if at is None:
+        return None
+    secs = int((datetime.now(UTC) - at).total_seconds())
+    if secs < 90:
+        return "just now"
+    if secs < 5400:
+        return f"{round(secs / 60)} minutes ago"
+    if secs < 86400 * 2:
+        return f"{round(secs / 3600)} hours ago"
+    return f"{secs // 86400} days ago"
+
+
+def _discover_page(
+    request: Request,
+    db: Session,
+    user: User,
+    venue: str | None,
+    period: str | None,
+    sort: str,
+    *,
+    notice: str | None = None,
+    error: str | None = None,
+    status_code: int = 200,
+) -> Response:
+    view = discover.discover_view(db, user, venue, period, sort)
+    return _render_private(
+        request,
+        "watch_discover.html",
+        status_code=status_code,
+        user=user,
+        demo=user.is_demo,
+        view=view,
+        updated=_ago(view.fetched_at),
+        venue_labels={v: get_profile(v).display_name for v in view.venues},
+        sample=False,
+        notice=notice,
+        error=error,
+    )
+
+
+@router.get("/watch/discover", response_class=HTMLResponse)
+def watch_discover(
+    request: Request,
+    venue: str = "",
+    period: str = "",
+    sort: str = "pnl",
+    notice: str = "",
+    db: Session = Depends(get_db),
+):
+    if not _discover_on():
+        raise HTTPException(status_code=404)
+    user = _user(request, db)
+    if user is None:
+        if get_settings().demo_mode:  # the static demo: a visitor sees invented rows
+            view = demo.discover_sample(venue, period, sort)
+            return _render_private(
+                request,
+                "watch_discover.html",
+                user=None,
+                demo=True,
+                view=view,
+                updated=_ago(view.fetched_at),
+                venue_labels={v: get_profile(v).display_name for v in view.venues},
+                sample=True,
+                notice=None,
+                error=None,
+            )
+        return RedirectResponse(login_url("/watch/discover"), status_code=303)
+    return _discover_page(
+        request, db, user, venue, period, sort, notice=DISCOVER_NOTICES.get(notice)
+    )
 
 
 def _watch_page(db: Session, user: User, w: Watched) -> dict:

@@ -333,7 +333,26 @@ notional and count) held less than the copy delay
 (fills grouped by order id). Leverage uses the last fill price, not a
 mark. The section needs 10 fills.
 
-Next: step 7 (`/watch/discover`), after counsel on the venue terms.
+**Step 7 (2026-10-14, branch `copy-strategies-discover`):** done, shipped
+ahead of counsel behind `WATCH_DISCOVER_ENABLED` (off in code, on in prod
+via fly.toml `[env]`; flip it to vault). Aiden's call: pre-launch, show the
+full capability. Migration 0018 `leaderboard_snapshots` (a mutable cache,
+one row per venue and period). `discover.refresh` (job `watch_discover`,
+every `watch_discover_refresh_minutes`, 60) streams Hyperliquid's
+undocumented `stats-data` leaderboard file (~39 MB, 47k rows; kept: top
+rows by pnl and by roi above `watch_discover_min_account_value`, $10k, with
+volume in the period) and Polymarket's Data API v2 `/v2/leaderboard`
+(only where `watch_venues` opens Polymarket; prod does not). Identity
+fields are dropped in the connector. `/watch/discover` and
+`/api/watch/discover` read the snapshot only; Add posts to `POST /watch`
+and returns to discover. Static demo shows both venues; the seeded demo
+seeds snapshots (needs the flag). Terms questions for counsel are in the
+"Leaderboard (watch discover)" sections of docs/venues/hyperliquid.md and
+polymarket.md.
+
+Open: an hourly refresh pulls ~0.9 GB/day from Hyperliquid's CDN; raise
+`WATCH_DISCOVER_REFRESH_MINUTES` if that matters. Every copy strategies
+step is now built.
 
 ## 8. Next round plan (2026-10-11)
 

@@ -130,3 +130,29 @@ def test_small_seed_has_a_house_strategy_and_a_private_watch(seeded):
         assert db.scalars(
             select(MirrorAssetFill).where(MirrorAssetFill.allocation_id == tail.id)
         ).all()
+
+
+def test_seed_stores_leaderboard_snapshots_with_the_watched_address(seeded):
+    from alphamarket import discover
+    from alphamarket.models import LeaderboardSnapshot
+
+    sf, _ = seeded
+    with sf() as db:
+        snaps = db.scalars(select(LeaderboardSnapshot)).all()
+        assert {(s.venue, s.period) for s in snaps} == {
+            ("hyperliquid", p) for p in seed_demo.LEADERBOARD_PERIODS
+        }
+        for s in snaps:
+            assert len(s.rows) == 24
+            assert all(re.fullmatch(r"0x[0-9a-f]{40}", r["address"]) for r in s.rows)
+            assert seed_demo.WATCH_ADDRESS in {r["address"] for r in s.rows}
+        investor = db.scalar(select(User).where(User.email == f"investor@{seed_demo.EMAIL_DOMAIN}"))
+        settings = get_settings()
+        settings.watch_discover_enabled = True
+        try:
+            view = discover.discover_view(db, investor, "hyperliquid", "week", "pnl")
+        finally:
+            settings.watch_discover_enabled = False
+        states = {r.address: r.state for r in view.rows}
+        assert states[seed_demo.WATCH_ADDRESS] == discover.RowState.WATCHING
+        assert sum(s == discover.RowState.ADD for s in states.values()) == 23

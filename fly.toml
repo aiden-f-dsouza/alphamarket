@@ -56,3 +56,8 @@ primary_region = "iad"
   size = "shared-cpu-1x"
   memory = "512mb"
   processes = ["stream"]
+
+# Non-secret feature flags (config.py). Vault a feature by flipping it here
+# and running `fly deploy`.
+[env]
+  WATCH_DISCOVER_ENABLED = "true"  # /watch/discover (copy strategies step 7)

@@ -105,6 +105,8 @@ PROFILES: dict[str, VenueProfile] = {
         fee_rounding_micros=1,  # usdc_size carries six decimals
         ownership=OwnershipProof.PROFILE_CODE,
         asset_classes=("prediction",),  # wave2
+        # step 7: /v2/leaderboard time_period day|week|month|all (verified 2026-10-14)
+        leaderboard_periods=("day", "week", "month", "all"),
     ),
     # ---- venue-kraken ----
     "kraken": VenueProfile(
@@ -201,6 +203,8 @@ PROFILES: dict[str, VenueProfile] = {
         rate_budgets=(hyperliquid.RATE_BUDGET,),
         paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
         asset_classes=("crypto",),  # wave2
+        # step 7: windows day|week|month|allTime (verified 2026-10-14)
+        leaderboard_periods=("day", "week", "month", "all"),
         # P7: `userFills` frames are the REST fill objects, ingested directly.
         stream_mode=StreamMode.FILLS,
         stream_users_per_ip=hyperliquid.WS_USERS_PER_IP,
@@ -637,11 +641,20 @@ DATA_SOURCE_BUDGETS: dict[str, tuple[RateBudget, ...]] = {
 _MARKET_DATA_BUILDERS: dict[str, Callable[[str], MarketDataSource]] = {
     "kalshi": lambda venue_env: KalshiMarketData(base_url=KALSHI_BASE_URLS[venue_env]),
     "polymarket": lambda venue_env: PolymarketMarketData(
-        clob_url=POLYMARKET_BASE_URLS[venue_env]["clob"]
+        clob_url=POLYMARKET_BASE_URLS[venue_env]["clob"],
+        data_url=POLYMARKET_BASE_URLS[venue_env]["data"],
+        # step 7: the board has no roi or account value, so the top by pnl is
+        # all a snapshot uses; twice its rows leaves room for opt-outs.
+        leaderboard_keep=2 * get_settings().watch_discover_rows,
     ),
     "kraken": lambda venue_env: KrakenMarketData(base_url=KRAKEN_API_URL),  # venue-kraken
     "hyperliquid": lambda venue_env: hyperliquid.HyperliquidMarketData(
-        info_url=hyperliquid.INFO_URLS[venue_env]
+        info_url=hyperliquid.INFO_URLS[venue_env],
+        # step 7: the leaderboard document is ~47k rows; keep only what a
+        # discover snapshot can use (twice its rows, so the opt-outs removed
+        # afterwards cannot leave it short), above the discover floor.
+        leaderboard_keep=2 * get_settings().watch_discover_rows,
+        leaderboard_min_account_value=str(get_settings().watch_discover_min_account_value),
     ),
     "coinbase": lambda venue_env: CoinbaseMarketData(),  # ---- venue-coinbase ----
     # ---- venue-binanceus ----

@@ -84,6 +84,9 @@ class JobKind(StrEnum):
     # abandoned connect whose first delete failed (aggregator_jobs.py). 22 chars;
     # jobs.kind is String(40).
     AGGREGATOR_DELETE_USER = "aggregator_delete_user"
+    # copy strategies step 7: refresh the venues' public leaderboard snapshots
+    # (discover.refresh). Global, no account.
+    WATCH_DISCOVER = "watch_discover"
     # P7: NOT work. A row of this kind is a coordination lease (acquire_lease
     # below): "stream process X holds account 7's websocket". No handler is
     # ever registered for it, so no worker claims it; venue_account_id stays
@@ -141,6 +144,7 @@ DEFAULT_PRIORITY: dict[str, int] = {
     JobKind.KEY_ROTATE: PRIORITY_MAINTENANCE,
     JobKind.PRICES_DAILY: PRIORITY_MAINTENANCE,
     JobKind.HOUSEKEEPING: PRIORITY_MAINTENANCE,
+    JobKind.WATCH_DISCOVER: PRIORITY_MAINTENANCE,
     JobKind.BACKFILL: PRIORITY_BACKFILL,
 }
 

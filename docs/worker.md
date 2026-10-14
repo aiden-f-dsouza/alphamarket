@@ -45,6 +45,7 @@ Postgres is the only queue (decision E3: no Redis). Enqueueing is idempotent
 | `key_rotate` | global | Re-encrypt credentials under a new data key | P3 |
 | `scope_recheck` | account | Re-prove a credential is read-only | P3 |
 | `aggregator_delete_user` | account (released) | Retry a failed SnapTrade `deleteUser` for an account that is already disconnected or suspended (below) | worker.py (wave 2) |
+| `watch_discover` | global | `discover.refresh`: each discover venue's public leaderboard into `leaderboard_snapshots` (floor, opt-outs, top by pnl plus top by roi); an open-circuit or busy venue waits for the next tick. Queued by `tick_watch_discover` every `WATCH_DISCOVER_REFRESH_MINUTES` (60) and at worker start when the snapshots are older, only while `WATCH_DISCOVER_ENABLED` | worker.py (copy strategies step 7) |
 | `lease` | none (key names the holding) | Not work: a coordination lease of the stream process ("Streaming", below). No handler, so no worker claims it; `venue_account_id` stays NULL so it never blocks the account's jobs | stream.py (P7) |
 
 Another module adds a handler with
