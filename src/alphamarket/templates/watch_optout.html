@@ -16,6 +16,7 @@
 {% block content %}
 <div class="claim">
   <div class="stack" style="gap:24px">
+    {% if sample %}<div class="notice" role="note">Demo walkthrough: the address, code and counts here are invented. Nothing you type is recorded, no venue is contacted and no watchlist or paper tail is touched.</div>{% endif %}
     {% if stage == "done" %}
     <span class="label">Watchlist opt-out</span>
     <div class="stack"><h1 style="font-size:40px">{{ "Already opted out." if result.already else "Opted out." }}</h1>
@@ -27,8 +28,9 @@
         {% endif %}
       </p>
     </div>
+    {% if sample %}<p class="small text2">A crypto or stock tail stopped this way sells its positions at the next fresh quote and shows as stopped on its owner's portfolio; see "When a tail stops" on the <a href="/verification" style="text-decoration:underline">Verification</a> page. In this demo nothing was removed, stopped or recorded.</p>{% endif %}
     <span class="mono small muted">{{ result.venue }} · {{ result.address }}</span>
-    <a class="small muted" href="/security">Back to security &amp; privacy</a>
+    {% if sample %}<a class="small muted" href="/watch">Back to the sample watchlist</a>{% else %}<a class="small muted" href="/security">Back to security &amp; privacy</a>{% endif %}
 
     {% else %}
     <span class="label">Watchlist opt-out{% if claim %} · {{ claim.display_name }} · <span class="mono">{{ claim.address }}</span>{% endif %}</span>
@@ -51,6 +53,7 @@
       <span class="small text2">Verify your email address first. <a href="/dashboard/security" style="text-decoration:underline">Account security</a></span>
       {% else %}
       <form method="post" action="/watch/optout" class="card" autocomplete="off">
+        {% if sample %}<div class="body" style="padding:20px 28px 0"><span class="small text2">Prefilled with a sample Hyperliquid address. The demo ignores what you type and always uses it.</span></div>{% endif %}
         <div class="body" style="padding:28px;gap:18px">
           <label class="field"><span class="label">Venue</span><select name="venue">{% for v, label in venues %}<option value="{{ v }}" {{ "selected" if form.venue == v }}>{{ label }}</option>{% endfor %}</select></label>
           <label class="field"><span class="label">Address</span><input class="mono" name="address" required pattern="0[xX][0-9a-fA-F]{40}" maxlength="42" autocomplete="off" spellcheck="false" placeholder="0x…" value="{{ form.address }}"></label>
@@ -60,7 +63,7 @@
       {% endif %}
 
     {% elif claim.message %}
-    <form method="post" action="/watch/optout/verify" class="card" autocomplete="off" data-claim-form data-claim-address="{{ claim.address }}">
+    <form method="post" action="/watch/optout/verify" class="card" autocomplete="off" {% if not sample %}data-claim-form {% endif %}data-claim-address="{{ claim.address }}">
       <input type="hidden" name="venue" value="{{ claim.venue }}">
       <input type="hidden" name="address" value="{{ claim.address }}">
       <div class="body" style="padding:28px;gap:20px">
@@ -69,7 +72,7 @@
           <pre class="claim-message" data-claim-message="{{ claim.message }}">{{ claim.message }}</pre>
         </div>
         <div class="stack" style="gap:8px">
-          <button class="btn" type="button" data-claim-sign hidden>Sign with my wallet</button>
+          {% if not sample %}<button class="btn" type="button" data-claim-sign hidden>Sign with my wallet</button>{% endif %}
           <span class="small muted" data-claim-status aria-live="polite"></span>
         </div>
         <label class="field"><span class="label">Signature</span><textarea class="mono" name="signature" rows="3" spellcheck="false" placeholder="0x… (filled in when you sign with a browser wallet)" data-claim-signature></textarea>

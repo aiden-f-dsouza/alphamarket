@@ -31,7 +31,7 @@
     </div>
     {% if t.error %}<div class="error" role="alert">{{ t.error }}</div>{% endif %}
     {% if t.real and t.active %}<div class="notice">You already have an active paper tail of this strategy. <a href="/portfolio" style="text-decoration:underline">See it on your portfolio</a>; stop it there to start a new one.</div>{% endif %}
-    {% if t.real and t.closing %}<div class="notice">Closing: your stopped paper tail of this strategy is still selling its positions; each closes at the next fresh quote. <a href="/portfolio" style="text-decoration:underline">See it on your portfolio</a>.</div>{% endif %}
+    {% if (t.real or t.demo) and t.closing %}<div class="notice">Closing: your stopped paper tail of this strategy is still selling its positions; each closes at the next fresh quote. <a href="/portfolio" style="text-decoration:underline">See it on your portfolio</a>.</div>{% endif %}
     {% if t.real and t.own %}<div class="notice">This is your own strategy. Creators cannot paper-tail their own record.</div>{% endif %}
     <div class="stepper">
       <div class="on"><i>1</i><span>Allocation</span></div><span></span><div class="on"><i>2</i><span>Drawdown limit</span></div><span></span><div class="on"><i>3</i><span>Pricing of fills</span></div><span></span><div class="on"><i>4</i><span>Koine pricing</span></div><span></span><div><i>5</i><span>Start</span></div>
