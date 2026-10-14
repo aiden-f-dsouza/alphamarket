@@ -73,19 +73,33 @@ import httpx
 from alphamarket.connectors.base import (
     Action,
     BalanceUnavailable,
+    LeaderboardEntry,
+    LeaderboardPeriod,
     MarketDataSource,
     NormalizedBalance,
     NormalizedFill,
     NormalizedMarket,
     NormalizedPosition,
     NormalizedSettlement,
+    RateLimited,
     Side,
     VenueConnector,
+    leaderboard_figure,
 )
 from alphamarket.money import MICROS_PER_UNIT
 
 _MICRO = Decimal(1) / MICROS_PER_UNIT
 PAGE_SIZE = 1000  # v2 maximum for /v2/activity and /v2/positions
+DATA_URL = "https://data-api.polymarket.com"
+# Step 7: /v2/leaderboard `time_period` values (OpenAPI, 2026-10-14). A
+# cursor pins its board, so later pages send nothing else.
+LEADERBOARD_WINDOWS = {
+    LeaderboardPeriod.DAY: "day",
+    LeaderboardPeriod.WEEK: "week",
+    LeaderboardPeriod.MONTH: "month",
+    LeaderboardPeriod.ALL: "all",
+}
+LEADERBOARD_PAGE_MAX = 1000  # `limit` maximum on /v2/leaderboard
 
 
 def is_address(value: str) -> bool:
@@ -383,8 +397,16 @@ class PolymarketMarketData(MarketDataSource):
 
     venue = "polymarket"
 
-    def __init__(self, clob_url: str, client: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        clob_url: str,
+        client: httpx.Client | None = None,
+        data_url: str = DATA_URL,
+        leaderboard_keep: int = LEADERBOARD_PAGE_MAX,
+    ) -> None:
         self.clob_url = clob_url.rstrip("/")
+        self.data_url = data_url.rstrip("/")
+        self.leaderboard_keep = leaderboard_keep
         self.http = _PublicHttp(client)
 
     def _quote(self, token_id: str, side: str) -> int:
@@ -433,3 +455,65 @@ class PolymarketMarketData(MarketDataSource):
             close_time=datetime.fromisoformat(end.replace("Z", "+00:00")) if end else None,
             as_of=datetime.now(UTC),
         )
+
+    # ---- copy strategies step 7: the trader leaderboard (discover.py) ----
+
+    def fetch_leaderboards(
+        self, periods: tuple[LeaderboardPeriod, ...]
+    ) -> dict[LeaderboardPeriod, list[LeaderboardEntry]]:
+        """The top `leaderboard_keep` rows of the PNL board, overall category,
+        per period, in the venue's rank order. One request per period while
+        `leaderboard_keep` <= 1000 (the page maximum); deeper boards follow
+        `next_cursor`.
+
+        `GET {data_url}/v2/leaderboard?time_period=&limit=` (VERIFIED live and
+        against /v2/openapi.json, 2026-10-14). Rows: rank (the venue's
+        competition rank: ties share one and the next skips), user_id (the
+        wallet, lowercase), pnl (float, USDC; day/week/month are the MARKED
+        equity change net of flows, `all` is realized only), volume (float,
+        in SHARES, not USD), user_name, profile_image, x_username, verified.
+        Kept: user_id, rank, pnl (rounded to 6 dp, leaderboard_figure).
+        Dropped: every identity field (user_name, profile_image, x_username,
+        verified) and volume, because LeaderboardEntry.volume is in the quote
+        asset and shares are not dollars. There is no roi and no account
+        value on this board."""
+        out: dict[LeaderboardPeriod, list[LeaderboardEntry]] = {}
+        for period in periods:
+            window = LEADERBOARD_WINDOWS.get(period)
+            if window is not None:
+                out[period] = self._leaderboard(window)
+        return out
+
+    def _leaderboard(self, window: str) -> list[LeaderboardEntry]:
+        rows: list[LeaderboardEntry] = []
+        params: dict[str, Any] = {
+            "time_period": window,
+            "limit": min(self.leaderboard_keep, LEADERBOARD_PAGE_MAX),
+        }
+        seen: set[str] = set()
+        while len(rows) < self.leaderboard_keep:
+            self.throttle("leaderboard")
+            resp = self.http.get(f"{self.data_url}/v2/leaderboard", params)
+            if resp.status_code == 429:  # still busy after _PublicHttp's own retries
+                retry = resp.headers.get("Retry-After") or ""
+                wait = float(retry) if retry.replace(".", "", 1).isdigit() else 10.0
+                raise RateLimited(wait, "leaderboard")
+            resp.raise_for_status()
+            payload = resp.json()
+            for r in payload.get("data") or []:
+                address = str(r.get("user_id") or "").lower()
+                if not is_address(address):
+                    continue
+                rows.append(
+                    LeaderboardEntry(
+                        address=address,
+                        rank=int(r["rank"]),
+                        pnl=leaderboard_figure(_dec(r["pnl"])),
+                    )
+                )
+            cursor = (payload.get("pagination") or {}).get("next_cursor")
+            if not cursor or cursor in seen:
+                break
+            seen.add(cursor)
+            params = {"cursor": cursor}  # the cursor pins the board and window
+        return rows[: self.leaderboard_keep]

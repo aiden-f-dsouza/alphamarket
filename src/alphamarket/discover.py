@@ -18,6 +18,7 @@ Rules:
   and limited to venues open for watching (`watchlist.open_venues`).
 """
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -26,8 +27,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from alphamarket.config import get_settings
-from alphamarket.connectors.base import LeaderboardEntry, LeaderboardPeriod
-from alphamarket.connectors.registry import get_profile
+from alphamarket.connectors.base import (
+    BudgetExhausted,
+    LeaderboardEntry,
+    LeaderboardPeriod,
+    RateLimited,
+)
+from alphamarket.connectors.registry import build_market_data, get_profile
 from alphamarket.jobs import JobContext, aware
 from alphamarket.models import (
     LeaderboardSnapshot,
@@ -37,9 +43,12 @@ from alphamarket.models import (
     Watch,
     WatchOptout,
 )
-from alphamarket.money import to_micros
+from alphamarket.money import MICROS_PER_UNIT, to_micros
 from alphamarket.public import publicly_visible
+from alphamarket.venue_limits import is_venue_outage, rate_limit_from_http
 from alphamarket.watchlist import open_venues, short_address, watch_count
+
+logger = logging.getLogger(__name__)
 
 SORTS = ("pnl", "roi")
 PERIOD_ORDER = tuple(p.value for p in LeaderboardPeriod)
@@ -134,8 +143,90 @@ def refresh(ctx: JobContext) -> dict:
     leaderboards through its market data (spending the venue's outbound
     budget), filter (min account value, opt-outs), keep the top
     watch_discover_rows per period and store them. Returns counts per
-    (venue, period) for the job log. Implemented in the discover-data stream."""
-    raise NotImplementedError
+    (venue, period) for the job log.
+
+    Like the prices job, a venue whose circuit is open is skipped, and one
+    that is out of budget or answers 429 is left for the next tick (no
+    early re-run: a refresh has no cursor, and the snapshot it would replace
+    is still there). Any failure of one venue leaves the others to run; its
+    previous snapshots stay. Does nothing while the feature is off."""
+    if not enabled():
+        return {}
+    db, limiter = ctx.db, ctx.limiter
+    counts: dict[tuple[str, str], int] = {}
+    for venue in discover_venues():
+        if limiter is not None and limiter.breaker_open_until(venue) is not None:
+            logger.info("watch discover: %s circuit open, skipped until the next tick", venue)
+            continue
+        periods = tuple(LeaderboardPeriod(p) for p in periods_for(venue))
+        try:
+            boards = _fetch(venue, periods, limiter)
+            if boards is None:
+                continue
+            blocked = set(db.scalars(select(WatchOptout.address).where(WatchOptout.venue == venue)))
+            fetched_at = ctx.clock()
+            for period in periods:
+                if period not in boards:  # the venue sent nothing: keep the old one
+                    continue
+                rows = select_rows(boards[period], blocked)
+                store_snapshot(db, venue, period.value, rows, fetched_at)
+                counts[(venue, period.value)] = len(rows)
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("watch discover refresh failed for %s", venue)
+    return counts
+
+
+def _fetch(
+    venue: str, periods: tuple[LeaderboardPeriod, ...], limiter
+) -> dict[LeaderboardPeriod, list[LeaderboardEntry]] | None:
+    """One venue's boards through its throttled public market data, feeding
+    its circuit breaker. None when the venue is busy (budget, 429): it is
+    left for the next tick. Other failures raise."""
+    try:
+        source = build_market_data(venue, get_settings().venue_env(venue))
+        if limiter is not None:
+            source.set_throttle(limiter.throttle(venue, None))
+        boards = source.fetch_leaderboards(periods)
+    except Exception as exc:
+        limited = exc if isinstance(exc, RateLimited) else rate_limit_from_http(exc)
+        if limited is not None and limiter is not None:
+            limiter.on_rate_limited(venue, None, limited.retry_after_seconds, limited.endpoint)
+        if limited is not None or isinstance(exc, BudgetExhausted):
+            logger.info("watch discover: %s busy until the next tick: %s", venue, exc)
+            return None
+        if limiter is not None and is_venue_outage(exc):
+            limiter.record_failure(venue)
+        raise
+    if limiter is not None:
+        limiter.record_success(venue)
+    return boards
+
+
+def select_rows(entries: list[LeaderboardEntry], blocked: set[str]) -> list[dict]:
+    """The snapshot rows of one (venue, period): drop rows whose reported
+    account value is under watch_discover_min_account_value (kept when the
+    venue reports none) and opted-out addresses, then keep the union of the
+    top watch_discover_rows by pnl and the top watch_discover_rows by roi
+    (rows without roi never qualify by roi), in pnl order. Ties keep the
+    venue's rank order."""
+    settings = get_settings()
+    floor = settings.watch_discover_min_account_value * MICROS_PER_UNIT
+    n = settings.watch_discover_rows
+    rows = []
+    for entry in sorted(entries, key=lambda e: e.rank):
+        row = snapshot_row(entry)
+        if row["address"] in blocked:
+            continue
+        value = row["account_value_micros"]
+        if value is not None and value < floor:
+            continue
+        rows.append(row)
+    by_pnl = sorted(rows, key=lambda r: r["pnl_micros"], reverse=True)  # stable: rank order
+    by_roi = sorted((r for r in rows if r["roi"] is not None), key=_roi_key, reverse=True)
+    keep = {id(r) for r in by_pnl[:n]} | {id(r) for r in by_roi[:n]}
+    return [r for r in by_pnl if id(r) in keep]
 
 
 def _roi_key(row: dict) -> Decimal:

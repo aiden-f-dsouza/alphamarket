@@ -10,6 +10,8 @@ Ticks (enqueue only, idempotent across processes thanks to dedupe keys):
   next_sync_at has come (deterministic per-account jitter), a global
   `mirror` sweep, and a `backfill` for paged venues not yet backfilled;
 - every price_refresh_interval_seconds: a global `prices` job;
+- every watch_discover_refresh_minutes, only while watch_discover_enabled: a
+  global `watch_discover` job (leaderboard snapshots for /watch/discover);
 - nightly 04:15 UTC: `reconcile` per reconcilable account, then one global
   `stats` job (waits for the reconciles), and housekeeping.
 
@@ -25,12 +27,13 @@ import signal
 from datetime import timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from alphamarket import (
     aggregator_jobs,
     credentials,
+    discover,
     email,
     housekeeping,
     oauth_jobs,
@@ -72,6 +75,7 @@ from alphamarket.mirror import process_allocation
 from alphamarket.models import (
     AccountSchedule,
     Allocation,
+    LeaderboardSnapshot,
     Strategy,
     VenueAccount,
     VenueAccountStatus,
@@ -345,6 +349,18 @@ def handle_aggregator_delete_user(ctx: JobContext) -> None:
     aggregator_jobs.run(ctx)
 
 
+@register_handler(JobKind.WATCH_DISCOVER)
+def handle_watch_discover(ctx: JobContext) -> None:
+    """Copy strategies step 7: refresh every discover venue's leaderboard
+    snapshots (discover.refresh; a busy venue waits for the next tick)."""
+    counts = discover.refresh(ctx)
+    logger.info(
+        "watch discover: %s",
+        ", ".join(f"{venue}/{period} {n}" for (venue, period), n in sorted(counts.items()))
+        or "nothing stored",
+    )
+
+
 def pricing_venues_in_use(db: Session) -> list[str]:
     """wave2: venues whose market data prices at least one active asset
     account (profile.pricing_venue, else the venue itself)."""
@@ -458,6 +474,28 @@ def tick_oauth(session_factory: sessionmaker = SessionLocal) -> None:
         logger.info("queued %d oauth refresh jobs", n)
 
 
+def tick_watch_discover(
+    session_factory: sessionmaker = SessionLocal, only_if_stale: bool = False
+) -> None:
+    """Step 7: queue one `watch_discover` refresh, only while
+    watch_discover_enabled. The default dedupe key keeps ticks from piling
+    up behind a slow run. `only_if_stale` (worker start) skips it when every
+    snapshot is younger than the refresh interval, so a deploy does not
+    re-download the leaderboards it fetched minutes ago."""
+    settings = get_settings()
+    if not settings.watch_discover_enabled:
+        return
+    now = utcnow()
+    with session_factory() as db:
+        if only_if_stale:
+            oldest = db.scalar(select(func.min(LeaderboardSnapshot.fetched_at)))
+            interval = timedelta(minutes=settings.watch_discover_refresh_minutes)
+            if oldest is not None and now - aware(oldest) < interval:
+                return
+        enqueue(db, JobKind.WATCH_DISCOVER, now=now)
+        db.commit()
+
+
 def sync_now(db: Session, account: VenueAccount) -> int | None:
     """Queue an immediate sync (e.g. from the dashboard) at top sync priority."""
     job_id = enqueue(db, JobKind.SYNC, account_id=account.id, priority=PRIORITY_SYNC_FOLLOWED)
@@ -480,6 +518,14 @@ def main() -> None:
     )
     scheduler.add_job(tick_nightly, "cron", hour=4, minute=15, max_instances=1)
     scheduler.add_job(tick_oauth, "interval", minutes=15, max_instances=1)  # wave2
+    if settings.watch_discover_enabled:  # step 7; off unless the flag is set
+        scheduler.add_job(
+            tick_watch_discover,
+            "interval",
+            minutes=settings.watch_discover_refresh_minutes,
+            max_instances=1,
+        )
+        tick_watch_discover(only_if_stale=True)  # a fresh deploy fills an empty page
     tick_syncs()  # queue due work immediately at startup
     scheduler.start()
     stopping = False
