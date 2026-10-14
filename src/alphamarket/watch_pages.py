@@ -316,7 +316,6 @@ def watch_discover(
                 "watch_discover.html",
                 user=None,
                 demo=True,
-                private_watch=True,
                 view=view,
                 updated=_ago(view.fetched_at),
                 venue_labels={v: get_profile(v).display_name for v in view.venues},

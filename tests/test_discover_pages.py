@@ -251,6 +251,8 @@ def test_demo_sample_renders_with_banner_and_disabled_add(client, demo_on):
     assert resp.status_code == 200
     html = resp.text
     assert "Sample data" in html and "Discover addresses" in html
+    # a list of addresses, not one watched address: no single-address strip
+    assert "not a Koine member" not in html
     assert 'name="robots" content="noindex' in html
     assert resp.headers["cache-control"] == "private, no-store"
     assert 'action="/watch"' not in html and 'href="#"' not in html
