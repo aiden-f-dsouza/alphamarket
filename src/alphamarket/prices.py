@@ -17,7 +17,8 @@ run_daily(ctx) -> None
 refresh_asset_marks(db, limiter) -> int
     asset_quotes (and funding_rates for perps) for instruments in open
     follower books: ACTIVE allocations, and STOPPED ones that are not flat
-    yet (their stop close needs a fresh quote; STOPPED_QUOTE_WINDOW).
+    yet, at any age (their stop close needs a fresh quote; STOPPED_QUOTE_WINDOW
+    bounds only the cost of finding them).
     Returns quotes written.
 
 fresh_side(db, instrument_id, now, side) -> Quoted | None
@@ -86,6 +87,7 @@ from alphamarket.models import (
     MarketDataCoverage,
     MirrorAssetFill,
     MirrorLedgerEntry,
+    PaperBookCheckpoint,
     PriceDaily,
     Strategy,
     VenueAccount,
@@ -868,24 +870,82 @@ def fresh_side(db: Session, instrument_id: int, now: datetime, side: str) -> Quo
     return None
 
 
+def last_side_at(db: Session, instrument_id: int, side: str) -> datetime | None:
+    """When the newest kept asset_quotes row with a positive `side` ("bid" or
+    "ask") was taken, at any age; None when no kept row has one (quotes are
+    pruned after quote_retention_days). For the "Closing" notice and the
+    nightly stuck-close log only: never a price."""
+    if side not in ("bid", "ask"):
+        raise ValueError(f"side must be bid or ask, got {side!r}")
+    column = getattr(AssetQuote, side)
+    rows = db.execute(
+        select(column, AssetQuote.as_of)
+        .where(AssetQuote.instrument_id == instrument_id, column.is_not(None))
+        .order_by(AssetQuote.as_of.desc(), AssetQuote.id.desc())
+        .limit(10)
+    ).all()
+    return next((aware(as_of) for value, as_of in rows if _positive(value)), None)
+
+
 # A stopped allocation is quoted while its book is not flat (its positions
-# close at the first fresh quote, paper_lifecycle.close_stopped), but only
-# for this long after it stopped: the query stays bounded instead of scanning
-# every stopped allocation in history. One still open after it closes only
-# when a quote arrives some other way (another book holding the instrument).
+# close at the first fresh quote, paper_lifecycle.close_stopped), however long
+# that takes: a close never uses a stale mark (decision 9), so a tail whose
+# quotes stopped would stay "Closing" forever. The window only bounds the COST
+# of finding them. Within it the ledger is summed as for an ACTIVE book; past
+# it, a stopped tail is summed only when its book checkpoint (a cache, one row
+# per allocation) does not show it flat, or the ledger has rows the checkpoint
+# has not folded (_stopped_maybe_open), so the scan does not grow with every
+# leg of every tail that ever stopped. A tail still closing after
+# settings.stop_close_alert_days is logged nightly (housekeeping).
 STOPPED_QUOTE_WINDOW = timedelta(days=30)
 
 
-def _open_instruments(db: Session, now: datetime | None = None) -> list[Instrument]:
-    """Instruments some ACTIVE allocation, or some allocation STOPPED within
-    STOPPED_QUOTE_WINDOW (a tail still closing), holds a non-zero amount of
-    (the ledger's net legs, so a position closed by a split, a sell or the
-    stop close is not open, and a stopped tail that is flat drops out)."""
-    cutoff = aware(now or utcnow()) - STOPPED_QUOTE_WINDOW
-    quoted = or_(
-        Allocation.status == AllocationStatus.ACTIVE,
-        and_(Allocation.status == AllocationStatus.STOPPED, Allocation.stopped_at >= cutoff),
+def _checkpoint_holds_something(state) -> bool:
+    """A paper_book checkpoint state with a non-cash holding (perps too). A
+    state that cannot be read counts as holding (the ledger sum decides)."""
+    try:
+        held = state["held"]
+        return any(asset != CASH_ASSET and int(atoms) != 0 for asset, atoms in held.items())
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return True
+
+
+def _stopped_maybe_open(db: Session, cutoff: datetime) -> set[int]:
+    """Allocations STOPPED before `cutoff` (or with no stop time) that may
+    still hold something: their book checkpoint holds a non-cash asset, is
+    missing, or the ledger has rows after it. A flat stopped book stays flat
+    (nothing opens a position after a stop; a late split is closed with it,
+    paper_lifecycle.correct_late_splits), so its checkpoint, written by the
+    mirror pass, keeps it out. The checkpoint only prunes: the ledger sum in
+    _open_pairs decides."""
+    cp = PaperBookCheckpoint
+    newer = (
+        select(MirrorLedgerEntry.id)
+        .where(
+            MirrorLedgerEntry.allocation_id == Allocation.id,
+            MirrorLedgerEntry.id > func.coalesce(cp.through_entry_id, 0),
+        )
+        .exists()
     )
+    rows = db.execute(
+        select(Allocation.id, cp.state, newer)
+        .outerjoin(cp, cp.allocation_id == Allocation.id)
+        .where(
+            Allocation.status == AllocationStatus.STOPPED,
+            or_(Allocation.stopped_at < cutoff, Allocation.stopped_at.is_(None)),
+        )
+    ).all()
+    return {
+        alloc
+        for alloc, state, has_newer in rows
+        if has_newer or (state is not None and _checkpoint_holds_something(state))
+    }
+
+
+def _open_pairs(db: Session, quoted) -> set[tuple[int, str]]:
+    """(allocation id, asset) of every non-cash asset an allocation matching
+    `quoted` holds a non-zero amount of (the ledger's net legs, so a position
+    closed by a split, a sell or the stop close is not open)."""
     held = db.execute(
         select(
             MirrorLedgerEntry.allocation_id,
@@ -896,7 +956,34 @@ def _open_instruments(db: Session, now: datetime | None = None) -> list[Instrume
         .where(quoted, MirrorLedgerEntry.asset != CASH_ASSET)
         .group_by(MirrorLedgerEntry.allocation_id, MirrorLedgerEntry.asset)
     ).all()
-    open_pairs = {(alloc, asset) for alloc, asset, total in held if total}
+    return {(alloc, asset) for alloc, asset, total in held if total}
+
+
+def _stopped_quoted(db: Session, now: datetime):
+    """The STOPPED allocations whose ledger is summed: every one stopped
+    within STOPPED_QUOTE_WINDOW, and older ones not known to be flat."""
+    cutoff = aware(now) - STOPPED_QUOTE_WINDOW
+    recent = and_(Allocation.status == AllocationStatus.STOPPED, Allocation.stopped_at >= cutoff)
+    old = _stopped_maybe_open(db, cutoff)
+    return or_(recent, Allocation.id.in_(old)) if old else recent
+
+
+def closing_allocation_ids(db: Session, now: datetime | None = None) -> set[int]:
+    """Ids of the STOPPED allocations whose paper book is not flat yet, at any
+    age: the tails still "Closing" (paper_lifecycle.is_closing, found in one
+    query instead of one book per allocation)."""
+    pairs = _open_pairs(db, _stopped_quoted(db, now or utcnow()))
+    return {alloc for alloc, _ in pairs}
+
+
+def _open_instruments(db: Session, now: datetime | None = None) -> list[Instrument]:
+    """Instruments some ACTIVE allocation, or some STOPPED allocation that is
+    not flat yet (a tail still closing, however long ago it stopped; see
+    STOPPED_QUOTE_WINDOW), holds a non-zero amount of (the ledger's net legs,
+    so a position closed by a split, a sell or the stop close is not open,
+    and a stopped tail that is flat drops out)."""
+    quoted = or_(Allocation.status == AllocationStatus.ACTIVE, _stopped_quoted(db, now or utcnow()))
+    open_pairs = _open_pairs(db, quoted)
     if not open_pairs:
         return []
     ids = {
@@ -968,7 +1055,7 @@ def _refresh_funding(db: Session, source, inst: Instrument, now: datetime) -> No
 
 def refresh_asset_marks(db: Session, limiter) -> int:
     """Quotes (and, for perps, funding rates) of every instrument an active
-    follower book holds, or a recently stopped one that is still closing
+    follower book holds, or a stopped one that is still closing
     (_open_instruments). A source that is out of budget, rate limited or
     circuit-open is skipped for the rest of the call (the next tick retries).
     Returns the number of quotes written."""

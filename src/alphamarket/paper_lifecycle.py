@@ -45,6 +45,25 @@ apply_lifecycle(db, allocation, now) -> int
       ACTIVE allocation, or an instrument whose ref is booked adds nothing,
       so a liquidation (which already flattened the perps) followed by a
       stop never closes twice. Binary allocations never reach this module.
+    - a split after the stop close (correct_late_splits): a split whose
+      corporate action arrives after the stop close but whose ex-date is at
+      or before it is booked on the pre-close holding, while the close sold
+      the pre-split quantity at a post-split quote, so the book holds the
+      split's delta again. Per such SPLIT leg (ref "ca:<id>", booked after
+      the close, dated at or before it), one group
+      "stop:<instrument_id>:<allocation_id>:ca:<id>" dated at the close and
+      priced at the close's own price and basis (the quote that was fresh
+      at that instant; never a new or stale one) sells the delta (a reverse
+      split buys it back). Its cash and fee legs are the DIFFERENCE between
+      one close of the corrected quantity (paper.fill_amounts) and what the
+      close and earlier corrections booked, so the stop close's groups add
+      up to "split, then close" to the micro (regulatory fees are rounded
+      up to the cent per fill and FINRA's TAF is capped, so they do not
+      add up share by share; a reverse split's correction refunds fee).
+      Run right after the split is booked (before a later dividend is
+      computed on the phantom shares) and again by close_stopped.
+    closing_waits(db, allocation, now) lists the positions a closing tail
+    still waits on (no fresh bid/ask): the tail page names them.
     Returns the number of events applied.
 
 close_now(db, allocation, now=None) -> int
@@ -117,7 +136,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from fractions import Fraction
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.orm import Session
 
@@ -657,6 +676,10 @@ def apply_corporate_actions(db: Session, allocation: Allocation, now: datetime) 
     for row in pending:
         if _apply_action(db, allocation, equities[row.symbol], row, now):
             applied += 1
+            if row.kind == CorporateActionKind.SPLIT:
+                # A split dated before the stop close, booked after it: close
+                # its shares now, before a later dividend is computed on them.
+                applied += correct_late_splits(db, allocation, equities[row.symbol])
     return applied
 
 
@@ -747,6 +770,52 @@ def _close_qty(allocation: Allocation, inst: Instrument, held, book):
     return held
 
 
+def _close_side(qty) -> tuple[Action, str]:
+    """A long closes with a sell at the bid, a short with a buy at the ask."""
+    return (Action.SELL, "bid") if qty.atoms > 0 else (Action.BUY, "ask")
+
+
+@dataclass(frozen=True)
+class CloseWait:
+    """One position of a closing tail that waits for a fresh quote."""
+
+    asset: str
+    label: str  # how the instrument reads on a page
+    side: str  # "bid" | "ask": the side its close takes
+    last_quote_at: datetime | None  # newest quote with that side, any age (None: none kept)
+
+
+def closing_waits(db: Session, allocation: Allocation, now: datetime) -> list[CloseWait]:
+    """The positions a stopped tail still holds that wait for a fresh quote
+    (no bid, or no ask for a short, within quote_max_age_seconds at `now`):
+    what the "Closing" notice names. Read-only and quiet (no logging); empty
+    when the tail is not closing or every position can close on the next
+    pass."""
+    if allocation.status != AllocationStatus.STOPPED:
+        return []
+    book = paper_book.book_state(db, allocation)
+    if is_flat(book):
+        return []
+    from alphamarket import paper
+
+    instruments = paper._instruments_by_asset(db, allocation)
+    waits: list[CloseWait] = []
+    for asset, held in sorted(book.holdings.items()):
+        inst = instruments.get(asset)
+        if inst is None:
+            continue
+        if inst.type == InstrumentType.PERP:
+            position = book.perps.get(asset)
+            if position is None:
+                continue
+            held = position.qty
+        _, side = _close_side(held)
+        if prices.fresh_side(db, inst.id, now, side) is not None:
+            continue
+        waits.append(CloseWait(asset, inst.label, side, prices.last_side_at(db, inst.id, side)))
+    return waits
+
+
 def close_stopped(db: Session, allocation: Allocation, now: datetime) -> int:
     """See the module docstring (the stop close). Returns instruments closed."""
     if allocation.status != AllocationStatus.STOPPED:
@@ -775,6 +844,12 @@ def close_stopped(db: Session, allocation: Allocation, now: datetime) -> int:
             continue
         ref = stop_ref(inst.id, allocation.id)
         if paper_book.has_group(db, allocation, ref):
+            # A split booked after the close but dated before it (the close
+            # sold the pre-split quantity): closed with the stop close.
+            fixed = correct_late_splits(db, allocation, inst)
+            if fixed:
+                applied += fixed
+                continue
             logger.warning(
                 "allocation %s: %s closed at the stop but still held (%s); left as is",
                 allocation.id,
@@ -782,8 +857,7 @@ def close_stopped(db: Session, allocation: Allocation, now: datetime) -> int:
                 qty.units,
             )
             continue
-        action = Action.SELL if qty.atoms > 0 else Action.BUY
-        side = "bid" if action is Action.SELL else "ask"
+        action, side = _close_side(qty)
         quote = prices.fresh_side(db, inst.id, now, side)
         if quote is None:
             logger.info(
@@ -814,6 +888,123 @@ def close_stopped(db: Session, allocation: Allocation, now: datetime) -> int:
             applied += 1
     if applied:
         logger.info("allocation %s: stop closed %d instruments", allocation.id, applied)
+    return applied
+
+
+def _stop_close_legs(db: Session, allocation: Allocation, ref: str) -> list[MirrorLedgerEntry]:
+    """Every leg of one instrument's stop close: the close (`ref`) and its
+    late-split corrections (`ref`:ca:<id>)."""
+    return list(
+        db.scalars(
+            select(MirrorLedgerEntry)
+            .where(
+                MirrorLedgerEntry.allocation_id == allocation.id,
+                or_(MirrorLedgerEntry.ref == ref, MirrorLedgerEntry.ref.like(f"{ref}:%")),
+            )
+            .order_by(MirrorLedgerEntry.id)
+        ).all()
+    )
+
+
+def correct_late_splits(db: Session, allocation: Allocation, inst: Instrument) -> int:
+    """See the module docstring (a split after the stop close). Returns the
+    corrections booked."""
+    if allocation.status != AllocationStatus.STOPPED or inst.type != InstrumentType.EQUITY:
+        return 0
+    ref = stop_ref(inst.id, allocation.id)
+    close = db.scalars(
+        select(MirrorAssetFill)
+        .where(
+            MirrorAssetFill.allocation_id == allocation.id,
+            MirrorAssetFill.instrument_id == inst.id,
+            MirrorAssetFill.reason == STOP_CLOSE,
+        )
+        .order_by(MirrorAssetFill.id)
+    ).first()
+    close_ids = [leg.id for leg in _stop_close_legs(db, allocation, ref) if leg.ref == ref]
+    if close is None or not close_ids:
+        return 0
+    closed_at = aware(close.filled_at)
+    late = [
+        leg
+        for leg in db.scalars(
+            select(MirrorLedgerEntry)
+            .where(
+                MirrorLedgerEntry.allocation_id == allocation.id,
+                MirrorLedgerEntry.asset == inst.base_asset,
+                MirrorLedgerEntry.kind == LegKind.SPLIT,
+                MirrorLedgerEntry.ref.like("ca:%"),
+                MirrorLedgerEntry.id > max(close_ids),
+            )
+            .order_by(MirrorLedgerEntry.id)
+        ).all()
+        if aware(leg.occurred_at) <= closed_at
+    ]
+    if not late:
+        return 0
+    from alphamarket import paper
+    from alphamarket.execution import ExecutedAssetFill, get_asset_executor
+
+    get_asset_executor(allocation.mode)  # paper only: live raises
+    profile = paper._profile_of(db, allocation)
+    applied = 0
+    for split in late:
+        fix_ref = f"{ref}:{split.ref}"
+        if paper_book.has_group(db, allocation, fix_ref):
+            continue
+        # What the close and earlier corrections booked, at one common scale.
+        legs = _stop_close_legs(db, allocation, ref)
+        scale = max([split.decimals] + [leg.decimals for leg in legs if leg.asset != CASH_ASSET])
+        sold = -sum(
+            leg.delta_atoms * 10 ** (scale - leg.decimals)
+            for leg in legs
+            if leg.kind == LegKind.FILL_BASE
+        )
+        received = sum(leg.delta_atoms for leg in legs if leg.kind == LegKind.FILL_QUOTE)
+        charged = -sum(leg.delta_atoms for leg in legs if leg.kind == LegKind.FEE)
+        delta = split.delta_atoms * 10 ** (scale - split.decimals)
+        if sold + delta < 0:
+            logger.warning(
+                "allocation %s: split %s of %s exceeds the stop close; left as is",
+                allocation.id,
+                split.ref,
+                inst.base_asset,
+            )
+            continue
+        # One close of the corrected quantity at the close's own price.
+        proceeds, fee = paper.fill_amounts(profile, Action.SELL, sold + delta, scale, close.price)
+        action = Action.SELL if delta > 0 else Action.BUY
+        cash = proceeds - received  # + receives more (sell), - pays back (buy)
+        executed = ExecutedAssetFill(
+            qty_atoms=abs(delta),
+            qty_decimals=scale,
+            price=close.price,
+            price_basis=close.price_basis,
+            notional_micros=cash if action is Action.SELL else -cash,
+            fee_micros=fee - charged,
+            filled_at=closed_at,
+            quote_at=aware(close.quote_at),
+        )
+        row = paper.record_asset_fill(
+            db,
+            allocation,
+            inst,
+            action,
+            executed,
+            ref=fix_ref,
+            realized_micros=0,
+            signal_id=None,
+            reason=STOP_CLOSE,
+        )
+        if row is not None:
+            applied += 1
+            logger.info(
+                "allocation %s: %s split %s booked after the stop close; closed at %s",
+                allocation.id,
+                inst.base_asset,
+                split.ref,
+                close.price,
+            )
     return applied
 
 

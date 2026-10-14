@@ -22,6 +22,9 @@ per (allocation, ref, kind, asset)):
 |  |  | (P&L realized at the mark) |
 | stop close | stop:<instrument_id>:<allocation_id> | as the spot/equity sell or perp fill |
 |  |  | above, of the whole position, at the bid (ask to cover a short) |
+| late split after it | stop:<instrument_id>:<allocation_id>:ca:<id> | the split's delta sold |
+|  |  | (reverse: bought back) at the close's price; cash and fee legs are the |
+|  |  | difference to one close of the whole (paper_lifecycle.correct_late_splits) |
 | split | ca:<corporate_action_id> | SPLIT +/-delta <base> |
 | cash dividend | ca:<corporate_action_id> | DIVIDEND +USD |
 

@@ -9,8 +9,10 @@ Contract: run(ctx) -> dict[str, int]
     w3-perf: paper_book.drop_bad_checkpoints over a random sample of
     CHECKPOINT_SAMPLE paper book checkpoints (a cache: one that disagrees
     with a full replay of the ledger is deleted, logged, and rebuilt by the
-    next mirror pass). Returns counts per category. Never touches an
-    append-only table.
+    next mirror pass); r2 follow-ups: report_stuck_closes logs every
+    position of a tail stopped more than settings.stop_close_alert_days ago
+    that still waits for a fresh quote (writes nothing). Returns counts per
+    category. Never touches an append-only table.
 
 Every table pruned here is coordination or convenience state, not evidence:
 - rate_limit_counters: windows that have ended.
@@ -31,14 +33,17 @@ Each category is deleted and committed on its own, so a failure in one
 leaves the others done.
 """
 
+import logging
 from datetime import timedelta
 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from alphamarket import paper_book, pending, ratelimit, sessions
-from alphamarket.jobs import prune_finished
+from alphamarket.jobs import aware, prune_finished
 from alphamarket.models import AssetQuote, AuthToken, UserSession
+
+logger = logging.getLogger(__name__)
 
 CHECKPOINT_SAMPLE = 50  # full replays per night; every checkpoint is also count-checked on use
 
@@ -85,6 +90,37 @@ def prune_quotes(db: Session, now, retention: timedelta) -> int:
     return result.rowcount or 0
 
 
+def report_stuck_closes(db: Session, now, after: timedelta) -> int:
+    """Log (WARNING) every position of a tail stopped more than `after` ago
+    that still waits for a fresh quote to close (paper_lifecycle.closing_waits):
+    the close never takes a stale mark (decision 9), so a delisted or
+    unquoted instrument needs a person. Prices keep requesting its quote
+    meanwhile (prices.STOPPED_QUOTE_WINDOW). Writes nothing; returns the
+    positions logged."""
+    from alphamarket import paper_lifecycle, prices
+    from alphamarket.models import Allocation
+
+    cutoff = now - after
+    logged = 0
+    for allocation_id in sorted(prices.closing_allocation_ids(db, now)):
+        allocation = db.get(Allocation, allocation_id)
+        stopped_at = aware(allocation.stopped_at) if allocation is not None else None
+        if stopped_at is not None and stopped_at > cutoff:
+            continue
+        for wait in paper_lifecycle.closing_waits(db, allocation, now):
+            logger.warning(
+                "allocation %s stopped %s still closing: %s has no fresh %s (last %s)",
+                allocation_id,
+                stopped_at.isoformat() if stopped_at else "at an unknown time",
+                wait.label,
+                wait.side,
+                wait.last_quote_at.isoformat() if wait.last_quote_at else "none kept",
+            )
+            logged += 1
+    db.rollback()  # read-only: end the transaction
+    return logged
+
+
 def run(ctx) -> dict[str, int]:
     db, now, settings = ctx.db, ctx.clock(), ctx.settings
     counts: dict[str, int] = {}
@@ -96,4 +132,7 @@ def run(ctx) -> dict[str, int]:
     db.commit()
     counts["jobs"] = prune_finished(db, now=now)
     counts["book_checkpoints"] = paper_book.drop_bad_checkpoints(db, sample=CHECKPOINT_SAMPLE)
+    counts["stuck_closes"] = report_stuck_closes(
+        db, now, timedelta(days=settings.stop_close_alert_days)
+    )
     return counts

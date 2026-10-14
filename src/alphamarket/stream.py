@@ -34,7 +34,10 @@ process's accounts free up after STREAM_LEASE_SECONDS. Venues with a per-IP
 cap on streamed users (Hyperliquid: 10) also take one of `cap` slot leases
 per egress IP ("stream:slot:<venue>:<egress_ip>:<n>"), most-followed
 creators first; a better-ranked creator left without a slot makes the
-holder of the worst-ranked one give its slot up at the next refresh.
+holder of the worst-ranked one give its slot up at the next refresh. The
+per-process cap (STREAM_MAX_ACCOUNTS) works the same way for watches only:
+a creator no process streams, kept out because this process is full, makes
+it give up its worst-ranked watched address (creators always outrank).
 
 Safety: credentials are decrypted only through ingest.connector_for ->
 credentials.open_credential (audited, purpose "stream") on every (re)connect;
@@ -585,11 +588,40 @@ class StreamSupervisor:
                 return key
         return None
 
+    def _ip_slots_full(self, db: Session, venue: str) -> bool:
+        cap = get_profile(venue).stream_users_per_ip
+        if cap is None:
+            return False
+        return len(live_leases(db, slot_lease_prefix(venue, self.settings.egress_ip))) >= cap
+
     def _release(self, db: Session, account_id: int) -> None:
         slot = self.slots.pop(account_id, None)
         if slot is not None:
             release_lease(db, slot, self.holder)
         release_lease(db, account_lease_key(account_id), self.holder)
+
+    def _evict_worst(
+        self,
+        db: Session,
+        mine: list[int],
+        rank: dict[int, int],
+        best_starved: int,
+        held: set[int],
+        start: list[Candidate],
+        stop: list[int],
+        where: str,
+    ) -> list[Candidate]:
+        """Release the worst-ranked of `mine` if it ranks below `best_starved`
+        (a candidate left without room). Returns `start` without it."""
+        worst = max(mine, key=lambda a: rank[a], default=None)
+        if worst is None or rank[worst] <= best_starved:
+            return start
+        logger.info("releasing account %s (%s): a better-ranked creator needs room", worst, where)
+        self._release(db, worst)
+        held.discard(worst)
+        if worst in self.streams:
+            stop.append(worst)
+        return [c for c in start if c.account_id != worst]
 
     def plan(self, finished: dict[int, str | None]) -> tuple[list[Candidate], list[int]]:
         """One pass over the leases (runs in a thread): release the accounts
@@ -623,12 +655,28 @@ class StreamSupervisor:
                     stop.append(account_id)
             held = set(running) - set(stop)
             starved: dict[str, int] = {}  # venue -> best rank left without a slot
+            starved_creator: int | None = None  # best creator rank the global cap kept out
+            elsewhere = {
+                k for k, h in live_leases(db, ACCOUNT_LEASE_PREFIX).items() if h != self.holder
+            }
             for c in candidates:
-                if len(held) >= self.settings.stream_max_accounts:
-                    break
                 if c.account_id in held or c.account_id in self.cooloff:
                     continue
                 key = account_lease_key(c.account_id)
+                if len(held) >= self.settings.stream_max_accounts:
+                    # Full. Only a creator no process streams is starved;
+                    # every candidate after the first watch is a watch.
+                    if c.is_watch:
+                        break
+                    if key in elsewhere:
+                        continue
+                    if self._ip_slots_full(db, c.venue):
+                        # Room alone would not help: the per-IP rule below
+                        # frees one of our worse-ranked slots, if any.
+                        starved.setdefault(c.venue, rank[c.account_id])
+                    else:
+                        starved_creator = rank[c.account_id]
+                    break
                 payload = {"venue": c.venue, "egress_ip": self.settings.egress_ip}
                 if not acquire_lease(db, key, self.holder, ttl, payload=payload):
                     continue  # another process streams it
@@ -647,18 +695,16 @@ class StreamSupervisor:
             # the next pass, here or elsewhere, takes the freed slot for it.
             for venue, best_starved in starved.items():
                 mine = [a for a in held if a in self.slots and _venue_of(candidates, a) == venue]
-                worst = max(mine, key=lambda a: rank[a], default=None)
-                if worst is not None and rank[worst] > best_starved:
-                    logger.info(
-                        "releasing %s account %s: a more-followed creator needs its slot",
-                        venue,
-                        worst,
-                    )
-                    self._release(db, worst)
-                    held.discard(worst)
-                    if worst in self.streams:
-                        stop.append(worst)
-                    start = [c for c in start if c.account_id != worst]
+                start = self._evict_worst(db, mine, rank, best_starved, held, start, stop, venue)
+            # The process cap (stream_max_accounts) is full and a creator
+            # waits: give up the worst-ranked watch this process holds, the
+            # same way (one per pass, the next pass takes the freed room).
+            if starved_creator is not None and len(held) >= self.settings.stream_max_accounts:
+                watches = {c.account_id for c in candidates if c.is_watch}
+                mine = [a for a in held if a in watches]
+                start = self._evict_worst(
+                    db, mine, rank, starved_creator, held, start, stop, "process"
+                )
         return start, stop
 
     # -- tasks --

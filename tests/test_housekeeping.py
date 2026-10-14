@@ -180,6 +180,7 @@ def test_housekeeping_deletes_exactly_the_stale_rows(session_factory):
             "pending_accounts": 0,
             "jobs": 2,
             "book_checkpoints": 0,
+            "stuck_closes": 0,
         }
         left = surviving(db, seeded)
         for table, kinds in left.items():

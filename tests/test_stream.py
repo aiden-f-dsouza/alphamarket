@@ -588,6 +588,98 @@ def test_a_claimed_creator_takes_a_stream_slot_from_a_watch(sf, monkeypatch):
     asyncio.run(scenario())
 
 
+# ---- the per-process cap (stream_max_accounts) ----------------------------------------------
+
+
+def test_a_creator_takes_room_from_a_watch_when_the_process_is_full(sf):
+    watch_a = seed(sf, key_id="0x" + "a1" * 20, allocations=5, is_watch=True)
+    watch_b = seed(sf, key_id="0x" + "b2" * 20, allocations=4, is_watch=True)
+    server = FakeServer()
+
+    async def scenario():
+        p = supervisor(sf, server, holder="P1", stream_max_accounts=2)
+        await p.refresh()
+        assert set(p.streams) == {watch_a, watch_b}  # full, IP slots to spare
+        creator = seed(sf, key_id="0x" + "c3" * 20, allocations=1)
+        await p.refresh()  # the cap keeps the creator out: the worst watch goes
+        assert set(p.streams) == {watch_a}
+        await p.refresh()  # and the creator takes the room
+        assert set(p.streams) == {watch_a, creator}
+        await p.refresh()  # stable: the remaining watch outranks nothing waiting
+        assert set(p.streams) == {watch_a, creator}
+        with sf() as db:
+            assert set(jobs.live_leases(db, stream.ACCOUNT_LEASE_PREFIX)) == {
+                account_lease_key(watch_a),
+                account_lease_key(creator),
+            }
+        await p.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_the_process_cap_never_evicts_for_a_watch_or_between_creators(sf):
+    creator_a = seed(sf, key_id="0x" + "a1" * 20, allocations=1)
+    creator_b = seed(sf, key_id="0x" + "b2" * 20, allocations=1)
+    server = FakeServer()
+
+    async def scenario():
+        p = supervisor(sf, server, holder="P1", stream_max_accounts=2)
+        await p.refresh()
+        assert set(p.streams) == {creator_a, creator_b}
+        seed(sf, key_id="0x" + "c3" * 20, allocations=9, is_watch=True)  # a heavy watch
+        seed(sf, key_id="0x" + "d4" * 20, allocations=5)  # a better-followed creator
+        await p.refresh()
+        await p.refresh()
+        assert set(p.streams) == {creator_a, creator_b}  # no churn among creators
+        await p.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_a_creator_streamed_by_another_process_evicts_nothing(sf):
+    creator = seed(sf, key_id="0x" + "a1" * 20, allocations=1)
+    watch = seed(sf, key_id="0x" + "b2" * 20, allocations=1, is_watch=True)
+    server_1, server_2 = FakeServer(), FakeServer()
+
+    async def scenario():
+        p1 = supervisor(sf, server_1, holder="P1", stream_max_accounts=1)
+        p2 = supervisor(sf, server_2, holder="P2", stream_max_accounts=1)
+        await p1.refresh()
+        assert set(p1.streams) == {creator}
+        await p2.refresh()
+        await p2.refresh()
+        assert set(p2.streams) == {watch}  # P1 has the creator: P2 keeps its watch
+        await p1.shutdown()
+        await p2.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_a_full_process_and_full_ip_slots_free_a_watch_slot_for_a_creator(sf, monkeypatch):
+    profile = registry.PROFILES["hyperliquid"]
+    monkeypatch.setitem(
+        registry.PROFILES, "hyperliquid", dataclasses.replace(profile, stream_users_per_ip=2)
+    )
+    watch_a = seed(sf, key_id="0x" + "a1" * 20, allocations=5, is_watch=True)
+    watch_b = seed(sf, key_id="0x" + "b2" * 20, allocations=4, is_watch=True)
+    server = FakeServer()
+
+    async def scenario():
+        p = supervisor(sf, server, holder="P1", stream_max_accounts=2)
+        await p.refresh()
+        assert set(p.streams) == {watch_a, watch_b}  # process and IP both full
+        creator = seed(sf, key_id="0x" + "c3" * 20, allocations=1)
+        await p.refresh()
+        assert set(p.streams) == {watch_a}
+        await p.refresh()
+        assert set(p.streams) == {watch_a, creator}
+        with sf() as db:
+            assert len(jobs.live_leases(db, "stream:slot:hyperliquid:")) == 2
+        await p.shutdown()
+
+    asyncio.run(scenario())
+
+
 # ---- secrets ------------------------------------------------------------------------------
 
 
