@@ -338,7 +338,9 @@ from an address to a person (plan: never link an address to an identity).
 
 What is stored. One snapshot per period (`leaderboard_snapshots`, a cache
 replaced on each refresh): rows with an account value of at least
-`WATCH_DISCOVER_MIN_ACCOUNT_VALUE` (default $10,000), minus opted-out
+`WATCH_DISCOVER_MIN_ACCOUNT_VALUE` (default $10,000) and some volume in
+the period (vaults, treasuries and genesis holders top the board on
+mark-to-market alone; the app hides them by a list we do not have), minus opted-out
 addresses (`watch_optouts`), keeping the top `WATCH_DISCOVER_ROWS` (default
 200) by pnl plus the top 200 by roi. Figures are rounded to 6 dp and stored
 as integer micros; they are Hyperliquid's own numbers, labelled as such, not

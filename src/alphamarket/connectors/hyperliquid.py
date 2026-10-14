@@ -1382,7 +1382,11 @@ class HyperliquidMarketData(_Info, AssetMarketData):
                     skipped += 1
                     continue
                 for period, pnl_micros, roi_key, fields in parsed:
-                    cuts[period].add(position, pnl_micros, roi_key, fields, eligible)
+                    # No volume in the period: not a trader to copy (vaults,
+                    # treasuries and genesis holders top the board on mark-
+                    # to-market alone; the app hides them, we cannot tell).
+                    traded = to_micros(fields[3]) > 0
+                    cuts[period].add(position, pnl_micros, roi_key, fields, eligible and traded)
         if skipped:
             logger.warning("hyperliquid leaderboard: skipped %d malformed rows", skipped)
         return {period: cut.entries() for period, cut in cuts.items()}

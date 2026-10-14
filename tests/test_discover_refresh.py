@@ -157,6 +157,18 @@ def test_hyperliquid_leaderboard_bounds_output_but_ranks_over_every_row():
 
 
 @respx.mock
+def test_hyperliquid_leaderboard_skips_rows_with_no_volume_in_the_period():
+    respx.get(HL_URL).mock(return_value=httpx.Response(200, text=HL_DOC))
+    md = HyperliquidMarketData(leaderboard_keep=100, leaderboard_min_account_value="0")
+    boards = md.fetch_leaderboards((LeaderboardPeriod.DAY, WEEK))
+    # Rows 4, 20, 21, 22 and 23 have day vlm "0.0" (protocol-style accounts
+    # that top the board on mark-to-market alone): gone from day, still in week.
+    day = {_n(e.address) for e in boards[LeaderboardPeriod.DAY]}
+    assert day == set(range(1, 28)) - {4, 20, 21, 22, 23}
+    assert {_n(e.address) for e in boards[WEEK]} == set(range(1, 28))
+
+
+@respx.mock
 def test_hyperliquid_leaderboard_429_is_rate_limited_and_throttled():
     calls = []
 
@@ -263,6 +275,16 @@ def test_select_rows_filters_and_unions_pnl_and_roi(settings):
         "volume_micros": None,
         "account_value_micros": 50_000_000_000,
     }
+
+
+def test_select_rows_drops_a_reported_zero_volume(settings):
+    entries = [
+        LeaderboardEntry(address=addr(1), rank=1, pnl="900", volume="0"),  # dropped
+        LeaderboardEntry(address=addr(2), rank=2, pnl="800", volume="0.000001"),
+        LeaderboardEntry(address=addr(3), rank=3, pnl="700"),  # volume not reported: kept
+    ]
+    rows = discover.select_rows(entries, blocked=set())
+    assert [_n(r["address"]) for r in rows] == [2, 3]
 
 
 # ---- discover.refresh ------------------------------------------------------------------

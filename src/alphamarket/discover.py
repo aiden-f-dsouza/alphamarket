@@ -207,7 +207,8 @@ def _fetch(
 def select_rows(entries: list[LeaderboardEntry], blocked: set[str]) -> list[dict]:
     """The snapshot rows of one (venue, period): drop rows whose reported
     account value is under watch_discover_min_account_value (kept when the
-    venue reports none) and opted-out addresses, then keep the union of the
+    venue reports none), rows with a reported zero volume for the period
+    (protocol accounts, not traders) and opted-out addresses, then keep the union of the
     top watch_discover_rows by pnl and the top watch_discover_rows by roi
     (rows without roi never qualify by roi), in pnl order. Ties keep the
     venue's rank order."""
@@ -221,6 +222,8 @@ def select_rows(entries: list[LeaderboardEntry], blocked: set[str]) -> list[dict
             continue
         value = row["account_value_micros"]
         if value is not None and value < floor:
+            continue
+        if row["volume_micros"] == 0:  # reported, and nothing traded in the period
             continue
         rows.append(row)
     by_pnl = sorted(rows, key=lambda r: r["pnl_micros"], reverse=True)  # stable: rank order
