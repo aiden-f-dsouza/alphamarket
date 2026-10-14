@@ -20,9 +20,13 @@ nothing here describes a live account, a performance fee or a high-water mark.
 """
 
 import random
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 
+from alphamarket import trader_profile as tp
 from alphamarket.charts import drawdown_window, polyline, window_x
+from alphamarket.config import get_settings
+from alphamarket.connectors.base import InstrumentType
 from alphamarket.connectors.registry import PROFILES
 from alphamarket.public import (
     ASSET_CLASS_LABELS,
@@ -1492,3 +1496,89 @@ def watch_sample_page(sample_id: str) -> dict | None:
     }
     page["tailing"] = {**page["tailing"], "state": "active", "href": "/portfolio"}
     return page
+
+
+# "How this trader trades" for /watch/sample-1. The fills below are invented
+# (BTC and ETH perps, the last five are the sample's recent trades above); every
+# metric on the page is computed from them by the real trader_profile functions,
+# so the sample cannot drift from the code. Equity is the sample's own curve.
+# (iso time UTC, instrument, action, quantity, price, order id)
+_WATCH_SAMPLE_FILLS = [
+    ("2026-06-02T00:00:14", "BTC-PERP", "buy", "0.250", "61240.0", "s01"),
+    ("2026-06-02T00:00:15", "BTC-PERP", "buy", "0.070", "61242.5", "s01"),
+    ("2026-06-04T08:00:31", "BTC-PERP", "sell", "0.320", "62105.0", "s02"),
+    ("2026-06-04T08:01:02", "ETH-PERP", "sell", "3.5", "2512.0", "s03"),
+    ("2026-06-09T16:00:20", "ETH-PERP", "buy", "3.5", "2448.5", "s04"),
+    ("2026-06-11T00:00:12", "BTC-PERP", "buy", "0.280", "60870.0", "s05"),
+    ("2026-06-12T13:42:07", "BTC-PERP", "buy", "0.080", "61455.0", "s06"),
+    ("2026-06-12T20:15:40", "BTC-PERP", "sell", "0.120", "62310.0", "s07"),
+    ("2026-06-16T16:00:44", "ETH-PERP", "sell", "4.2", "2590.0", "s09"),
+    ("2026-06-19T08:00:09", "BTC-PERP", "sell", "0.240", "63020.0", "s08"),
+    ("2026-06-22T00:00:27", "ETH-PERP", "buy", "4.2", "2611.0", "s10"),
+    ("2026-06-24T00:00:18", "BTC-PERP", "buy", "0.300", "62880.0", "s11"),
+    ("2026-06-24T00:00:19", "BTC-PERP", "buy", "0.040", "62881.0", "s11"),
+    ("2026-06-24T15:20:33", "BTC-PERP", "sell", "0.340", "62415.0", "s12"),
+    ("2026-06-30T14:05:11", "BTC-PERP", "buy", "0.220", "61900.0", "s13"),
+    ("2026-06-30T14:48:52", "BTC-PERP", "sell", "0.220", "62150.0", "s14"),
+    ("2026-06-26T15:02:30", "ETH-PERP", "sell", "2.0", "2598.0", "s31"),
+    ("2026-06-26T15:04:12", "ETH-PERP", "buy", "2.0", "2594.0", "s32"),
+    ("2026-07-03T08:00:36", "ETH-PERP", "sell", "3.0", "2705.0", "s15"),
+    ("2026-07-07T00:00:22", "BTC-PERP", "buy", "0.300", "64100.0", "s17"),
+    ("2026-07-14T08:01:15", "ETH-PERP", "buy", "3.0", "2622.0", "s16"),
+    ("2026-07-20T16:00:29", "ETH-PERP", "sell", "3.6", "2640.0", "s19"),
+    ("2026-07-27T00:00:13", "BTC-PERP", "sell", "0.300", "66310.0", "s18"),
+    ("2026-07-29T16:00:07", "ETH-PERP", "buy", "6.0", "2598.0", "s20"),
+    ("2026-07-30T14:12:08", "BTC-PERP", "buy", "0.200", "65880.0", "s33"),
+    ("2026-07-30T14:15:19", "BTC-PERP", "sell", "0.200", "65945.0", "s34"),
+    ("2026-08-02T08:00:51", "ETH-PERP", "sell", "2.4", "2660.0", "s21"),
+    ("2026-08-04T13:30:44", "BTC-PERP", "buy", "0.250", "61120.0", "s22"),
+    ("2026-08-05T00:00:26", "BTC-PERP", "buy", "0.150", "60540.0", "s23"),
+    ("2026-08-06T16:00:39", "ETH-PERP", "sell", "4.0", "2702.4", "s25"),
+    ("2026-08-13T08:00:17", "BTC-PERP", "sell", "0.400", "62010.0", "s24"),
+    ("2026-08-27T08:51:36", "BTC-PERP", "buy", "0.140", "61210.0", "s26"),
+    ("2026-08-28T16:22:10", "ETH-PERP", "buy", "0.8", "2688.1", "s27"),
+    ("2026-08-30T11:05:47", "BTC-PERP", "sell", "0.060", "63980.0", "s28"),
+    ("2026-08-31T21:40:33", "ETH-PERP", "sell", "1.2", "2651.8", "s29"),
+    ("2026-09-01T03:14:09", "BTC-PERP", "buy", "0.085", "63402.0", "s30"),
+]
+_SAMPLE_QTY_DECIMALS = 5
+
+
+def watch_sample_profile() -> tp.TraderProfile:
+    """The sample address's profile: the real `trader_profile.build_profile`
+    over `_WATCH_SAMPLE_FILLS`, the sample equity curve, and one invented
+    funding payment a day (mostly paid, as a net-long perp book would)."""
+    fills = []
+    for when, instrument, action, qty, price, order in _WATCH_SAMPLE_FILLS:
+        atoms = int(Decimal(qty).scaleb(_SAMPLE_QTY_DECIMALS))
+        notional = int(Decimal(qty) * Decimal(price) * 1_000_000)
+        fills.append(
+            tp.FillIn(
+                at=datetime.fromisoformat(when).replace(tzinfo=UTC),
+                instrument=instrument,
+                kind=InstrumentType.PERP,
+                action=action,
+                qty_atoms=atoms,
+                qty_decimals=_SAMPLE_QTY_DECIMALS,
+                price=price,
+                notional_micros=notional,
+                order_id=order,
+            )
+        )
+    dates, curve = _series(_by_slug(WATCH_BASE_SLUG))
+    equity = [tp.EquityIn(d, round(v * 1e6)) for d, v in zip(dates, curve, strict=True)]
+    rng = random.Random(23)
+    first, last = fills[0].at.date(), fills[-1].at.date()
+    funding = [
+        tp.FundingIn(
+            datetime.combine(first + timedelta(days=i), datetime.min.time(), tzinfo=UTC),
+            round(rng.gauss(-2.6, 3.5) * 1e6),
+        )
+        for i in range((last - first).days + 1)
+    ]
+    return tp.build_profile(
+        fills,
+        equity=equity,
+        funding=funding,
+        copy_delay_seconds=get_settings().ingest_interval_seconds,
+    )

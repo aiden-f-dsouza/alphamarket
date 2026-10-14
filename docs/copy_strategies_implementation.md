@@ -306,7 +306,20 @@ Follow-ups from round 2:
 - [ ] A split that arrives after a stop close but dated before it leaves
       the tail "Closing" (logged, not handled)
 
-Next: step 6 (`trader_profile.py` + the `/watch/{id}` section).
+**Step 6 (2026-10-11, branch `wip/trader-profile`):** done. Pure
+`trader_profile.py` (FIFO round trips, holding buckets, weekday x hour
+heatmap, top instruments + HHI, entry size vs equity, perp leverage,
+long/short skew, funding, prediction-market price buckets, copy
+feasibility), `trader_profile_db.py` bridge, the "How this trader
+trades" section on `/watch/{id}` only, private help at `/watch/help`
+(`docs/watchlist_help.md`), and the static demo sample computed by the
+real functions. Copy feasibility = share of closed round trips (by entry
+notional and count) held less than the copy delay
+(`ingest_interval_seconds`, 300 s), plus the median gap between trades
+(fills grouped by order id). Leverage uses the last fill price, not a
+mark. The section needs 10 fills.
+
+Next: step 7 (`/watch/discover`), after counsel on the venue terms.
 
 ## 8. Next round plan (2026-10-11)
 

@@ -12,6 +12,7 @@ match, and a partial or different duplicate quarantines the account.
 """
 
 import logging
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -845,11 +846,17 @@ def load_leg_groups(db: Session, account_id: int) -> list[LegGroup]:
 
 
 def account_entries(
-    db: Session, account_id: int, after: datetime | None = None
+    db: Session,
+    account_id: int,
+    after: datetime | None = None,
+    kinds: Collection[str] | None = None,
 ) -> list[LedgerEntry]:
     """The account's legs in ingestion order, optionally only those after
-    `after` (strictly: an anchor already contains what happened at it)."""
+    `after` (strictly: an anchor already contains what happened at it) and
+    only of the given leg `kinds` (filtered in SQL)."""
     query = select(LedgerEntry).where(LedgerEntry.venue_account_id == account_id)
+    if kinds is not None:
+        query = query.where(LedgerEntry.kind.in_([str(k) for k in kinds]))
     rows = db.scalars(query.order_by(LedgerEntry.id)).all()
     if after is None:
         return list(rows)

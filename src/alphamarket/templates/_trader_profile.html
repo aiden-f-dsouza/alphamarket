@@ -1,0 +1,133 @@
+{# "How this trader trades": private to a watcher (watch context only, included by
+   _strategy_body.html). `trader` is a trader_profile.TraderProfile or None. Inline SVG,
+   server-rendered; no script, no fetch. Navy for bars and shades (green is reserved for
+   "verified"), grey for the lesser side, red only where a cost is a cost. #}
+{% import "_macros.html" as m %}
+{% macro dur(s) -%}
+{%- if s < 60 %}{{ s|round|int }} s{% elif s < 3600 %}{{ '%g'|format((s / 60)|round(1)) }} min{% elif s < 172800 %}{{ '%g'|format((s / 3600)|round(1)) }} h{% else %}{{ '%g'|format((s / 86400)|round(1)) }} days{% endif -%}
+{%- endmacro %}
+{% macro share(x) -%}{{ "%.0f"|format(x * 100) }}%{%- endmacro %}
+{% macro x1(x) -%}{{ "%.1f"|format(x * 100) }}%{%- endmacro %}
+<section class="card" id="how-they-trade" aria-labelledby="how-they-trade-h"><div class="body" style="gap:20px">
+  <div class="spread" style="align-items:baseline;flex-wrap:wrap;gap:8px">
+    <h3 id="how-they-trade-h" style="font-family:var(--serif);font-weight:500;color:var(--brand);font-size:24px">How this trader trades</h3>
+    <a class="small text2" href="/watch/help" style="text-decoration:underline">How these are computed</a>
+  </div>
+  {% if not trader or not trader.enough_history %}
+  <div class="empty" style="padding:8px 0"><span class="text2">Not enough history yet to describe how this address trades. {% if trader and trader.n_fills %}{{ trader.n_fills }} fill{{ "s" if trader.n_fills != 1 }} so far; this section appears at 10.{% else %}No fills have been read yet; it appears at 10.{% endif %}</span></div>
+  {% else %}
+  <span class="mono small muted">{{ trader.n_fills }} fills, {{ trader.first_at.strftime("%b %-d, %Y") }} to {{ trader.last_at.strftime("%b %-d, %Y") }} (UTC). Habits read from public trades, not a verified record.</span>
+  <div class="tp-grid">
+
+<div class="tp-col">
+    {% if trader.holding %}
+    {% set h = trader.holding %}{% set top = h.buckets|map(attribute=1)|max %}
+    <div class="tp-cell"><span class="label">Holding periods</span>
+      <svg viewBox="0 0 320 132" width="100%" role="img" aria-label="Round trips by holding period">
+        <line x1="8" y1="100.5" x2="312" y2="100.5" stroke="var(--line2)"/>
+        {% for label, n in h.buckets %}{% set bh = (n / top * 78) if top else 0 %}{% set x = 14 + loop.index0 * 60 %}
+        <rect x="{{ x }}" y="{{ 100 - bh }}" width="48" height="{{ bh }}" fill="var(--brand)" fill-opacity="{{ 0.85 if n else 0 }}"><title>{{ label }}: {{ n }}</title></rect>
+        <text x="{{ x + 24 }}" y="{{ 94 - bh }}" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--text2)">{{ n }}</text>
+        <text x="{{ x + 24 }}" y="118" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--muted)">{{ label }}</text>
+        {% endfor %}
+      </svg>
+      <span class="small text2">Median {{ dur(h.median_seconds) }} across {{ h.n_round_trips }} closed round trip{{ "s" if h.n_round_trips != 1 }}.</span>
+    </div>
+    {% endif %}
+
+    {% if trader.instruments %}
+    {% set ins = trader.instruments %}
+    <div class="tp-cell"><span class="label">What they trade</span>
+      <div class="stack" style="gap:10px">
+        {% for i in ins.top %}
+        <div class="stack" style="gap:4px"><div class="spread" style="align-items:baseline"><span class="mono small" style="overflow-wrap:anywhere">{{ i.instrument }}</span><span class="mono small text2">{{ share(i.share) }} · {{ m.usd(i.notional_micros / 1000000, 0) }}</span></div>{{ m.bar(i.share * 100, "var(--brand)", 6) }}</div>
+        {% endfor %}
+      </div>
+      <span class="small text2">{{ ins.n_instruments }} instrument{{ "s" if ins.n_instruments != 1 }} traded. Concentration (HHI) {{ "%.2f"|format(ins.hhi) }}, where 1.00 is a single instrument.</span>
+    </div>
+    {% endif %}
+
+    {% if trader.perps %}
+    {% set p = trader.perps %}
+    <div class="tp-cell"><span class="label">Perpetual futures</span>
+      <div class="kv">
+        {% if p.avg_leverage is not none %}<div><span>Leverage, average</span><span>{{ "%.2f"|format(p.avg_leverage) }}×</span></div>
+        <div><span>Leverage, highest</span><span>{{ "%.2f"|format(p.max_leverage) }}×</span></div>{% endif %}
+        {% if p.long_share is not none %}<div><span>Long / short by notional</span><span>{{ share(p.long_share) }} / {{ share(1 - p.long_share) }}</span></div>{% endif %}
+        {% if p.funding_paid_micros is not none %}<div><span>Funding {{ "paid" if p.funding_paid_micros >= 0 else "received" }}</span><span {% if p.funding_paid_micros > 0 %}class="bad"{% endif %}>{{ m.usd((p.funding_paid_micros|abs) / 1000000) }}</span></div>{% endif %}
+      </div>
+      {% if p.long_share is not none %}
+      <svg viewBox="0 0 320 14" width="100%" role="img" aria-label="Long versus short notional"><rect x="0" y="2" width="320" height="10" rx="5" fill="var(--gray)"/><rect x="0" y="2" width="{{ (320 * p.long_share)|round(1) }}" height="10" rx="5" fill="var(--brand)"/></svg>
+      <span class="small text2"><span style="color:var(--brand)">Navy</span> long, grey short. Counts only notional that opened or added to a position.</span>
+      {% endif %}
+      {% if p.avg_leverage is none %}<span class="small muted">Leverage needs the nightly equity history; it follows the first run.</span>{% endif %}
+      {% if p.funding_paid_micros is none %}<span class="small muted">No funding payments recorded for this address.</span>{% endif %}
+    </div>
+    {% endif %}
+
+</div>
+<div class="tp-col">
+    {% if trader.heatmap %}
+    {% set grid = trader.heatmap %}{% set mx = grid|map("max")|max %}
+    <div class="tp-cell"><span class="label">When they trade (UTC)</span>
+      <svg viewBox="0 0 420 150" width="100%" role="img" aria-label="Fills by weekday and hour of day">
+        {% for row in grid %}{% set d = loop.index0 %}
+        <text x="26" y="{{ 12 + d * 16 + 1 }}" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--muted)">{{ ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][d] }}</text>
+        {% for n in row %}
+        <rect x="{{ 32 + loop.index0 * 16 }}" y="{{ d * 16 + 2 }}" width="14" height="14" rx="2" fill="{{ 'var(--brand)' if n else 'var(--chip)' }}"{% if n %} fill-opacity="{{ (0.18 + 0.82 * n / mx)|round(2) }}"{% endif %}><title>{{ ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][d] }} {{ "%02d"|format(loop.index0) }}:00 UTC: {{ n }} fill{{ "s" if n != 1 }}</title></rect>
+        {% endfor %}{% endfor %}
+        {% for hr in [0, 6, 12, 18, 23] %}<text x="{{ 32 + hr * 16 + 7 }}" y="132" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--muted)">{{ "%02d"|format(hr) }}</text>{% endfor %}
+      </svg>
+      <span class="small text2">Darker means more fills. Busiest cell: {{ mx }} fill{{ "s" if mx != 1 }}.</span>
+    </div>
+    {% endif %}
+
+    <div class="tp-cell"><span class="label">Pace and size</span>
+      <div class="kv">
+        {% if trader.frequency %}{% set f = trader.frequency %}
+        <div><span>Fills per active day</span><span>{{ "%.1f"|format(f.per_active_day) }}</span></div>
+        <div><span>Fills per week</span><span>{{ "%.1f"|format(f.per_week) }}</span></div>
+        <div><span>Active days</span><span>{{ f.active_days }} of {{ f.span_days }}</span></div>
+        {% endif %}
+        {% if trader.sizing %}{% set s = trader.sizing %}
+        {% if s.median_share is not none %}<div><span>Entry size, median</span><span>{{ x1(s.median_share) }} of equity</span></div>{% endif %}
+        {% if s.p90_share is not none %}<div><span>Entry size, 90th percentile</span><span>{{ x1(s.p90_share) }} of equity</span></div>{% endif %}
+        <div><span>Entries (from flat)</span><span>{{ s.n_entries }}</span></div>
+        <div><span>Scaled in / scaled out</span><span>{{ s.scale_ins }} / {{ s.scale_outs }}</span></div>
+        {% endif %}
+      </div>
+      {% if trader.sizing and trader.sizing.median_share is none %}<span class="small muted">Entry size needs the nightly equity history; it follows the first run.</span>{% endif %}
+    </div>
+
+    {% if trader.copy %}
+    {% set c = trader.copy %}
+    <div class="tp-cell"><span class="label">Copy feasibility</span>
+      <div class="kv">
+        {% if c.median_gap_seconds is not none %}<div><span>Median gap between trades</span><span>{{ dur(c.median_gap_seconds) }}</span></div>{% endif %}
+        {% if c.too_fast_notional_share is not none %}<div><span>Round trips shorter than the copy delay ({{ dur(c.copy_delay_seconds) }})</span><span>{{ share(c.too_fast_notional_share) }} of closed notional ({{ c.n_too_fast }} of {{ c.n_round_trips }})</span></div>{% endif %}
+        <div><span>Trades</span><span>{{ c.n_trades }}</span></div>
+      </div>
+      {% if c.too_fast_notional_share is not none %}<span class="small text2">A follower is about {{ dur(c.copy_delay_seconds) }} behind; trades closed faster than that cannot be copied.</span>{% endif %}
+    </div>
+    {% endif %}
+
+</div>
+
+    {% if trader.binary %}
+    {% set b = trader.binary %}
+    <div class="tp-cell wide"><span class="label">Prediction markets: entry price</span>
+      <div style="overflow-x:auto"><table>
+        <tr><th>Entry price (cents)</th><th class="num">Entries</th><th class="num">Held to settlement</th><th class="num">Win rate when held</th></tr>
+        {% for k in b.buckets %}
+        <tr><td class="mono">{{ k.label }}</td><td class="num">{{ k.n_entries }}</td>
+          <td class="num">{{ share(k.held_share) if k.held_share is not none else "·" }}</td>
+          <td class="num">{% if k.win_rate is not none %}{{ share(k.win_rate) }} <span class="muted">of {{ "%g"|format(k.decided_qty) }}</span>{% else %}·{% endif %}</td></tr>
+        {% endfor %}
+      </table></div>
+      <span class="small text2">{% if b.held_to_settlement is not none %}Overall {{ share(b.held_to_settlement) }} of settled quantity was held to settlement. {% endif %}Win rate counts contracts, and only those held through a yes or no result. A dot means no settled trades in that bucket yet.</span>
+    </div>
+    {% endif %}
+
+  </div>
+  {% endif %}
+</div></section>

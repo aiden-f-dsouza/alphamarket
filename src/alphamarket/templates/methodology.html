@@ -12,6 +12,6 @@
   .doc table { margin:16px 0; } .doc td { font-family:var(--sans); font-size:14px; color:var(--text2); }
 {% endblock %}
 {% block content %}
-{{ m.learn_tabs(nav_key) }}
+{% if tabs is not defined or tabs %}{{ m.learn_tabs(nav_key) }}{% endif %}
 <div class="doc">{{ body|safe }}</div>
 {% endblock %}
