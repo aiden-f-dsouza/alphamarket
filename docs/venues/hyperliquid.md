@@ -300,9 +300,70 @@ Open questions for counsel (watchlist):
 3. Does a wallet address with its trading history count as personal data under
    GDPR/UK GDPR/CCPA for this use, and what notice or deletion path (beyond
    the opt-out and no-identity-linking rule) is required?
-4. Does anything change for the leaderboard discover page (Hyperliquid
-   publishes a leaderboard [VERIFY endpoint, terms and rate limits; not read
-   for this draft])?
+4. Does anything change for the leaderboard discover page? (Endpoint, rate
+   cost and what is read: "Leaderboard (watch discover)" below; the terms
+   question is restated there.)
+
+## Leaderboard (watch discover)
+
+Copy strategies step 7 (`discover.py`, `/watch/discover`). Shipped behind
+`WATCH_DISCOVER_ENABLED` (fly.toml `[env]`); turn that off to vault it.
+Checked 2026-10-14.
+
+Endpoint. `GET https://stats-data.hyperliquid.xyz/Mainnet/leaderboard`
+(`/Testnet/leaderboard` for testnet), no authentication. This is the document
+the app's own leaderboard page (app.hyperliquid.xyz/leaderboard) loads: its
+JavaScript bundle fetches `https://stats-data.hyperliquid.xyz/${chain}/leaderboard`.
+It is **not** in the API documentation, which names the stats-data host only
+for builder-fill files (`/Mainnet/builder_fills/...`), so it is an
+undocumented, unversioned file and can change shape or disappear without
+notice [VERIFY: ask Hyperliquid whether it is meant for third parties]. It is
+a static JSON file on S3 behind CloudFront (`Server: AmazonS3`, `X-Cache: Hit
+from cloudfront`), regenerated every few minutes. Size on 2026-10-14:
+**38.7 MB** uncompressed (gzip is not offered), **47,097 rows**.
+
+What is read. Per row: `ethAddress`, `accountValue` (USD, now) and
+`windowPerformances` for `day`, `week`, `month` and `allTime` (each `pnl`,
+`roi`, `vlm`; decimal strings). `allTime` is stored as the period `all`. The
+document has no rank and no order; Koine ranks each period by pnl descending
+over every row (ties keep document order), as the app does. The app also
+hides vault and treasury addresses from its table; Koine does not, so its
+ranks can sit a few places below the app's, and protocol accounts (large
+holders with zero volume) can appear near the top.
+
+What is dropped. `displayName` (a user-chosen name, set on about 3% of rows)
+and `prize` are discarded inside the connector; `LeaderboardEntry` has no
+field for them, nothing identity-like is stored, and no lookup is ever made
+from an address to a person (plan: never link an address to an identity).
+
+What is stored. One snapshot per period (`leaderboard_snapshots`, a cache
+replaced on each refresh): rows with an account value of at least
+`WATCH_DISCOVER_MIN_ACCOUNT_VALUE` (default $10,000), minus opted-out
+addresses (`watch_optouts`), keeping the top `WATCH_DISCOVER_ROWS` (default
+200) by pnl plus the top 200 by roi. Figures are rounded to 6 dp and stored
+as integer micros; they are Hyperliquid's own numbers, labelled as such, not
+Koine-computed ones. The connector streams the document and keeps only the
+candidate rows (twice the snapshot size per period), so a refresh holds about
+30 MB, not the ~300 MB a whole-document parse takes.
+
+Cadence and rate cost. One GET per refresh, every
+`WATCH_DISCOVER_REFRESH_MINUTES` (default 60), plus one at worker start when
+the snapshots are older than that: about 0.9 GB of transfer a day from
+CloudFront. The file is not served by the info API, so the documented
+1,200-weight-per-minute IP budget does not obviously apply; Koine charges it
+anyway as one ordinary info request (weight 20, no per-item weight) through
+the same outbound limiter, circuit breaker and 429 path as every other
+Hyperliquid call. A busy or failing fetch waits for the next tick.
+
+Terms (for counsel). The Terms of Use govern the Interface and say nothing
+about the API or this file (see "Terms re-check" above). The leaderboard is
+something the Interface itself publishes to every visitor, but Koine reads
+the file directly, ranks tens of thousands of third-party addresses and
+offers them to its users as watch candidates. [VERIFY with counsel: does
+reading the Interface's own data file count as using the Interface (§3.1.8
+"automated methods ... in ways that exceed reasonable usage"), and does
+browsing a leaderboard of non-users change the watchlist answers above
+(questions 1 and 3)? Hourly, one request, is our position on "reasonable".]
 
 ## Known gaps
 

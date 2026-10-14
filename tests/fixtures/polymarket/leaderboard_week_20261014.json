@@ -1,0 +1,310 @@
+{
+ "data": [
+  {
+   "rank": 1,
+   "user_id": "0x0000000000000000000000000000000000000001",
+   "pnl": 3054314.534295246,
+   "volume": 13669578.487212019,
+   "user_name": "placeholder-name-1",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 2,
+   "user_id": "0x0000000000000000000000000000000000000002",
+   "pnl": 1317151.8142370004,
+   "volume": 5880738.800834,
+   "user_name": "placeholder-name-2",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 3,
+   "user_id": "0x0000000000000000000000000000000000000003",
+   "pnl": 968423.5226198849,
+   "volume": 405764.9094929989,
+   "user_name": "placeholder-name-3",
+   "profile_image": "",
+   "x_username": "placeholder-handle-3",
+   "verified": false
+  },
+  {
+   "rank": 4,
+   "user_id": "0x0000000000000000000000000000000000000004",
+   "pnl": 710245.4177638614,
+   "volume": 41573988.22819493,
+   "user_name": "placeholder-name-4",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 5,
+   "user_id": "0x0000000000000000000000000000000000000005",
+   "pnl": 661753.7444784002,
+   "volume": 2879894.283669,
+   "user_name": "placeholder-name-5",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 6,
+   "user_id": "0x0000000000000000000000000000000000000006",
+   "pnl": 603309.688140206,
+   "volume": 36459672.26813098,
+   "user_name": "placeholder-name-6",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 7,
+   "user_id": "0x0000000000000000000000000000000000000007",
+   "pnl": 580878.822685997,
+   "volume": 12895136.371393004,
+   "user_name": "placeholder-name-7",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 8,
+   "user_id": "0x0000000000000000000000000000000000000008",
+   "pnl": 495437.8752142,
+   "volume": 9557736.190674003,
+   "user_name": "placeholder-name-8",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 9,
+   "user_id": "0x0000000000000000000000000000000000000009",
+   "pnl": 479287.40539999993,
+   "volume": 1213178.851527,
+   "user_name": "placeholder-name-9",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 10,
+   "user_id": "0x000000000000000000000000000000000000000a",
+   "pnl": 429182.38509955467,
+   "volume": 1737999.7182509995,
+   "user_name": "placeholder-name-10",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 11,
+   "user_id": "0x000000000000000000000000000000000000000b",
+   "pnl": 402124.12296216685,
+   "volume": 5150069.693167,
+   "user_name": "placeholder-name-11",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 12,
+   "user_id": "0x000000000000000000000000000000000000000c",
+   "pnl": 397774.03711532033,
+   "volume": 988678.8394139997,
+   "user_name": "placeholder-name-12",
+   "profile_image": "https://example.invalid/placeholder.png",
+   "x_username": "placeholder-handle-12",
+   "verified": false
+  },
+  {
+   "rank": 13,
+   "user_id": "0x000000000000000000000000000000000000000d",
+   "pnl": 394228.0360419713,
+   "volume": 756248.280069,
+   "user_name": "placeholder-name-13",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 14,
+   "user_id": "0x000000000000000000000000000000000000000e",
+   "pnl": 391932.45794,
+   "volume": 2099379.4599999995,
+   "user_name": "placeholder-name-14",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 15,
+   "user_id": "0x000000000000000000000000000000000000000f",
+   "pnl": 390937.44762755476,
+   "volume": 7994.664002000001,
+   "user_name": "placeholder-name-15",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 16,
+   "user_id": "0x0000000000000000000000000000000000000010",
+   "pnl": 333918.369026,
+   "volume": 0.0,
+   "user_name": "placeholder-name-16",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 17,
+   "user_id": "0x0000000000000000000000000000000000000011",
+   "pnl": 304927.27826568123,
+   "volume": 18447197.20873599,
+   "user_name": "placeholder-name-17",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 18,
+   "user_id": "0x0000000000000000000000000000000000000012",
+   "pnl": 301049.62662695267,
+   "volume": 31049917.272757005,
+   "user_name": "placeholder-name-18",
+   "profile_image": "https://example.invalid/placeholder.png",
+   "x_username": "placeholder-handle-18",
+   "verified": false
+  },
+  {
+   "rank": 19,
+   "user_id": "0x0000000000000000000000000000000000000013",
+   "pnl": 295268.45452314813,
+   "volume": 9018955.659334,
+   "user_name": "placeholder-name-19",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 20,
+   "user_id": "0x0000000000000000000000000000000000000014",
+   "pnl": 280738.8582620893,
+   "volume": 0.0,
+   "user_name": "placeholder-name-20",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 21,
+   "user_id": "0x0000000000000000000000000000000000000015",
+   "pnl": 278268.78798465076,
+   "volume": 442253.65538700006,
+   "user_name": "placeholder-name-21",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 22,
+   "user_id": "0x0000000000000000000000000000000000000016",
+   "pnl": 265698.9908820001,
+   "volume": 3061294.142419,
+   "user_name": "placeholder-name-22",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 23,
+   "user_id": "0x0000000000000000000000000000000000000017",
+   "pnl": 256649.96038536902,
+   "volume": 317501.57242499996,
+   "user_name": "placeholder-name-23",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 24,
+   "user_id": "0x0000000000000000000000000000000000000018",
+   "pnl": 251309.24743257006,
+   "volume": 2612600.9545659996,
+   "user_name": "placeholder-name-24",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 25,
+   "user_id": "0x0000000000000000000000000000000000000019",
+   "pnl": 248131.20773350692,
+   "volume": 949335.676023,
+   "user_name": "placeholder-name-25",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 26,
+   "user_id": "0x000000000000000000000000000000000000001a",
+   "pnl": 243306.61969378515,
+   "volume": 2524541.93875,
+   "user_name": "placeholder-name-26",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 27,
+   "user_id": "0x000000000000000000000000000000000000001b",
+   "pnl": 228688.05814996694,
+   "volume": 3999795.7630399996,
+   "user_name": "placeholder-name-27",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 28,
+   "user_id": "0x000000000000000000000000000000000000001c",
+   "pnl": 217650.49033152242,
+   "volume": 280746.62004999997,
+   "user_name": "placeholder-name-28",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 29,
+   "user_id": "0x000000000000000000000000000000000000001d",
+   "pnl": 205704.7712782,
+   "volume": 619749.011126,
+   "user_name": "placeholder-name-29",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  },
+  {
+   "rank": 30,
+   "user_id": "0x000000000000000000000000000000000000001e",
+   "pnl": 204767.1958377047,
+   "volume": 3537793.099377999,
+   "user_name": "placeholder-name-30",
+   "profile_image": "",
+   "x_username": "",
+   "verified": false
+  }
+ ],
+ "pagination": {
+  "limit": 30,
+  "offset": 0,
+  "has_more": true,
+  "next_cursor": "eyJkYXRhIjp7InR5cGUiOiJsZWFkZXJib2FyZCIsInBhcmFtcyI6eyJsIjoxMDAwLCJvIjoxMDAwLCJzIjoiUE5MIiwidCI6IndlZWsiLCJjIjoib3ZlcmFsbCJ9fSwic2lnIjoiNmRmYjMyMmE5ODcyNDBkMWEwYWY5OTk4ZmIxODBhMzkifQ"
+ }
+}

@@ -343,6 +343,61 @@ the same way as above, and the scraping bullets apply with more force
 counsel and, ideally, Polymarket have answered.** The Hyperliquid side has a
 cleaner terms position (docs/venues/hyperliquid.md).
 
+## Leaderboard (watch discover)
+
+Copy strategies step 7 (`discover.py`, `/watch/discover`). The code exists
+and is tested, but **it does not run in production**: discover only covers
+venues open for watching, and `WATCH_VENUES` is `hyperliquid` there. It runs
+only where an operator adds `polymarket` to `WATCH_VENUES` (and
+`WATCH_DISCOVER_ENABLED` is on). Checked 2026-10-14.
+
+Endpoint. `GET https://data-api.polymarket.com/v2/leaderboard` (Data API v2;
+the v1 `/v1/leaderboard` retires with the rest of v1 on 2026-10-24), no
+authentication. Documented in https://data-api.polymarket.com/v2/openapi.json
+(`get_leaderboard`, tag "boards") and verified live. Parameters used:
+`time_period` (`day` | `week` | `month` | `all`, which map one to one onto the
+discover periods), `limit` (at most 1000), and `cursor` for deeper pages (a
+cursor pins board, window and category, so it is sent alone). Defaults kept:
+`category=overall`, `sort_by=PNL`.
+
+What is read. `user_id` (the wallet, lowercase), `rank` (Polymarket's
+competition rank: ties share a rank and the next skips) and `pnl` (USDC, a
+JSON float, rounded to 6 dp and stored as integer micros). Per the OpenAPI,
+`day`/`week`/`month` pnl is the marked equity change net of flows (it moves
+with unrealised marks) while `all` is realised-only lifetime pnl; the two are
+the venue's own figures and are labelled as such. The board has no roi and no
+account value, so the account-value floor does not apply and the roi sort has
+nothing to show for Polymarket.
+
+What is dropped. `user_name`, `profile_image`, `x_username` (a linked X
+handle) and `verified` are discarded inside the connector and never stored
+(`LeaderboardEntry` has no field for them); `volume` is dropped too, because
+it is in shares, not dollars.
+
+What is stored. Per period, the top `WATCH_DISCOVER_ROWS` (default 200) by
+pnl after removing opted-out addresses (`watch_optouts`), in
+`leaderboard_snapshots` (a cache replaced on each refresh). The connector
+asks for twice that many (one request with `limit=400`), so opt-outs cannot
+leave a snapshot short.
+
+Cadence and rate cost. Every `WATCH_DISCOVER_REFRESH_MINUTES` (default 60):
+one request per period, four in all, about 220 KB each at the full
+`limit=1000` (about 90 KB at 400). `/v2/leaderboard` falls under the Data API
+v2 general limit, 800 requests per 10 s (rate-limits page, read 2026-10-14);
+four an hour is negligible. Calls go through `_PublicHttp` (0.11 s floor,
+bounded `Retry-After` retries) and the outbound limiter hook; a 429 that
+survives those retries leaves the venue for the next tick.
+
+Terms (for counsel). Everything in "Data, scraping and commercial use" above
+applies, with more force: the board lists thousands of wallets whose owners
+have no relationship with Koine, and Koine stores a ranked copy of it. The
+leaderboard is published by Polymarket for everyone, and Koine keeps only
+addresses and Polymarket's own pnl, never the names, handles or pictures that
+come with it. [VERIFY with counsel before `polymarket` is added to
+`WATCH_VENUES` anywhere public: open questions 1, 3 and 5 cover it, plus
+whether storing a ranked copy of the board is "collecting" or "copying the
+material" under section 4.2.]
+
 ## Rate limits
 
 From https://docs.polymarket.com/quickstart/introduction/rate-limits (read

@@ -14,6 +14,7 @@ Rules:
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
+from decimal import ROUND_HALF_EVEN, Decimal
 from enum import StrEnum
 from typing import Protocol
 
@@ -898,6 +899,23 @@ class LeaderboardEntry(BaseModel):
     roi: str | None = None  # decimal fraction: "0.1234" = 12.34%
     volume: str | None = None  # decimal string, quote asset
     account_value: str | None = None  # decimal string, quote asset, at fetch time
+
+
+LEADERBOARD_QUANTUM = Decimal("0.000001")
+
+
+def leaderboard_figure(value: str | Decimal) -> str:
+    """A venue's leaderboard money figure (pnl, volume, account value) as a
+    plain decimal string of at most 6 dp, rounded half-even.
+
+    These are DISPLAY figures the venue computed and Koine labels as the
+    venue's own, never ledger money: Hyperliquid prints up to 10 dp and
+    Polymarket sends floats, and money.to_micros rightly refuses anything
+    finer than 1e-6. So connectors round here, once, explicitly, and
+    discover.snapshot_row stores the result as integer micros (invariant 1).
+    A ledger value must never come through this function."""
+    rounded = Decimal(value).quantize(LEADERBOARD_QUANTUM, rounding=ROUND_HALF_EVEN)
+    return format(rounded, "f")
 
 
 class AssetMarketData(MarketDataSource):
