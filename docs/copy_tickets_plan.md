@@ -7,8 +7,15 @@ When the user has connected their own account on that venue (read-only, as
 today), Koine checks whether they placed it and shows their real result next
 to the paper one.
 
-Status: v1 being built on `feat/copy-tickets`. Off by default
-(`COPY_TICKETS_ENABLED`).
+Status (2026-10-22): v1 built on `feat/copy-tickets`, off by default
+(`COPY_TICKETS_ENABLED`). Done: migration 0019, `copy_tickets.py` (issue,
+expire, match, stats, settings, views, email), the worker hooks, `/copy`,
+the settings form route and the JSON routes, methodology "Copy tickets",
+tests (tests/test_copy_tickets.py). Not done yet: the portfolio settings
+block, the tail form checkbox and a /portfolio notice for `copy_saved`
+(those templates were being changed elsewhere; `allocation_copy_context`
+holds what they need). See "Implementation notes (v1)" at the end for where
+the build refines this plan.
 
 ## Why this shape
 
@@ -118,3 +125,71 @@ profile.
 - `COPY_TICKETS_ENABLED` (default false): every surface and the issuing step.
 - `COPY_TICKETS_SIZED` (default true): false shows only the impersonal fields
   (no quantity for the user's amount; stake as a share of equity).
+
+## Implementation notes (v1)
+
+Where the build settles something the plan left open, or differs from it:
+
+- Issuing runs in `worker.handle_mirror` right after `process_allocation`
+  commits, so outside the allocation's row lock. Two passes racing on the
+  same paper fill are kept apart by the unique `mirror_fill_id` /
+  `mirror_asset_fill_id`: the loser's insert is rolled back alone (a
+  savepoint) and it issues and emails nothing (tested on SQLite and
+  Postgres). A ticket failure is logged and never fails mirroring. A paper
+  fill made by `POST /allocations/{id}/run` gets its ticket on the next
+  worker pass (issuing is a catch-up over every ticketless fill since
+  `copy_enabled_at`).
+- "Created after the user turned tickets on" uses the paper fill's
+  `created_at` (when Koine wrote it), compared with `copy_enabled_at`.
+- Expiry: the global mirror sweep (every sync tick) runs one UPDATE; pages
+  also show an open ticket past `expires_at` as expired before that runs.
+- Matching: tickets oldest first, real fills oldest first. The fill that
+  crosses a ticket's quantity counts only for the part needed but is used
+  up (it matches at most one ticket). A partial match keeps taking later
+  fills in its window until it is whole; `matched_price` is the VWAP of
+  every counted quantity and `matched_at` the time of the last real fill
+  used. Skipped tickets never match. Tickets older than 7 days are not
+  matched any more (daily venues ingest late, so the 24-hour window is on
+  fill time). `matched_qty_atoms` is at the ticket's `qty_decimals`
+  (floored if a real fill reports finer).
+- Accounts the user may pick: their own, same venue, not a watch account,
+  status not suspended, disconnected or pending. The venue env is not
+  compared.
+- User actions: Done from open or expired, Skip from open; anything else
+  (a double click, a ticket matched meanwhile) leaves the ticket as it is.
+  Settings changes and Done/Skip are audited (`copy.settings`,
+  `copy.ticket_done`, `copy.ticket_skip`). The settings routes share the
+  tail routes' `follow_user` rate limit.
+- `COPY_TICKETS_SIZED=false` drops the matched quantity too, not only the
+  ticket's, and the email and page use a disclaimer that says the trade is
+  the same for everyone.
+- `trade_url` is a `str.format` template with `{symbol}` (URL-quoted),
+  `{base}`, `{quote}`, `{base_lower}` and `{quote_lower}` (canonical codes
+  from the instrument; a perp's `-PERP` suffix dropped). Venue links, checked
+  2026-10-22:
+  - Kraken: `https://pro.kraken.com/app/trade/{base_lower}-{quote_lower}`,
+    confirmed (the BTC/USD page's canonical link is `/app/trade/btc-usd`).
+  - Binance.US: `https://www.binance.us/spot-trade/{base_lower}_{quote_lower}`,
+    confirmed (the BTC page links `/spot-trade/btc_usdt`).
+  - Hyperliquid: `https://app.hyperliquid.xyz/trade/{symbol}`, the widely
+    used perp form; the app loads any path, so not confirmed for spot pair
+    names [VERIFY].
+  - Kalshi (`https://kalshi.com/markets`), Polymarket
+    (`https://polymarket.com`), Coinbase
+    (`https://www.coinbase.com/advanced-trade`), Alpaca
+    (`https://app.alpaca.markets`), IBKR
+    (`https://www.interactivebrokers.com/portal/`): home link only. Kalshi
+    market pages need a slug the ticker does not carry, Polymarket's need
+    the event slug, Coinbase refuses automated checks, Alpaca and IBKR have
+    no public per-symbol page.
+  - SnapTrade: no link (orders go through the user's own broker).
+- Integration hooks for the portfolio and tail pages:
+  `copy_tickets.allocation_copy_context(db, user, allocation)` returns
+  `available`, `sized`, `allocation_id`, `enabled`, `email`, `account_id`,
+  `enabled_at`, `can_enable`, `venue`, `venue_label`, `accounts`
+  (`[{id, label}]`, never a key id), `action` (the form URL) and `stats`.
+  The form posts `enabled` and `email` checkboxes and `account_id` ("" for
+  none) to `/portfolio/allocations/{id}/copy`, which redirects to
+  `/portfolio?notice=copy_saved`. A tail form checkbox can call
+  `set_copy_settings(db, user, allocation, True, False, None)` after the
+  allocation is created.
