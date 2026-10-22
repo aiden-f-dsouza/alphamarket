@@ -2,6 +2,7 @@
 per-tail settings and the nav link. Every surface is hidden while
 COPY_TICKETS_ENABLED is off (copy_tickets_plan "Settings")."""
 
+from alphamarket.models import User
 from test_copy_tickets import copy_on  # noqa: F401  (fixture)
 from test_tail_ui import _allocations, _start, eth, viewer  # noqa: F401  (fixtures)
 
@@ -78,3 +79,16 @@ def test_portfolio_copy_settings_round_trip(
     html = client.get("/portfolio?notice=copy_saved").text
     assert "Copy ticket settings saved" in html
     assert "Copy tickets · on" in html
+
+
+def test_a_demo_investors_copy_page_carries_the_sample_banner(
+    client,
+    session_factory,
+    viewer,  # noqa: F811
+    copy_on,  # noqa: F811
+):
+    assert "Sample data" not in client.get("/copy").text
+    with session_factory() as db:
+        db.get(User, viewer).is_demo = True  # a seeded demo investor (invariant 7)
+        db.commit()
+    assert "Sample data" in client.get("/copy").text

@@ -130,7 +130,7 @@ uv run python scripts/seed_demo.py --reset
 
 # 3. Serve it
 DATABASE_URL=postgresql+psycopg://alphamarket:alphamarket@localhost:5432/alphamarket_demo \
-DEMO_MODE=true WATCH_DISCOVER_ENABLED=true \
+DEMO_MODE=true WATCH_DISCOVER_ENABLED=true COPY_TICKETS_ENABLED=true \
 uv run uvicorn alphamarket.main:app --reload
 ```
 
@@ -196,4 +196,14 @@ Scale the staging app's `worker` process to zero.
    return and drawdown beside the name and the copy lag of crypto/equity
    fills (also as JSON at `/api/feed`). Rooms and chat on that page remain the
    static community mock-up; a creator's handle links to their strategy.
-7. **Verification** (`/verification`): how each number above is computed.
+7. **Start a tail** (still logged in as the investor): open a strategy they
+   don't tail yet. The tail card has the form inline, with the drawdown
+   preselected just above that strategy's worst drawdown and an opt-in for
+   copy tickets.
+8. **Copy tickets** (`/copy`, needs `COPY_TICKETS_ENABLED=true` when serving):
+   the investor's tails have issued tickets since the seed started, all
+   through the real mirror jobs. Most have expired; trades from the last hour
+   before the seed ended are still open, with a "Place on <venue>" link and
+   Done/Skip. Each tail on `/portfolio` has a Copy tickets panel. Nothing is
+   matched, because the investor has no account of their own connected.
+9. **Verification** (`/verification`): how each number above is computed.

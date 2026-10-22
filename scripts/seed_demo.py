@@ -58,6 +58,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from alphamarket import (  # noqa: F401  (worker registers the job handlers)
+    copy_tickets,
     credentials,
     jobs,
     tails,
@@ -617,6 +618,8 @@ FOLLOWS = (
     ("investor", ("northwind", "tidewater", "meridian", "isobar", "lantern", "fedwatch")),
     ("analyst", ("harbor", "northwind", "quarry", "fedwatch")),
 )
+# Their paper tails issue copy tickets (copy_tickets.py) through the seed.
+COPY_TICKET_INVESTOR = "investor"
 INVESTORS = (("investor", "Demo Investor"), ("analyst", "Demo Analyst"))
 
 
@@ -2227,13 +2230,17 @@ class Sim:
         with self.sf() as db:
             user = db.get(User, self.users[who])
             strategy = db.get(Strategy, self.strategies[handle])
-            tails.create_allocation(
+            alloc = tails.create_allocation(
                 db,
                 user,
                 tails.AllocationIn(
                     strategy_slug=strategy.slug, allocation=f"{dollars}.00", drawdown_limit_bps=dd
                 ),
             )
+            if who == COPY_TICKET_INVESTOR:
+                # Copy tickets from the tail's start: the real mirror jobs issue
+                # them as the simulation runs (most expire; the last hour's stay open).
+                copy_tickets.set_copy_settings(db, user, alloc, True, False, None)
 
     def on_final(self, _arg) -> None:
         """Today: a last sync of everyone, then the nightly set (reconcile,
@@ -2402,12 +2409,20 @@ def seed(
             for h, b in world.by_handle.items()
         )
     )
-    with (
-        network_blocked(),
-        sim_registry(world),
-        time_machine.travel(world.start - timedelta(hours=1), tick=False) as traveller,
-    ):
-        summary = Sim(sf, world, traveller, password, log).run()
+    settings = get_settings()
+    copy_was = settings.copy_tickets_enabled
+    # Tickets are issued whatever the serving env says; COPY_TICKETS_ENABLED
+    # there decides whether anyone sees them.
+    settings.copy_tickets_enabled = True
+    try:
+        with (
+            network_blocked(),
+            sim_registry(world),
+            time_machine.travel(world.start - timedelta(hours=1), tick=False) as traveller,
+        ):
+            summary = Sim(sf, world, traveller, password, log).run()
+    finally:
+        settings.copy_tickets_enabled = copy_was
     from alphamarket import public
 
     with sf() as db:

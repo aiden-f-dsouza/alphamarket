@@ -26,6 +26,7 @@ from alphamarket.config import get_settings
 from alphamarket.models import (
     Allocation,
     AllocationStatus,
+    CopyTicket,
     EquitySnapshot,
     MirrorAssetFill,
     Strategy,
@@ -161,6 +162,9 @@ def test_small_seed_through_the_real_pipeline(demo_db, demo_on):
         ).all()
         assert copied  # signals v2 -> paper fills
         assert {f.price_basis for f in copied} <= {"ask", "bid", "creator_price_penalty"}
+        tickets = db.scalars(select(CopyTicket).where(CopyTicket.user_id == investor.id)).all()
+        assert tickets  # the investor's tails issued copy tickets through the real jobs
+        assert not db.scalars(select(CopyTicket).where(CopyTicket.user_id != investor.id)).all()
 
         # Invariant 7: without DEMO_MODE nothing seeded is public.
         get_settings().demo_mode = False

@@ -54,6 +54,7 @@ def _page(
         "copy.html",
         status_code=status_code,
         user=user,
+        demo=user.is_demo,  # a seeded demo investor's tickets are sample data (invariant 7)
         notice=notice,
         error=error,
         **data,
