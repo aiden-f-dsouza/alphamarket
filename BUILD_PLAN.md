@@ -460,6 +460,10 @@ as phases P0-P8 (hygiene/CI, Ledger v2, jobs + outbound rate limits, security
 streaming), compares hosting options, and lists outside setup. Scope confirmed:
 paper copying only; crypto = Kraken, Hyperliquid, Coinbase, Binance.US;
 equities long-only via Alpaca, IBKR Flex, SnapTrade. M12/M13 deferred.
+2026-10-22: on-chain perp DEXs join for WATCHING public addresses only (no
+wallet connects): Lighter, Pacifica, GMX design note in wave 1, Nado wave 2;
+dYdX (US geoblock) and Drift (relaunched as Velocity) are no-go. Plan:
+`docs/onchain_perps_plan.md`; demo first, prod after each terms position.
 
 Next features (2026-10-07): `docs/copy_strategies_plan.md` plans Koine-run
 strategies (agent portfolios trading real Koine-owned accounts, connected

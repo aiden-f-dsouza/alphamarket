@@ -12,7 +12,7 @@ the two disagree, fix one of them; do not leave both.
 | Area | In this pass | Deferred |
 |---|---|---|
 | Copying | **Paper copy for every asset class** (binary, crypto spot, crypto perps, equities). Invariants 4 and 8 unchanged: read-only keys only, `get_executor("live")` still raises. | Sandbox or live execution, write-scoped keys |
-| Crypto | Kraken, Coinbase (behind written CDP approval), Hyperliquid, Binance.US | On-chain self-custody wallets, Binance.com/Bybit/OKX |
+| Crypto | Kraken, Coinbase (behind written CDP approval), Hyperliquid, Binance.US. **2026-10-22:** on-chain perp DEXs (Lighter, Pacifica, GMX; Nado later) for WATCHING public addresses only, never wallet connects (docs/onchain_perps_plan.md) | Connecting on-chain self-custody wallets, Binance.com/Bybit/OKX |
 | Equities | Alpaca OAuth, IBKR Flex, SnapTrade; long stocks/ETFs incl. dividends, splits, symbol changes | Options, short positions (flagged "unsupported activity" at ingest) |
 | Security | TOTP, DB sessions, CSRF, headers, KMS envelope vault, audit log, CI scanning, backups, consent screens | SOC 2 audit, pen test (evidence collection starts now) |
 | Rate limiting | Inbound (protect Koine) and outbound (respect venue budgets, per key and per egress IP) | |
