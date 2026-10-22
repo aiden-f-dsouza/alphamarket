@@ -107,6 +107,20 @@ PROFILES: dict[str, VenueProfile] = {
         asset_classes=("prediction",),  # wave2
         # step 7: /v2/leaderboard time_period day|week|month|all (verified 2026-10-14)
         leaderboard_periods=("day", "week", "month", "all"),
+        # /v2/leaderboard has pnl only; the rest is PolymarketMarketData.leaderboard_details
+        leaderboard_columns=(
+            "pnl",
+            "volume",
+            "positions_value",
+            "markets_traded",
+            "biggest_win",
+            "active_since",
+        ),
+        leaderboard_note=(
+            "PnL is Polymarket's leaderboard figure for the period; volume, positions value "
+            "and lifetime stats come from Polymarket's public wallet stats. Volume counts "
+            "whole UTC days. Polymarket publishes no ROI or cash balance."
+        ),
     ),
     # ---- venue-kraken ----
     "kraken": VenueProfile(

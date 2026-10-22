@@ -63,8 +63,9 @@ values, so history ingested from v1 is NOT re-ingested; keep it that way
 (fills are append-only and unique on this id).
 """
 
+import logging
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any
 
@@ -73,6 +74,8 @@ import httpx
 from alphamarket.connectors.base import (
     Action,
     BalanceUnavailable,
+    BudgetExhausted,
+    LeaderboardDetails,
     LeaderboardEntry,
     LeaderboardPeriod,
     MarketDataSource,
@@ -100,6 +103,31 @@ LEADERBOARD_WINDOWS = {
     LeaderboardPeriod.ALL: "all",
 }
 LEADERBOARD_PAGE_MAX = 1000  # `limit` maximum on /v2/leaderboard
+# Whole UTC days a board period covers for /v2/user-volume (the window ends
+# today, so "day" is today so far, "week" the last 7 UTC days incl. today).
+# `all` has no entry: the bounds are omitted (full history).
+VOLUME_WINDOW_DAYS = {
+    LeaderboardPeriod.DAY: 1,
+    LeaderboardPeriod.WEEK: 7,
+    LeaderboardPeriod.MONTH: 30,
+}
+
+logger = logging.getLogger(__name__)
+
+
+def volume_window(period: LeaderboardPeriod, now: datetime) -> dict[str, int]:
+    """`start`/`end` epoch seconds for /v2/user-volume: the last N whole UTC
+    days ending today (start = 00:00 UTC of day today-N+1, end = now; the
+    venue floors both to their UTC day). {} for `all`."""
+    days = VOLUME_WINDOW_DAYS.get(period)
+    if days is None:
+        return {}
+    now = now.astimezone(UTC)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return {
+        "start": int((today - timedelta(days=days - 1)).timestamp()),
+        "end": int(now.timestamp()),
+    }
 
 
 def is_address(value: str) -> bool:
@@ -408,6 +436,11 @@ class PolymarketMarketData(MarketDataSource):
         self.data_url = data_url.rstrip("/")
         self.leaderboard_keep = leaderboard_keep
         self.http = _PublicHttp(client)
+        # leaderboard_details: value and user-stats do not depend on the
+        # period, so one fetch per address serves all four boards. A failed
+        # fetch is cached as None too: one refresh never retries an address.
+        self._wallet_cache: dict[str, tuple[str | None, dict[str, Any] | None]] = {}
+        self._enrichment_stopped = False
 
     def _quote(self, token_id: str, side: str) -> int:
         resp = self.http.get(f"{self.clob_url}/price", {"token_id": token_id, "side": side})
@@ -517,3 +550,104 @@ class PolymarketMarketData(MarketDataSource):
             seen.add(cursor)
             params = {"cursor": cursor}  # the cursor pins the board and window
         return rows[: self.leaderboard_keep]
+
+    # ---- discover: per-wallet enrichment of the kept rows ----
+
+    def leaderboard_details(
+        self,
+        period: LeaderboardPeriod,
+        addresses: list[str],
+        now: datetime | None = None,
+    ) -> dict[str, LeaderboardDetails]:
+        """Data API v2 public wallet stats for the KEPT rows of one board
+        (OpenAPI /v2/openapi.json, read 2026-10-22; fixtures in
+        tests/fixtures/polymarket/):
+
+        - `GET /v2/user-volume?user=&start=&end=` -> `data.volume_usdc`: the
+          period's volume in USD (`data.volume` is shares: ignored). Whole UTC
+          days (volume_window); `all` sends no bounds.
+        - `GET /v2/value?user=` -> `data.value`: open positions marked to
+          market, USDC. Not an account value: cash is not observable.
+        - `GET /v2/user-stats?user=` -> `data.trades` (distinct markets
+          traded, lifetime), `data.biggest_win` (USDC, lifetime) and
+          `data.join_date` (epoch s or null). `data: null` = unknown user.
+          Everything else it returns (views, all_time_pnl, fee and reward
+          fields, volume) is ignored.
+
+        value and user-stats are fetched once per address per instance. A
+        failed call leaves its fields None and is logged; a 429 that survives
+        _PublicHttp's retries, or an exhausted budget, stops all further
+        enrichment (`enrichment_rate_limited`, rows done so far stand)."""
+        now = now or datetime.now(UTC)
+        window = volume_window(period, now)
+        out: dict[str, LeaderboardDetails] = {}
+        if self._enrichment_stopped:
+            return out
+        try:
+            for address in addresses:
+                volume = self._get_figure("user-volume", {"user": address, **window}, "volume_usdc")
+                if address not in self._wallet_cache:
+                    value = self._get_figure("value", {"user": address}, "value")
+                    stats = self._get_data("user-stats", {"user": address})
+                    self._wallet_cache[address] = (value, stats)
+                value, stats = self._wallet_cache[address]
+                stats = stats or {}
+                out[address] = LeaderboardDetails(
+                    volume=volume,
+                    positions_value=value,
+                    markets_traded=_int_or_none(stats.get("trades")),
+                    biggest_win=_figure_or_none(stats.get("biggest_win")),
+                    active_since=_int_or_none(stats.get("join_date")),
+                )
+        except (RateLimited, BudgetExhausted) as exc:
+            self._enrichment_stopped = True
+            if isinstance(exc, RateLimited):
+                self.enrichment_rate_limited = exc
+            logger.warning(
+                "polymarket discover: enrichment stopped after %d of %d addresses: %s",
+                len(out),
+                len(addresses),
+                exc,
+            )
+        return out
+
+    def _get_data(self, path: str, params: dict[str, Any]) -> dict[str, Any] | None:
+        """One wallet-stats GET -> its `data` object; None when the venue has
+        none (`data: null`) or the call failed (logged). Raises RateLimited
+        and BudgetExhausted so the caller can stop."""
+        self.throttle(path)
+        try:
+            resp = self.http.get(f"{self.data_url}/v2/{path}", params)
+            if resp.status_code == 429:
+                retry = resp.headers.get("Retry-After") or ""
+                wait = float(retry) if retry.replace(".", "", 1).isdigit() else 10.0
+                raise RateLimited(wait, path)
+            resp.raise_for_status()
+            data = resp.json().get("data")
+        except (httpx.HTTPError, ValueError, AttributeError) as exc:
+            logger.warning("polymarket discover: /v2/%s failed: %s", path, type(exc).__name__)
+            return None
+        return data if isinstance(data, dict) else None
+
+    def _get_figure(self, path: str, params: dict[str, Any], key: str) -> str | None:
+        data = self._get_data(path, params)
+        return _figure_or_none(data.get(key)) if data else None
+
+
+def _figure_or_none(value: Any) -> str | None:
+    """A USDC figure as a 6 dp decimal string; None when absent or not a number."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return leaderboard_figure(_dec(value))
+    except (ArithmeticError, ValueError, TypeError):
+        return None
+
+
+def _int_or_none(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return None

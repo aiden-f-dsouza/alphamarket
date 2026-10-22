@@ -1545,13 +1545,14 @@ def synthetic_solana_address(tag: str) -> str:
 def discover_sample(venue: str | None, period: str | None, sort: str):
     """The sample `discover.DiscoverView` (same bad-param fallbacks as the real one)."""
     from alphamarket import discover
-    from alphamarket.connectors.base import LeaderboardEntry
+    from alphamarket.connectors.base import LeaderboardDetails, LeaderboardEntry
 
     venues = tuple(_DISCOVER_VENUES)
     periods = tuple(_DISCOVER_SCALE)
     venue = venue if venue in venues else venues[0]
     period = period if period in periods else periods[0]
-    sort = sort if sort in discover.SORTS else "pnl"
+    columns = discover.columns_for(venue)
+    sort = sort if sort in discover.SORTS and sort in ("pnl", *columns) else "pnl"
     rng = random.Random(f"discover-{venue}-{period}")
     base = _DISCOVER_SCALE[period] * _DISCOVER_VENUES[venue]
     stored = []
@@ -1559,6 +1560,30 @@ def discover_sample(venue: str | None, period: str | None, sort: str):
         pnl = round(2_400_000 * base * (0.86**i) * rng.uniform(0.85, 1.15), 2)
         value = round(rng.uniform(0.4, 6.0) * 1_000_000, 2)
         roi = round(pnl / value * rng.uniform(0.5, 1.5), 4)
+        volume = f"{round(value * rng.uniform(3, 40), 2):.2f}"
+        if venue == "polymarket":  # pnl only on the board; the rest are wallet stats
+            row = discover.snapshot_row(
+                venue,
+                LeaderboardEntry(address=_discover_address(venue, i), rank=i + 1, pnl=f"{pnl:.2f}"),
+            )
+            # Lifetime figures scale with an all-time pnl, not the period's: a
+            # biggest win under one day's pnl, or volume 2,000x pnl, reads wrong.
+            lifetime = 2_400_000 * 0.4 * (0.86**i) * rng.uniform(0.85, 1.15)
+            discover.merge_details(
+                row,
+                LeaderboardDetails(
+                    volume=f"{round(abs(pnl) * rng.uniform(8, 40), 2):.2f}",
+                    positions_value=f"{round(lifetime * rng.uniform(0.05, 0.6), 2):.2f}",
+                    markets_traded=rng.randint(40, 1800),
+                    biggest_win=f"{round(lifetime * rng.uniform(0.08, 0.35), 2):.2f}",
+                    active_since=int(
+                        datetime(2023, 1, 1, tzinfo=UTC).timestamp()
+                        + rng.randint(0, 3 * 365) * 86400
+                    ),
+                ),
+            )
+            stored.append(row)
+            continue
         stored.append(
             discover.snapshot_row(
                 venue,
@@ -1567,7 +1592,7 @@ def discover_sample(venue: str | None, period: str | None, sort: str):
                     rank=i + 1,
                     pnl=f"{pnl:.2f}",
                     roi=f"{roi:.4f}",
-                    volume=f"{round(value * rng.uniform(3, 40), 2):.2f}",
+                    volume=volume,
                     account_value=f"{value:.2f}",
                 ),
             )
@@ -1593,9 +1618,13 @@ def discover_sample(venue: str | None, period: str | None, sort: str):
                 short=short_address(r["address"]),
                 rank=r["rank"],
                 pnl_micros=r["pnl_micros"],
-                roi=float(r["roi"]),
+                roi=float(r["roi"]) if r["roi"] is not None else None,
                 volume_micros=r["volume_micros"],
                 account_value_micros=r["account_value_micros"],
+                positions_value_micros=r.get("positions_value_micros"),
+                markets_traded=r.get("markets_traded"),
+                biggest_win_micros=r.get("biggest_win_micros"),
+                active_since=r.get("active_since"),
                 state=state,
                 watch_strategy_id=1 if state == discover.RowState.WATCHING else None,
                 listed_slug=slug,
@@ -1611,6 +1640,9 @@ def discover_sample(venue: str | None, period: str | None, sort: str):
         rows=rows,
         watch_count=len(_WATCH_SAMPLES),
         watch_max=get_settings().watch_max_per_user,
+        columns=columns,
+        labels=discover.labels_for(venue),
+        note=PROFILES[venue].leaderboard_note,
     )
 
 

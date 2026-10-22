@@ -477,15 +477,7 @@ def discover_watches(
     view = discover.discover_view(db, user, venue, period, sort)
     rows = []
     for r in view.rows:
-        row = {
-            "address": r.address,
-            "rank": r.rank,
-            "pnl_micros": r.pnl_micros,
-            "roi": r.roi,
-            "volume_micros": r.volume_micros,
-            "account_value_micros": r.account_value_micros,
-            "state": r.state,
-        }
+        row = discover.row_json(view, r)
         if r.watch_strategy_id is not None:
             row["watch_strategy_id"] = r.watch_strategy_id
         if r.listed_slug is not None:
@@ -497,6 +489,7 @@ def discover_watches(
         "sort": view.sort,
         "venues": list(view.venues),
         "periods": list(view.periods),
+        "columns": list(view.columns),
         "fetched_at": view.fetched_at.isoformat() if view.fetched_at else None,
         "watch_count": view.watch_count,
         "watch_max": view.watch_max,

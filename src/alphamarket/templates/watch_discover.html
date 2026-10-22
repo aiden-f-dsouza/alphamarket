@@ -3,7 +3,7 @@
 {% block title %}Discover addresses · Koine{% endblock %}
 {% block nav_active %}watch{% endblock %}
 {% block style %}
-  .dgrid { display:grid; grid-template-columns:44px minmax(0,1fr) 120px 80px 120px 120px 150px; gap:16px; align-items:center; padding:12px 20px; border-bottom:1px solid var(--line); }
+  .dgrid { display:grid; grid-template-columns:var(--cols, 44px minmax(0,1fr) 120px 80px 120px 120px 150px); gap:16px; align-items:center; padding:12px 20px; border-bottom:1px solid var(--line); }
   .dgrid:last-child { border-bottom:0; }
   .dgrid.head { padding-top:10px; padding-bottom:10px; }
   .dgrid .r { text-align:right; }
@@ -39,8 +39,10 @@
   <nav class="seg" aria-label="Venue">{% for v in view.venues %}<a href="{{ tab_url(v, view.period, view.sort) }}" class="{{ 'on' if v == view.venue }}">{{ venue_labels[v] }}</a>{% endfor %}</nav>
   {% endif %}
   <nav class="seg" aria-label="Period">{% for p in view.periods %}<a href="{{ tab_url(view.venue, p, view.sort) }}" class="{{ 'on' if p == view.period }}">{{ period_name(p) }}</a>{% endfor %}</nav>
-  <nav class="seg" aria-label="Sort by">{% for s, name in [("pnl", "PnL"), ("roi", "ROI")] %}<a href="{{ tab_url(view.venue, view.period, s) }}" class="{{ 'on' if s == view.sort }}">{{ name }}</a>{% endfor %}</nav>
+  {% if view.sorts | length > 1 %}<nav class="seg" aria-label="Sort by">{% for s in view.sorts %}<a href="{{ tab_url(view.venue, view.period, s) }}" class="{{ 'on' if s == view.sort }}">{{ view.label(s) }}</a>{% endfor %}</nav>{% endif %}
 </div>
+
+{% if view.note %}<p class="small text2" style="line-height:1.6;max-width:760px">{{ view.note }}</p>{% endif %}
 
 <p class="small text2" style="line-height:1.6;max-width:760px">These are {{ venue_labels[view.venue] }}'s own leaderboard figures for the period, not Koine-verified. Koine starts its own record of an address when you add it.
   {% if updated %}<span class="mono muted">Updated {{ updated }}.</span>{% endif %}</p>
@@ -49,15 +51,15 @@
 <div class="card plain"><div class="body"><span class="muted">{% if view.fetched_at is none %}The first leaderboard refresh hasn't run yet. Check back soon.{% else %}No addresses to show for this period.{% endif %}</span></div></div>
 {% else %}
 <div class="card">
-  <div class="dgrid head"><span class="label">#</span><span class="label">Address</span><span class="label r">PnL</span><span class="label r hide">ROI</span><span class="label r hide">Volume</span><span class="label r hide">Account value</span><span class="label r">&nbsp;</span></div>
+  {% set cols = view.columns | reject("equalto", "pnl") | list %}
+  {% set gridcols = "44px minmax(0,1fr) 120px" ~ (" 110px" * cols|length) ~ " 150px" %}
+  <div class="dgrid head" style="--cols:{{ gridcols }}"><span class="label">#</span><span class="label">Address</span><span class="label r">{{ view.label("pnl") }}</span>{% for c in cols %}<span class="label r hide">{{ view.label(c) }}</span>{% endfor %}<span class="label r">&nbsp;</span></div>
   {% for r in view.rows %}
-  <div class="dgrid">
+  <div class="dgrid" style="--cols:{{ gridcols }}">
     <span class="mono small muted">{{ loop.index }}</span>
-    <div class="stack" style="gap:2px;min-width:0"><span class="mono" title="{{ r.address }}" style="font-size:14px">{{ r.short }}</span><span class="mono small muted only-m">ROI {{ m.pct(r.roi) }}</span></div>
+    <div class="stack" style="gap:2px;min-width:0"><span class="mono" title="{{ r.address }}" style="font-size:14px">{{ r.short }}</span>{% if "roi" in cols %}<span class="mono small muted only-m">ROI {{ m.pct(r.roi) }}</span>{% endif %}</div>
     <span class="mono r" style="font-size:14px">{{ m.usd(r.pnl_micros / 1000000, 0) }}</span>
-    <span class="mono r hide" style="font-size:14px">{{ m.pct(r.roi) }}</span>
-    <span class="mono r hide" style="font-size:14px">{% if r.volume_micros is not none %}{{ m.usd(r.volume_micros / 1000000, 0) }}{% endif %}</span>
-    <span class="mono r hide" style="font-size:14px">{% if r.account_value_micros is not none %}{{ m.usd(r.account_value_micros / 1000000, 0) }}{% endif %}</span>
+    {% for c in cols %}<span class="mono r hide" style="font-size:14px">{% if c == "roi" %}{{ m.pct(r.roi) }}{% elif c == "volume" %}{% if r.volume_micros is not none %}{{ m.usd(r.volume_micros / 1000000, 0) }}{% endif %}{% elif c == "account_value" %}{% if r.account_value_micros is not none %}{{ m.usd(r.account_value_micros / 1000000, 0) }}{% endif %}{% elif c == "positions_value" %}{% if r.positions_value_micros is not none %}{{ m.usd(r.positions_value_micros / 1000000, 0) }}{% endif %}{% elif c == "biggest_win" %}{% if r.biggest_win_micros is not none %}{{ m.usd(r.biggest_win_micros / 1000000, 0) }}{% endif %}{% elif c == "markets_traded" %}{% if r.markets_traded is not none %}{{ "{:,}".format(r.markets_traded) }}{% endif %}{% elif c == "active_since" %}{% if r.active_since is not none %}{{ r.since }}{% endif %}{% endif %}</span>{% endfor %}
     <div class="act">
       {% if r.state == "watching" %}
       <a href="{{ '/watch/sample-1' if sample else '/watch/' ~ r.watch_strategy_id }}" class="small text2" style="text-decoration:underline;text-align:right">On your watchlist</a>

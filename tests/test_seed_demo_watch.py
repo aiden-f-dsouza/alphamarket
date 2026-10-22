@@ -140,12 +140,15 @@ def test_seed_stores_leaderboard_snapshots_with_the_watched_address(seeded):
     with sf() as db:
         snaps = db.scalars(select(LeaderboardSnapshot)).all()
         assert {(s.venue, s.period) for s in snaps} == {
-            ("hyperliquid", p) for p in seed_demo.LEADERBOARD_PERIODS
+            (v, p) for v in ("hyperliquid", "polymarket") for p in seed_demo.LEADERBOARD_PERIODS
         }
         for s in snaps:
             assert len(s.rows) == 24
             assert all(re.fullmatch(r"0x[0-9a-f]{40}", r["address"]) for r in s.rows)
-            assert seed_demo.WATCH_ADDRESS in {r["address"] for r in s.rows}
+            if s.venue == "hyperliquid":
+                assert seed_demo.WATCH_ADDRESS in {r["address"] for r in s.rows}
+            else:  # wallet stats merged in, no roi
+                assert s.rows[0]["roi"] is None and s.rows[0]["markets_traded"] is not None
         investor = db.scalar(select(User).where(User.email == f"investor@{seed_demo.EMAIL_DOMAIN}"))
         settings = get_settings()
         settings.watch_discover_enabled = True

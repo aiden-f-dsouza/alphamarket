@@ -2378,7 +2378,7 @@ def seed_leaderboards(db, fetched_at: datetime) -> None:
 
 def _seed_board(db, venue: str, address_of, fetched_at: datetime) -> None:
     from alphamarket import discover
-    from alphamarket.connectors.base import LeaderboardEntry
+    from alphamarket.connectors.base import LeaderboardDetails, LeaderboardEntry
 
     scale = {"day": 0.012, "week": 0.06, "month": 0.22, "all": 1.0}
     for period in LEADERBOARD_PERIODS:
@@ -2401,6 +2401,29 @@ def _seed_board(db, venue: str, address_of, fetched_at: datetime) -> None:
                 )
             )
         discover.store_snapshot(db, venue, period, rows, fetched_at)
+        # Polymarket: pnl from the board, the rest from wallet stats (invented addresses)
+        pm_rows = []
+        for i in range(24):
+            pnl = 1_200_000 * scale[period] * (0.87**i)
+            row = discover.snapshot_row(
+                "polymarket",
+                LeaderboardEntry(
+                    address="0x" + f"b0b0{i:04x}" + "b0b0" * 8, rank=i + 1, pnl=f"{pnl:.2f}"
+                ),
+            )
+            discover.merge_details(
+                row,
+                LeaderboardDetails(
+                    volume=f"{pnl * (4 + i % 6):.2f}",
+                    # lifetime figures scale with all-time pnl, not the period's
+                    positions_value=f"{1_200_000 * 0.87**i * 0.05 * (1 + i % 4):.2f}",
+                    markets_traded=60 + i * 37 % 900,
+                    biggest_win=f"{1_200_000 * 0.87**i * 0.2:.2f}",
+                    active_since=1_700_000_000 + i * 5_000_000,
+                ),
+            )
+            pm_rows.append(row)
+        discover.store_snapshot(db, "polymarket", period, pm_rows, fetched_at)
 
 
 def seed(

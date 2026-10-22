@@ -26,7 +26,7 @@ Rules:
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -36,6 +36,7 @@ from alphamarket.config import get_settings
 from alphamarket.connectors import addresses
 from alphamarket.connectors.base import (
     BudgetExhausted,
+    LeaderboardDetails,
     LeaderboardEntry,
     LeaderboardPeriod,
     MarketDataSource,
@@ -61,6 +62,31 @@ logger = logging.getLogger(__name__)
 SORTS = ("pnl", "roi")
 PERIOD_ORDER = tuple(p.value for p in LeaderboardPeriod)
 
+# Every column a venue's `VenueProfile.leaderboard_columns` may name, with its
+# header. Venue overrides say what is different about that venue's figure.
+COLUMN_LABELS = {
+    "pnl": "PnL",
+    "roi": "ROI",
+    "volume": "Volume",
+    "account_value": "Account value",
+    "positions_value": "Positions value",
+    "markets_traded": "Markets",
+    "biggest_win": "Biggest win",
+    "active_since": "Since",
+}
+VENUE_COLUMN_LABELS = {"polymarket": {"volume": "Volume (UTC days)"}}
+# Column -> DiscoverRow field (also its /api/watch/discover key). pnl is
+# always present, so it is not here.
+COLUMN_FIELDS = {
+    "roi": "roi",
+    "volume": "volume_micros",
+    "account_value": "account_value_micros",
+    "positions_value": "positions_value_micros",
+    "markets_traded": "markets_traded",
+    "biggest_win": "biggest_win_micros",
+    "active_since": "active_since",
+}
+
 
 class RowState:
     ADD = "add"  # can be added to the user's watchlist
@@ -82,6 +108,18 @@ class DiscoverRow:
     state: str  # RowState
     watch_strategy_id: int | None = None  # state WATCHING: /watch/{id}
     listed_slug: str | None = None  # state LISTED: /s/{slug}
+    # Venue wallet stats (LeaderboardDetails); None = the venue has no such column or no value
+    positions_value_micros: int | None = None
+    markets_traded: int | None = None
+    biggest_win_micros: int | None = None
+    active_since: int | None = None  # epoch seconds, UTC
+
+    @property
+    def since(self) -> str:
+        """active_since as month and year (UTC), "" when unknown."""
+        if self.active_since is None:
+            return ""
+        return datetime.fromtimestamp(self.active_since, UTC).strftime("%b %Y")
 
 
 @dataclass(frozen=True)
@@ -95,6 +133,47 @@ class DiscoverView:
     rows: list[DiscoverRow]
     watch_count: int
     watch_max: int
+    columns: tuple[str, ...] = ("pnl", "roi", "volume", "account_value")  # venue's, in order
+    labels: dict[str, str] | None = None  # column -> header; None = COLUMN_LABELS
+    note: str = ""  # the venue's one-line reading guide
+
+    @property
+    def sorts(self) -> tuple[str, ...]:
+        """The sort toggles this venue offers: roi only when it has a roi column."""
+        return tuple(s for s in SORTS if s == "pnl" or s in self.columns)
+
+    def label(self, column: str) -> str:
+        return (self.labels or COLUMN_LABELS).get(column, COLUMN_LABELS[column])
+
+
+def columns_for(venue: str) -> tuple[str, ...]:
+    return get_profile(venue).leaderboard_columns
+
+
+def labels_for(venue: str) -> dict[str, str]:
+    return {**COLUMN_LABELS, **VENUE_COLUMN_LABELS.get(venue, {})}
+
+
+def row_json(view: "DiscoverView", r: DiscoverRow) -> dict:
+    """One row of /api/watch/discover: the venue's columns only (integer
+    micros for money, epoch seconds for active_since)."""
+    out: dict = {"address": r.address, "rank": r.rank, "pnl_micros": r.pnl_micros}
+    for column in view.columns:
+        if column in COLUMN_FIELDS:
+            out[COLUMN_FIELDS[column]] = getattr(r, COLUMN_FIELDS[column])
+    out["state"] = r.state
+    return out
+
+
+def shown_columns(columns: tuple[str, ...], rows: list[DiscoverRow]) -> tuple[str, ...]:
+    """The venue's columns minus any that no row has a value for (a snapshot
+    from before a column existed, or enrichment that failed): an empty column
+    reads as broken. pnl always shows."""
+    return tuple(
+        c
+        for c in columns
+        if c not in COLUMN_FIELDS or any(getattr(r, COLUMN_FIELDS[c]) is not None for r in rows)
+    )
 
 
 def enabled() -> bool:
@@ -183,6 +262,10 @@ def refresh(ctx: JobContext) -> dict:
                 dropped: list[int] = []
                 rows = select_rows(venue, boards[period], blocked, dropped=dropped)
                 invalid += len(dropped)
+                beat = getattr(ctx, "heartbeat", None)
+                if beat is not None:  # enrichment can take minutes: keep the job's lease
+                    beat()
+                _enrich(venue, source, period, rows, fetched_at, limiter)
                 store_snapshot(db, venue, period.value, rows, fetched_at)
                 counts[(venue, period.value)] = len(rows)
             if invalid:
@@ -263,6 +346,39 @@ def _fetch(
     return boards, source
 
 
+def _enrich(venue, source, period, rows: list[dict], now: datetime, limiter) -> None:
+    """Merge the venue's per-wallet details into the KEPT rows (after opt-outs
+    and the top-N cut, so the calls scale with the snapshot, not the board).
+    Best effort: any failure is logged and leaves the fields unknown, and a
+    429 tells the limiter; the board is stored either way. Money goes through
+    to_micros like the board's own figures (invariant 1)."""
+    if not rows:
+        return
+    try:
+        details = source.leaderboard_details(period, [r["address"] for r in rows], now)
+    except Exception:
+        logger.exception("watch discover: %s %s enrichment failed, board kept", venue, period.value)
+        return
+    limited = source.enrichment_rate_limited
+    if limited is not None and limiter is not None:
+        limiter.on_rate_limited(venue, None, limited.retry_after_seconds, limited.endpoint)
+    for row in rows:
+        d = details.get(row["address"])
+        if d is not None:
+            merge_details(row, d)
+
+
+def merge_details(row: dict, d: LeaderboardDetails) -> None:
+    """Put one address's LeaderboardDetails into its stored row. A venue's
+    period volume replaces the board's only when it has one."""
+    if d.volume is not None:
+        row["volume_micros"] = to_micros(d.volume)
+    row["positions_value_micros"] = _micros_or_none(d.positions_value)
+    row["markets_traded"] = d.markets_traded
+    row["biggest_win_micros"] = _micros_or_none(d.biggest_win)
+    row["active_since"] = d.active_since
+
+
 def select_rows(
     venue: str,
     entries: list[LeaderboardEntry],
@@ -325,6 +441,9 @@ def discover_view(
     if not venues:
         return DiscoverView(None, "", sort, (), (), None, [], count, settings.watch_max_per_user)
     venue = venue if venue in venues else venues[0]
+    columns = columns_for(venue)
+    if sort not in ("pnl", *columns):  # e.g. ?sort=roi on a venue without roi
+        sort = "pnl"
     periods = periods_for(venue)
     period = period if period in periods else periods[0]
 
@@ -371,8 +490,16 @@ def discover_view(
                 state=state,
                 watch_strategy_id=watching.get(address),
                 listed_slug=listed.get(address),
+                positions_value_micros=r.get("positions_value_micros"),
+                markets_traded=r.get("markets_traded"),
+                biggest_win_micros=r.get("biggest_win_micros"),
+                active_since=r.get("active_since"),
             )
         )
+    columns = shown_columns(columns, rows)
+    if sort not in ("pnl", *columns):  # roi hidden: nothing to sort by
+        sort = "pnl"
+        rows.sort(key=lambda r: r.pnl_micros, reverse=True)
     return DiscoverView(
         venue=venue,
         period=period,
@@ -383,6 +510,9 @@ def discover_view(
         rows=rows,
         watch_count=count,
         watch_max=settings.watch_max_per_user,
+        columns=columns,
+        labels=labels_for(venue),
+        note=get_profile(venue).leaderboard_note,
     )
 
 

@@ -1,0 +1,14 @@
+{
+ "data": {
+  "proxy_wallet": "0x00000000000000000000000000000000000000a1",
+  "trades": 411,
+  "biggest_win": 1557137.625996,
+  "views": 18967,
+  "join_date": 1740064569,
+  "all_time_pnl": {
+   "timestamp": 1,
+   "realized_pnl": 1673254.591495,
+   "volume_usdc": 36848197.545991
+  }
+ }
+}
