@@ -369,27 +369,70 @@ JSON float, rounded to 6 dp and stored as integer micros). Per the OpenAPI,
 `day`/`week`/`month` pnl is the marked equity change net of flows (it moves
 with unrealised marks) while `all` is realised-only lifetime pnl; the two are
 the venue's own figures and are labelled as such. The board has no roi and no
-account value, so the account-value floor does not apply and the roi sort has
-nothing to show for Polymarket.
+account value, so the account-value floor does not apply, the roi sort is not
+offered for Polymarket, and its table has no ROI or Account value column.
 
 What is dropped. `user_name`, `profile_image`, `x_username` (a linked X
 handle) and `verified` are discarded inside the connector and never stored
-(`LeaderboardEntry` has no field for them); `volume` is dropped too, because
-it is in shares, not dollars.
+(`LeaderboardEntry` has no field for them); the board's `volume` is dropped
+too, because it is in shares, not dollars.
+
+Wallet stats (enrichment). For the rows that are KEPT in a snapshot (after
+opt-outs and the top `WATCH_DISCOVER_ROWS` cut, not the 2x over-fetch) the
+connector (`PolymarketMarketData.leaderboard_details`, called from
+`discover.refresh`) reads three more public Data API v2 endpoints, per
+wallet, no authentication (OpenAPI read 2026-10-22, fixtures
+`tests/fixtures/polymarket/{user_volume,value,user_stats}_20261022.json`):
+
+| Endpoint | Read | Shown as |
+|---|---|---|
+| `GET /v2/user-volume?user=&start=&end=` | `data.volume_usdc` (USD; `volume` is shares and is ignored) | "Volume (UTC days)" |
+| `GET /v2/value?user=` | `data.value`: open positions marked to market, USDC | "Positions value" |
+| `GET /v2/user-stats?user=` | `data.trades` (distinct markets traded, lifetime), `data.biggest_win` (USDC, best single resolved win, lifetime), `data.join_date` (epoch s or null) | "Markets", "Biggest win", "Since" (month and year, UTC) |
+
+Window. Volume is tracked in whole UTC days, so day, week and month are the
+last 1, 7 and 30 UTC days ending today (today included): `start` is 00:00 UTC
+of day today-N+1 and `end` is the refresh time (the venue floors both to
+their UTC day); `all` sends no bounds. This is why the column header says "UTC
+days": it is not a rolling 24 h or 7 d window and need not match the board's
+own window. Positions value is NOT an account value: Polymarket cash is not
+observable (see the connector docstring), so the column says positions only.
+`value` and `user-stats` do not depend on the period, so each address is
+fetched once per refresh and reused across the four periods (a per-refresh
+cache; a failed fetch is not retried within the refresh).
+
+Dropped from these responses: `views`, `all_time_pnl` and every other field,
+`proxy_wallet`, and `data: null` (unknown user) just leaves the fields empty.
+No name, username, image, X handle or `verified` flag is read or stored.
 
 What is stored. Per period, the top `WATCH_DISCOVER_ROWS` (default 200) by
 pnl after removing opted-out addresses (`watch_optouts`), in
-`leaderboard_snapshots` (a cache replaced on each refresh). The connector
-asks for twice that many (one request with `limit=400`), so opt-outs cannot
-leave a snapshot short.
+`leaderboard_snapshots` (a cache replaced on each refresh), with the wallet
+stats merged into each row as integer micros (`volume_micros`,
+`positions_value_micros`, `biggest_win_micros`), `markets_traded` and
+`active_since` (epoch seconds, UTC). Rows stored before enrichment existed
+lack the new keys and still render. The connector asks the board for twice
+`WATCH_DISCOVER_ROWS` (one request with `limit=400`), so opt-outs cannot leave
+a snapshot short.
 
 Cadence and rate cost. Every `WATCH_DISCOVER_REFRESH_MINUTES` (default 60):
-one request per period, four in all, about 220 KB each at the full
-`limit=1000` (about 90 KB at 400). `/v2/leaderboard` falls under the Data API
-v2 general limit, 800 requests per 10 s (rate-limits page, read 2026-10-14);
-four an hour is negligible. Calls go through `_PublicHttp` (0.11 s floor,
-bounded `Retry-After` retries) and the outbound limiter hook; a 429 that
-survives those retries leaves the venue for the next tick.
+one board request per period, four in all, about 220 KB each at the full
+`limit=1000` (about 90 KB at 400). Enrichment, with N = 200 kept rows and U
+unique addresses across the four periods (U <= 4 x 200 = 800): 4 x 200 = 800
+`user-volume` calls plus 2 x U `value` and `user-stats` calls, so at most
+800 + 1,600 = 2,400 requests an hour on top of the 4 board requests (2,404
+in all). With overlapping boards U is usually well under 800, so about 1,000
+requests is typical. The v2 general
+limit is 800 requests per 10 s (rate-limits page, read 2026-10-14); the
+connector spaces calls 0.11 s apart (`_PublicHttp`, about 9 a second, 90 per
+10 s), so the worst case takes about 4.5 minutes of a job and stays far
+under it. The refresh heartbeats the job's lease (300 s) before each period. Calls go through `_PublicHttp` (0.11 s floor, bounded `Retry-After`
+retries) and the outbound limiter hook. Failure policy: a failed enrichment
+call leaves its fields empty and is logged; a 429 that survives the retries,
+or an exhausted outbound budget, stops enrichment for the rest of the
+refresh (the limiter is told) and the rows done so far stand. The snapshot is
+always stored: enrichment never loses a board. (A 429 on the board request
+itself still leaves the venue for the next tick.)
 
 Terms (for counsel). Everything in "Data, scraping and commercial use" above
 applies, with more force: the board lists thousands of wallets whose owners

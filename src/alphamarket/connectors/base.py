@@ -196,6 +196,12 @@ class VenueProfile:
     # LeaderboardPeriod values the venue's public leaderboard offers; () = none.
     # MarketDataSource.fetch_leaderboards serves them.
     leaderboard_periods: tuple[str, ...] = ()
+    # The /watch/discover columns this venue's snapshot rows can fill, in
+    # display order (discover.COLUMN_LABELS names them). The default is what a
+    # full perp-DEX board has; a venue lists only what it really publishes.
+    leaderboard_columns: tuple[str, ...] = ("pnl", "roi", "volume", "account_value")
+    # One line under the period tabs: how to read this venue's figures. "" = none.
+    leaderboard_note: str = ""
     # ---- P7 streaming (stream.py) ----
     # None: the venue is polled only. Otherwise how its private stream feeds
     # the ledger (StreamMode); the connector's stream_source() builds it.
@@ -879,6 +885,23 @@ class MarketDataSource(_Throttled, ABC):
         document); a venue without a leaderboard returns {}."""
         return {}
 
+    # Set by leaderboard_details when the venue said 429 or the budget ran
+    # out part way: the caller tells its limiter, and the rows it got stand.
+    enrichment_rate_limited: "RateLimited | None" = None
+
+    def leaderboard_details(
+        self,
+        period: "LeaderboardPeriod",
+        addresses: list[str],
+        now: datetime | None = None,
+    ) -> "dict[str, LeaderboardDetails]":
+        """Optional extra figures for the KEPT leaderboard rows of one period
+        (after opt-outs and the top-N cut), keyed by lowercased address.
+        Default: none, so a venue whose board is complete needs nothing.
+        Must never raise for one address's failure: a missing key or a None
+        field means unknown, and the snapshot is stored regardless."""
+        return {}
+
 
 class LeaderboardPeriod(StrEnum):
     DAY = "day"
@@ -899,6 +922,18 @@ class LeaderboardEntry(BaseModel):
     roi: str | None = None  # decimal fraction: "0.1234" = 12.34%
     volume: str | None = None  # decimal string, quote asset
     account_value: str | None = None  # decimal string, quote asset, at fetch time
+
+
+class LeaderboardDetails(BaseModel):
+    """Extra per-address figures a venue's public wallet stats give beyond its
+    leaderboard row. Money fields are decimal strings (leaderboard_figure
+    rounded); like LeaderboardEntry there is deliberately no identity field."""
+
+    volume: str | None = None  # period volume in the quote asset (USD)
+    positions_value: str | None = None  # open positions marked to market
+    markets_traded: int | None = None  # distinct markets traded, lifetime
+    biggest_win: str | None = None  # best single resolved win, lifetime
+    active_since: int | None = None  # epoch seconds (UTC) of the venue's join date
 
 
 LEADERBOARD_QUANTUM = Decimal("0.000001")
