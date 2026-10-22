@@ -179,7 +179,7 @@ def test_navigation_is_consistent(client, demo_on):
 
 def test_demo_routes_vanish_when_demo_is_off(client):
     assert get_settings().demo_mode is False
-    for path in DEMO_ONLY:
+    for path in [p for p in DEMO_ONLY if p != "/feed"]:  # /feed is real now: login redirect
         assert client.get(path).status_code == 404, path
     for path in ["/", "/marketplace", "/transparency"]:
         html = client.get(path).text

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Feed · Koine{% endblock %}
+{% block nav_active %}feed{% endblock %}
+{% block style %}
+  .feed { display:grid; grid-template-columns:minmax(0, 1fr) 320px; gap:24px; align-items:start; }
+  .frow { display:grid; grid-template-columns:minmax(0, 1fr) 72px; gap:4px 16px; align-items:baseline; padding:14px 0; border-bottom:1px solid var(--line); }
+  .frow:last-child { border-bottom:0; }
+  .frow .r { text-align:right; }
+  .frow .meta { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .fol { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0; border-bottom:1px solid var(--line); }
+  .fol:last-child { border-bottom:0; }
+  @media (max-width:1000px) { .feed { grid-template-columns:minmax(0, 1fr); } }
+{% endblock %}
+{% block content %}
+<div class="stack" style="gap:8px"><span class="label">Feed</span><h1 style="font-size:40px">Trades from strategies you follow</h1></div>
+{% if not following and not tail_only %}
+<div class="card"><div class="body" style="padding:40px;align-items:flex-start;gap:16px">
+  <h3>You are not following a strategy yet.</h3>
+  <p class="text2" style="max-width:560px">Follow a verified strategy to see its new fills and settlements here.</p>
+  <a class="btn" href="/marketplace">Browse the marketplace</a>
+</div></div>
+{% else %}
+<div class="feed">
+  <div class="card"><div class="body" style="padding:8px 24px">
+    {% if items %}
+    {% for i in items %}
+    <div class="frow">
+      <div class="stack" style="gap:4px;min-width:0">
+        <div class="meta"><a href="/s/{{ i.slug }}" style="font-weight:500">{{ i.name }}</a>{% if i.tailing %}<span class="badge">paper-tailing</span>{% endif %}</div>
+        <span class="text2">{{ i.body }}</span>
+      </div>
+      <span class="mono small muted r">{{ i.when }}{% if i.when != "yesterday" %} ago{% endif %}</span>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="stack" style="padding:24px 0;gap:8px">
+      <h3>No trades yet.</h3>
+      <p class="text2">No trades have been recorded since you started following. New fills and settlements appear here as the platform verifies them.</p>
+    </div>
+    {% endif %}
+  </div></div>
+  <div class="card"><div class="body" style="padding:16px 24px">
+    <span class="label">Following</span>
+    {% for f in following %}
+    <div class="fol">
+      <div class="stack" style="gap:2px;min-width:0"><a href="/s/{{ f.slug }}" style="font-weight:500;overflow-wrap:anywhere">{{ f.name }}</a>{% if f.tailing %}<span class="small muted">paper-tailing</span>{% endif %}</div>
+      <form class="inline" method="post" action="/s/{{ f.slug }}/unfollow"><button class="btn secondary sm" type="submit">Unfollow</button></form>
+    </div>
+    {% endfor %}
+    {% for f in tail_only %}
+    <div class="fol">
+      <div class="stack" style="gap:2px;min-width:0"><a href="/s/{{ f.slug }}" style="font-weight:500;overflow-wrap:anywhere">{{ f.name }}</a><span class="small muted">paper-tailing</span></div>
+    </div>
+    {% endfor %}
+  </div></div>
+</div>
+{% endif %}
+{% endblock %}
