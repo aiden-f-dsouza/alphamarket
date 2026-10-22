@@ -11,6 +11,9 @@
   "use strict";
   var form = document.querySelector("[data-claim-form]");
   if (!form) return;
+  // window.ethereum signs EVM addresses only. Other kinds (Solana) sign in
+  // their own wallet and paste the signature: no wallet JS for them.
+  if (form.getAttribute("data-claim-kind") !== "evm") return;
   var button = form.querySelector("[data-claim-sign]");
   var field = form.querySelector("[data-claim-signature]");
   var status = form.querySelector("[data-claim-status]");

@@ -167,6 +167,7 @@ TIER_LABELS = {
     "reconciled": "reconciled nightly",
     "daily_verified": "daily verified",
     "fills_only": "fills verified · balance not reconciled",
+    "positions_verified": "positions verified nightly · cash reconstructed",
     "unclaimed": "ownership unclaimed",
 }
 
@@ -177,6 +178,12 @@ def verification_view(profile: VenueProfile | None, tier: str | None) -> dict | 
     if profile is None:
         return None
     note = None
+    if tier == "positions_verified":
+        note = (
+            f"{profile.display_name} keeps no account balance for this address, so Koine "
+            "checks its open positions against the venue every night; the cash is "
+            "reconstructed from its trades, not checked against the venue."
+        )
     if tier == "daily_verified":
         note = (
             f"{profile.display_name} reports end of day only, so this record is verified at "

@@ -1417,7 +1417,15 @@ _WATCH_SAMPLES = [
 
 
 def _watch_short(address: str) -> str:
-    return f"{address[:6]}…{address[-4:]}"
+    return short_address(address)
+
+
+def short_address(address: str) -> str:
+    """connectors.addresses.short (kind-aware), without importing the
+    watchlist into the demo module."""
+    from alphamarket.connectors.addresses import short
+
+    return short(address)
 
 
 def watch_list() -> list[dict]:
@@ -1462,10 +1470,11 @@ def watch_list() -> list[dict]:
 
 # ---- demo: discover sample ----
 # /watch/discover for a visitor in the static demo: invented leaderboard rows
-# for both watchable venues (prod opens only Hyperliquid; the demo shows the
-# full capability). The rows are built through `discover.snapshot_row` so the
-# money path is the real one. The first sample watch address shows as being
-# watched, one row as a verified Koine strategy; Add is disabled in the template.
+# for the watchable venues listed in _DISCOVER_VENUES (prod opens fewer; the
+# demo shows the full capability). The rows are built through
+# `discover.snapshot_row` so the money and address paths are the real ones.
+# The first sample watch address shows as being watched, one row as a
+# verified Koine strategy; Add is disabled in the template.
 _DISCOVER_SUFFIXES = [
     "c0ffee",
     "d15ea5",
@@ -1486,10 +1495,51 @@ _DISCOVER_SUFFIXES = [
 _DISCOVER_SCALE = {"day": 0.012, "week": 0.06, "month": 0.22, "all": 1.0}
 _DISCOVER_ROWS = 15
 
+# Sample discover venues, in tab order: venue -> size of its board relative to
+# Hyperliquid's. Each venue branch adds its line inside its own marked block
+# (docs/onchain_perps_plan.md S8); a venue must also be in registry.PROFILES.
+_DISCOVER_VENUES: dict[str, float] = {
+    "hyperliquid": 1.0,
+    "polymarket": 0.4,
+    # ---- venue-lighter ----
+    # ---- end venue-lighter ----
+    # ---- venue-pacifica ----
+    # ---- end venue-pacifica ----
+    # ---- venue-gmx_arbitrum ----
+    # ---- end venue-gmx_arbitrum ----
+    # ---- venue-nado ----
+    # ---- end venue-nado ----
+}
+
+# Synthetic Solana addresses start with this base58 run and are padded to a
+# 32-byte key: obviously invented ("De3o", the EVM samples' "de30" with a
+# letter o, since base58 has no zero), never anyone's.
+_SOLANA_SYNTHETIC_PREFIX = "De3o"
+
 
 def _discover_address(venue: str, i: int) -> str:
+    """An invented, well-formed address of the venue's kind (EVM unless the
+    profile says otherwise)."""
+    from alphamarket.connectors.addresses import AddressKind
+    from alphamarket.connectors.registry import PROFILES
+
+    profile = PROFILES.get(venue)
+    if profile is not None and profile.address_kind is AddressKind.SOLANA:
+        return synthetic_solana_address(f"{venue}{i:02d}")
     prefix = f"{(0x2000 + i * 0x0B3D + (7 if venue == 'polymarket' else 0)) % 0x10000:04x}"
     return "0x" + prefix + "0" * 30 + _DISCOVER_SUFFIXES[i % len(_DISCOVER_SUFFIXES)]
+
+
+def synthetic_solana_address(tag: str) -> str:
+    """A valid 44-character base58 Solana address (decodes to 32 bytes) that
+    starts with "De3o" and ends with base58 characters derived from `tag`:
+    deterministic, obviously synthetic, never a real key holder's."""
+    from alphamarket.connectors.addresses import B58_ALPHABET, b58decode
+
+    tail = "".join(B58_ALPHABET[(ord(c) * 7 + k) % 58] for k, c in enumerate(tag))[-12:]
+    address = _SOLANA_SYNTHETIC_PREFIX + "1" * (40 - len(tail)) + tail
+    assert len(b58decode(address)) == 32, address  # every such string is a 32-byte key
+    return address
 
 
 def discover_sample(venue: str | None, period: str | None, sort: str):
@@ -1497,13 +1547,13 @@ def discover_sample(venue: str | None, period: str | None, sort: str):
     from alphamarket import discover
     from alphamarket.connectors.base import LeaderboardEntry
 
-    venues = ("hyperliquid", "polymarket")
+    venues = tuple(_DISCOVER_VENUES)
     periods = tuple(_DISCOVER_SCALE)
     venue = venue if venue in venues else venues[0]
     period = period if period in periods else periods[0]
     sort = sort if sort in discover.SORTS else "pnl"
     rng = random.Random(f"discover-{venue}-{period}")
-    base = _DISCOVER_SCALE[period] * (1.0 if venue == "hyperliquid" else 0.4)
+    base = _DISCOVER_SCALE[period] * _DISCOVER_VENUES[venue]
     stored = []
     for i in range(_DISCOVER_ROWS):
         pnl = round(2_400_000 * base * (0.86**i) * rng.uniform(0.85, 1.15), 2)
@@ -1511,6 +1561,7 @@ def discover_sample(venue: str | None, period: str | None, sort: str):
         roi = round(pnl / value * rng.uniform(0.5, 1.5), 4)
         stored.append(
             discover.snapshot_row(
+                venue,
                 LeaderboardEntry(
                     address=_discover_address(venue, i),
                     rank=i + 1,
@@ -1518,7 +1569,7 @@ def discover_sample(venue: str | None, period: str | None, sort: str):
                     roi=f"{roi:.4f}",
                     volume=f"{round(value * rng.uniform(3, 40), 2):.2f}",
                     account_value=f"{value:.2f}",
-                )
+                ),
             )
         )
     stored.sort(key=lambda r: r["pnl_micros"], reverse=True)  # the venue ranks by PnL
@@ -1539,7 +1590,7 @@ def discover_sample(venue: str | None, period: str | None, sort: str):
             discover.DiscoverRow(
                 venue=venue,
                 address=r["address"],
-                short=_watch_short(r["address"]),
+                short=short_address(r["address"]),
                 rank=r["rank"],
                 pnl_micros=r["pnl_micros"],
                 roi=float(r["roi"]),

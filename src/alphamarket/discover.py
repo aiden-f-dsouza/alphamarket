@@ -12,6 +12,12 @@ Rules:
   dropped by the connector (`LeaderboardEntry` has no field for them) and
   never stored; no identity lookups of any kind.
 - An opted-out address (`watch_optouts`) is never shown.
+- Addresses are stored in the venue's normal form (`snapshot_row`:
+  connectors/addresses.py, EVM lowercased, Solana as given); a row whose
+  address does not normalize is dropped and counted, never stored.
+- A venue with its own privacy flag (MarketDataSource.private_addresses) has
+  the flagged addresses' watches removed once per refresh, from the board the
+  job already fetched (watchlist.remove_private_watch).
 - Figures are the venue's own for the period, labelled as such; Koine's
   record of an address starts when someone watches it.
 - Gated by `settings.watch_discover_enabled` (vault it by turning that off)
@@ -23,14 +29,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from alphamarket.config import get_settings
+from alphamarket.connectors import addresses
 from alphamarket.connectors.base import (
     BudgetExhausted,
     LeaderboardEntry,
     LeaderboardPeriod,
+    MarketDataSource,
     RateLimited,
 )
 from alphamarket.connectors.registry import build_market_data, get_profile
@@ -64,7 +72,7 @@ class RowState:
 @dataclass(frozen=True)
 class DiscoverRow:
     venue: str
-    address: str  # lowercased
+    address: str  # normalized for the venue's address kind
     short: str  # watchlist.short_address
     rank: int  # the venue's rank for the period
     pnl_micros: int
@@ -107,12 +115,14 @@ def _micros_or_none(value: str | None) -> int | None:
     return None if value is None else to_micros(value)
 
 
-def snapshot_row(entry: LeaderboardEntry) -> dict:
-    """The stored form of one leaderboard row: integer micros (invariant 1),
-    ROI as its decimal string. The one place a LeaderboardEntry is converted,
-    shared by refresh and the seeded demo."""
+def snapshot_row(venue: str, entry: LeaderboardEntry) -> dict:
+    """The stored form of one leaderboard row: the address normalized for the
+    venue's address kind (EVM lowercased, Solana as given), integer micros
+    (invariant 1), ROI as its decimal string. The one place a
+    LeaderboardEntry is converted, shared by refresh and the seeded demo.
+    Raises addresses.InvalidAddress for an address the kind refuses."""
     return {
-        "address": entry.address.lower(),
+        "address": addresses.normalize(get_profile(venue).address_kind, entry.address),
         "rank": entry.rank,
         "pnl_micros": to_micros(entry.pnl),
         "roi": entry.roi,
@@ -160,30 +170,74 @@ def refresh(ctx: JobContext) -> dict:
             continue
         periods = tuple(LeaderboardPeriod(p) for p in periods_for(venue))
         try:
-            boards = _fetch(venue, periods, limiter)
-            if boards is None:
+            fetched = _fetch(venue, periods, limiter)
+            if fetched is None:
                 continue
+            boards, source = fetched
             blocked = set(db.scalars(select(WatchOptout.address).where(WatchOptout.venue == venue)))
             fetched_at = ctx.clock()
+            invalid = 0
             for period in periods:
                 if period not in boards:  # the venue sent nothing: keep the old one
                     continue
-                rows = select_rows(boards[period], blocked)
+                dropped: list[int] = []
+                rows = select_rows(venue, boards[period], blocked, dropped=dropped)
+                invalid += len(dropped)
                 store_snapshot(db, venue, period.value, rows, fetched_at)
                 counts[(venue, period.value)] = len(rows)
+            if invalid:
+                logger.warning(
+                    "watch discover: %s sent %d invalid addresses, dropped", venue, invalid
+                )
+                counts[(venue, "invalid_addresses")] = invalid
             db.commit()
         except Exception:
             db.rollback()
             logger.exception("watch discover refresh failed for %s", venue)
+            continue
+        try:
+            swept = sweep_private(db, venue, source)
+            if swept:
+                counts[(venue, "private_removed")] = swept
+        except Exception:
+            db.rollback()
+            logger.exception("watch discover privacy sweep failed for %s", venue)
     return counts
+
+
+def sweep_private(db: Session, venue: str, source: MarketDataSource) -> int:
+    """The venue privacy sweep (onchain_perps_plan S5): the addresses the
+    source's last fetch_leaderboards saw with the venue's privacy flag on lose
+    every watch (watchlist.remove_private_watch: no watch_optouts row, an
+    audit row). A source without the hook answers None and costs nothing, not
+    even a query. Returns how many watched accounts were removed.
+
+    Limit: an address absent from the board cannot be checked at all; its
+    owner's route is the signed opt-out."""
+    from alphamarket.watchlist import remove_private_watch  # watchlist imports us lazily
+
+    private = source.private_addresses()
+    if not private:
+        return 0
+    accounts = db.scalars(
+        select(VenueAccount).where(
+            VenueAccount.is_watch.is_(True),
+            VenueAccount.venue == venue,
+            VenueAccount.key_id.in_(sorted(private)),
+        )
+    ).all()
+    for account in accounts:
+        remove_private_watch(db, account)
+    return len(accounts)
 
 
 def _fetch(
     venue: str, periods: tuple[LeaderboardPeriod, ...], limiter
-) -> dict[LeaderboardPeriod, list[LeaderboardEntry]] | None:
+) -> tuple[dict[LeaderboardPeriod, list[LeaderboardEntry]], MarketDataSource] | None:
     """One venue's boards through its throttled public market data, feeding
-    its circuit breaker. None when the venue is busy (budget, 429): it is
-    left for the next tick. Other failures raise."""
+    its circuit breaker, with the source that fetched them (its
+    private_addresses() describes this fetch). None when the venue is busy
+    (budget, 429): it is left for the next tick. Other failures raise."""
     try:
         source = build_market_data(venue, get_settings().venue_env(venue))
         if limiter is not None:
@@ -201,11 +255,19 @@ def _fetch(
         raise
     if limiter is not None:
         limiter.record_success(venue)
-    return boards
+    return boards, source
 
 
-def select_rows(entries: list[LeaderboardEntry], blocked: set[str]) -> list[dict]:
-    """The snapshot rows of one (venue, period): drop rows whose reported
+def select_rows(
+    venue: str,
+    entries: list[LeaderboardEntry],
+    blocked: set[str],
+    *,
+    dropped: list[int] | None = None,
+) -> list[dict]:
+    """The snapshot rows of one (venue, period): drop rows whose address does
+    not normalize for the venue's kind (their ranks are appended to
+    `dropped`, for the job log; never stored), rows whose reported
     account value is under watch_discover_min_account_value (kept when the
     venue reports none), rows with a reported zero volume for the period
     (protocol accounts, not traders) and opted-out addresses, then keep the union of the
@@ -217,7 +279,12 @@ def select_rows(entries: list[LeaderboardEntry], blocked: set[str]) -> list[dict
     n = settings.watch_discover_rows
     rows = []
     for entry in sorted(entries, key=lambda e: e.rank):
-        row = snapshot_row(entry)
+        try:
+            row = snapshot_row(venue, entry)
+        except addresses.InvalidAddress:
+            if dropped is not None:
+                dropped.append(entry.rank)
+            continue
         if row["address"] in blocked:
             continue
         value = row["account_value_micros"]
@@ -270,9 +337,9 @@ def discover_view(
         raw.sort(key=lambda r: r["pnl_micros"], reverse=True)
     raw = raw[:limit]
 
-    addresses = [r["address"] for r in raw]
-    watching = _watched_strategy_ids(db, user, venue, addresses)
-    listed = _listed_slugs(db, venue, addresses)
+    wanted = [r["address"] for r in raw]
+    watching = _watched_strategy_ids(db, user, venue, wanted)
+    listed = _listed_slugs(db, venue, wanted)
     full = count >= settings.watch_max_per_user
 
     rows = []
@@ -314,10 +381,8 @@ def discover_view(
     )
 
 
-def _watched_strategy_ids(
-    db: Session, user: User, venue: str, addresses: list[str]
-) -> dict[str, int]:
-    if not addresses:
+def _watched_strategy_ids(db: Session, user: User, venue: str, wanted: list[str]) -> dict[str, int]:
+    if not wanted:
         return {}
     rows = db.execute(
         select(VenueAccount.key_id, Strategy.id)
@@ -327,30 +392,30 @@ def _watched_strategy_ids(
             Watch.user_id == user.id,
             VenueAccount.is_watch.is_(True),
             VenueAccount.venue == venue,
-            VenueAccount.key_id.in_(addresses),
+            VenueAccount.key_id.in_(wanted),
         )
     ).all()
     return {key_id: strategy_id for key_id, strategy_id in rows}
 
 
-def _listed_slugs(db: Session, venue: str, addresses: list[str]) -> dict[str, str]:
+def _listed_slugs(db: Session, venue: str, wanted: list[str]) -> dict[str, str]:
     """Addresses that are a claimed creator's public strategy (the same test
     as watchlist.listed_strategy, batched)."""
-    if not addresses:
+    if not wanted:
         return {}
     rows = db.execute(
         select(Strategy, VenueAccount)
         .join(VenueAccount, VenueAccount.id == Strategy.venue_account_id)
         .where(
             VenueAccount.venue == venue,
-            func.lower(VenueAccount.key_id).in_(addresses),
+            VenueAccount.key_id.in_(wanted),  # stored normalized, like the rows
             VenueAccount.is_watch.is_(False),
             VenueAccount.claimed_at.is_not(None),
         )
     ).all()
     out: dict[str, str] = {}
     for strategy, account in rows:
-        address = account.key_id.lower()
+        address = account.key_id
         if address not in out and publicly_visible(db, strategy, account):
             out[address] = strategy.slug
     return out

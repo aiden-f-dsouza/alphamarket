@@ -20,6 +20,8 @@ from typing import Protocol
 
 from pydantic import BaseModel, Field, model_validator
 
+from alphamarket.connectors.addresses import AddressKind
+
 
 class BalanceUnavailable(Exception):
     """The venue exposes no cash balance for this account (e.g. Polymarket
@@ -72,7 +74,13 @@ class RateBudget:
     `VenueConnector.throttle`. Integers only so budgets compare exactly.
 
     Example, Kraken Starter tier: capacity 15, refill 20/min (0.33/s decay),
-    TradesHistory and Ledgers cost 2."""
+    TradesHistory and Ledgers cost 2.
+
+    Two hosts, two limits (an API and an explorer, say): declare one budget
+    per host, and in each give the OTHER host's endpoints cost 0. A cost of 0
+    (or less) neither waits nor spends a token (VenueLimiter.acquire skips
+    it; pinned by tests/test_venue_limits.py), so each request is charged
+    only to its own host's bucket."""
 
     scope: RateScope
     capacity: int  # tokens in a full bucket
@@ -141,6 +149,20 @@ class RegulatoryFees:
 
 
 @dataclass(frozen=True)
+class ReconcileMode(StrEnum):
+    """What nightly reconciliation compares for an asset venue (S2)."""
+
+    # The whole balance vector (cash and holdings) and every venue running
+    # balance: today's rule, the "reconciled" tier.
+    BALANCES = "balances"
+    # Only the signed perp position per instrument, within
+    # VenueProfile.position_tolerance_atoms; cash is never read. For venues
+    # with no venue-side balance (GMX wallet mode): the cash is reconstructed
+    # by the connector, so the tier is "positions_verified".
+    POSITIONS = "positions"
+
+
+@dataclass(frozen=True)
 class MarginTier:
     """One perp maintenance-margin tier: positions with notional >=
     lower_bound (USD, decimal string) may use at most max_leverage.
@@ -204,6 +226,18 @@ class VenueProfile:
     # "at most 10 unique users" across websocket user subscriptions per IP).
     # None: no documented cap.
     stream_users_per_ip: int | None = None
+    # ---- on-chain perps scaffold (docs/onchain_perps_plan.md S1/S2) ----
+    # How an ADDRESS venue's identifier is validated and stored
+    # (connectors/addresses.py). Read only when credential is ADDRESS.
+    address_kind: AddressKind = AddressKind.EVM
+    # BALANCES: reconcile the whole vector (needs balance_observable).
+    # POSITIONS: reconcile only the perp position vector; with
+    # balance_observable=False the account is still reconciled nightly and
+    # its tier is "positions_verified".
+    reconcile_mode: ReconcileMode = ReconcileMode.BALANCES
+    # POSITIONS mode: allowed |venue - ledger| per perp, in atoms at the
+    # compared scale (the venue's documented quantity rounding).
+    position_tolerance_atoms: int = 0
 
     @property
     def needs_secret(self) -> bool:
@@ -363,6 +397,12 @@ class NormalizedInstrument(BaseModel):
     min_notional: str | None = None  # decimal string in quote asset, if the venue has one
     multiplier: int = 1  # options: 100
     expiry: datetime | None = None
+    # False: paper copying skips the instrument (skip reason "not_copyable")
+    # while its signals are still recorded. For synthetic US equities/ETFs,
+    # pre-IPO names, FX and commodities on crypto perp venues until counsel
+    # answers (onchain_perps_plan Q3). A connector sets it the same way on
+    # fills and in fetch_instruments: the stored row follows the latest one.
+    copyable: bool = True
 
 
 class NormalizedAssetFill(BaseModel):
@@ -879,6 +919,29 @@ class MarketDataSource(_Throttled, ABC):
         document); a venue without a leaderboard returns {}."""
         return {}
 
+    # ---- on-chain perps scaffold: the venue's own privacy flag (S2) ----
+    #
+    # Some venues let an address owner hide themselves (Pacifica
+    # `privacy_mode`). The flag is a leaderboard attribute, venue-wide, so it
+    # lives here rather than on VenueConnector. Both hooks default to None:
+    # "this venue offers no such signal", and cost nothing.
+
+    def private_addresses(self) -> frozenset[str] | None:
+        """The normalized addresses the LAST fetch_leaderboards call on this
+        instance saw with the venue's privacy flag on (a connector collects
+        them while dropping those rows; no extra request). None before a
+        fetch, or when the venue has no flag. discover.refresh sweeps watches
+        of these addresses once per refresh (watchlist.remove_private_watch)."""
+        return None
+
+    def owner_private(self, address: str) -> bool | None:
+        """A one-off check of one normalized address, used only when a new
+        watch is created (watchlist._track), never per sync. True: treat the
+        address as opted out while the flag is on. False: the flag is off.
+        None: unknown (no flag on this venue, or the address is absent from
+        what the venue publishes)."""
+        return None
+
 
 class LeaderboardPeriod(StrEnum):
     DAY = "day"
@@ -893,7 +956,10 @@ class LeaderboardEntry(BaseModel):
     any other identity field (copy_strategies_plan: never link an address to
     an identity); a connector drops them before building this."""
 
-    address: str  # lowercased 0x address
+    # Normalized for the venue's `address_kind` (EVM lowercased, Solana as
+    # given): connectors normalize before building the entry
+    # (connectors.addresses.normalize).
+    address: str
     rank: int  # the venue's 1-based rank in its own ordering for the period
     pnl: str  # decimal string in the venue's quote asset (USD/USDC)
     roi: str | None = None  # decimal fraction: "0.1234" = 12.34%
@@ -942,8 +1008,15 @@ class Quote(BaseModel):
 class FundingRate(BaseModel):
     symbol: str
     at: datetime
-    rate: str  # decimal string per funding interval, e.g. "0.0000125"
+    # Decimal string per funding interval, e.g. "0.0000125". Positive means
+    # longs pay. Shorts receive it unless short_rate is set.
+    rate: str
     mark_price: str | None = None
+    # What shorts pay per interval (positive means shorts pay), for venues
+    # where the two sides differ (GMX adaptive funding plus borrowing). None:
+    # symmetric, shorts receive `rate` (methodology "Paper copying v2:
+    # funding").
+    short_rate: str | None = None
 
 
 class CorporateActionKind(StrEnum):

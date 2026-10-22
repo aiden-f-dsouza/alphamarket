@@ -25,6 +25,7 @@ from alphamarket.connectors.base import (
     InstrumentKind,
     NormalizedBalance,
     NormalizedBalances,
+    ReconcileMode,
     VenueConnector,
 )
 from alphamarket.connectors.registry import get_profile
@@ -56,6 +57,7 @@ from alphamarket.models import (
     VenueAccount,
     utcnow,
 )
+from alphamarket.valuation import PERP_SUFFIX
 
 logger = logging.getLogger(__name__)
 
@@ -125,8 +127,16 @@ def _positions_snapshot(connector: VenueConnector) -> list[dict]:
 
 def reconcilable(account: VenueAccount) -> bool:
     """False for venues whose cash balance cannot be observed; those accounts
-    stay in the fills-only tier and are never quarantined by reconciliation."""
-    return get_profile(account.venue).balance_observable
+    stay in the fills-only tier and are never quarantined by reconciliation.
+    A POSITIONS-mode venue is reconcilable without a balance: its perp
+    position vector is checked nightly (reconcile_positions)."""
+    profile = get_profile(account.venue)
+    return profile.balance_observable or profile.reconcile_mode is ReconcileMode.POSITIONS
+
+
+def positions_only(account: VenueAccount) -> bool:
+    """True when reconciliation compares only the perp position vector."""
+    return get_profile(account.venue).reconcile_mode is ReconcileMode.POSITIONS
 
 
 def reconcile_account(db: Session, account: VenueAccount, limiter=None) -> EquitySnapshot:
@@ -135,6 +145,8 @@ def reconcile_account(db: Session, account: VenueAccount, limiter=None) -> Equit
     if not reconcilable(account):
         raise BalanceUnavailable(f"{account.venue} exposes no balance to reconcile against")
     if is_asset_venue(account.venue):
+        if positions_only(account):
+            return reconcile_positions(db, account)
         return reconcile_asset_account(db, account, limiter=limiter)
     if account.anchor_balance_micros is None or account.anchor_at is None:
         raise ValueError(f"venue account {account.id} has no reconciliation anchor")
@@ -336,6 +348,91 @@ def reconcile_asset_account(db: Session, account: VenueAccount, limiter=None) ->
                 )
         for b in breaks:
             quarantine_account(db, account, _chain_reason(b), ref=f"ledger_entry:{b.entry_id}")
+    db.commit()
+    return snapshot
+
+
+# ---- reconciliation, POSITIONS mode (onchain_perps_plan S2) -----------------------
+#
+# For venues with no venue-side cash (GMX wallet mode): only the signed perp
+# position per instrument ("<X>-PERP" assets) is compared, within the venue's
+# documented quantity tolerance (VenueProfile.position_tolerance_atoms). Cash
+# and running balances are never read or checked; the cash is reconstructed by
+# the connector, which the "positions_verified" tier says.
+
+
+def _perps_only(vector: dict[str, AssetAmount]) -> dict[str, AssetAmount]:
+    return {asset: a for asset, a in vector.items() if asset.endswith(PERP_SUFFIX)}
+
+
+def compare_positions(
+    computed: dict[str, AssetAmount], venue: list[AssetAmount], tolerance_atoms: int
+) -> list[AssetCheck]:
+    """compare_vectors restricted to perp positions, every one with the same
+    fixed tolerance (no percentage: a position is a count, and the venue's
+    rounding of it does not scale with its size)."""
+    reported = _perps_only(balance_vector((), start=venue))
+    return [
+        AssetCheck(c.asset, c.decimals, c.venue_atoms, c.computed_atoms, max(tolerance_atoms, 0))
+        for c in compare_vectors(_perps_only(computed), list(reported.values()))
+    ]
+
+
+def reconcile_positions(db: Session, account: VenueAccount) -> EquitySnapshot:
+    """Reconcile a POSITIONS-mode account: one AssetReconciliation row per
+    perp, a summary EquitySnapshot with zero cash columns (cash is never
+    compared), and a quarantine on any position outside tolerance."""
+    anchor = latest_anchor_balances(db, account)
+    if not anchor:
+        raise ValueError(f"venue account {account.id} has no reconciliation anchor")
+    strategy = db.scalar(select(Strategy).where(Strategy.venue_account_id == account.id))
+    if strategy is None:
+        raise ValueError(f"venue account {account.id} has no strategy")
+    connector = connector_for(account)
+    tolerance = get_profile(account.venue).position_tolerance_atoms
+
+    for _attempt in range(2):  # as reconcile_asset_account: re-sync once before believing it
+        sync_account(db, account)
+        venue = connector.fetch_balances()
+        checks = compare_positions(replayed_vector(db, account, anchor), venue.assets, tolerance)
+        if all(c.ok for c in checks):
+            break
+
+    now = utcnow()
+    for c in checks:
+        db.add(
+            AssetReconciliation(
+                venue_account_id=account.id,
+                as_of=now,
+                asset=c.asset,
+                decimals=c.decimals,
+                venue_atoms=c.venue_atoms,
+                computed_atoms=c.computed_atoms,
+                divergence_atoms=c.divergence_atoms,
+                tolerance_atoms=c.tolerance_atoms,
+                reconciled=c.ok,
+            )
+        )
+    reconciled = all(c.ok for c in checks)
+    snapshot = EquitySnapshot(
+        strategy_id=strategy.id,
+        as_of=now,
+        venue_balance_micros=0,
+        computed_cash_micros=0,
+        divergence_micros=0,
+        tolerance_micros=0,
+        reconciled=reconciled,
+    )
+    db.add(snapshot)
+    for c in checks:
+        if not c.ok:
+            quarantine_account(
+                db,
+                account,
+                f"{c.asset}: venue position {c.venue_atoms} vs ledger {c.computed_atoms} atoms "
+                f"at {c.decimals} dp (tolerance {c.tolerance_atoms})",
+                ref=f"reconcile:{c.asset}",
+            )
     db.commit()
     return snapshot
 

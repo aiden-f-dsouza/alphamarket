@@ -18,6 +18,7 @@ from alphamarket import demo, discover, ratelimit
 from alphamarket.analytics import latest_stats
 from alphamarket.charts import polyline, window_x
 from alphamarket.config import get_settings
+from alphamarket.connectors import addresses
 from alphamarket.connectors.registry import build_connector, get_profile
 from alphamarket.db import get_db
 from alphamarket.models import Strategy, User
@@ -113,6 +114,25 @@ def watch_row(db: Session, user: User, w: Watched) -> dict:
     return row
 
 
+def address_ui(venues: list[tuple[str, str]]) -> dict:
+    """What an address form needs per venue kind (connectors/addresses.py):
+    one hint per venue (the template shows the selected venue's with CSS
+    :has(), no script), a placeholder, and the widest maxlength. The server
+    validates; the input carries no pattern because one field serves several
+    kinds."""
+    kinds = {v: get_profile(v).address_kind for v, _ in venues}
+    distinct = set(kinds.values())
+    return {
+        "hints": [(v, addresses.HINT[k]) for v, k in kinds.items()],
+        "placeholder": (
+            addresses.PLACEHOLDER[next(iter(distinct))]
+            if len(distinct) == 1
+            else "Paste the address"
+        ),
+        "maxlength": addresses.MAX_INPUT_LENGTH,
+    }
+
+
 def _list(
     request: Request,
     db: Session,
@@ -141,6 +161,7 @@ def _list(
         form=form or {"venue": venues[0][0] if venues else "", "address": "", "label": ""},
         notice=notice,
         discover_on=_discover_on(),
+        address_ui=address_ui(venues),
     )
 
 
@@ -379,6 +400,7 @@ def _optout_page(
     sample: bool = False,
 ) -> Response:
     venues = [(v, get_profile(v).display_name) for v in WATCHABLE_VENUES]
+    kind = get_profile(claim.venue).address_kind if claim is not None else None
     return _render_private(
         request,
         "watch_optout.html",
@@ -390,6 +412,12 @@ def _optout_page(
         error=error,
         form=form or {"venue": venues[0][0], "address": ""},
         venues=venues,
+        # The intro names the venues open for watching (an owner may still opt
+        # out on any watchable venue: the select lists them all).
+        open_labels=[get_profile(v).display_name for v in open_venues()],
+        address_ui=address_ui(venues),
+        claim_kind=kind.value if kind is not None else None,
+        sign_help=addresses.SIGN_HELP[kind] if kind is not None else None,
         claim=claim,
         result=result,
         verified=sample or (user is not None and user.email_verified_at is not None),

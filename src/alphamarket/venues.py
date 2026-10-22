@@ -45,7 +45,14 @@ from alphamarket import audit, consent, credentials
 from alphamarket.audit import AuditAction
 from alphamarket.auth import current_user
 from alphamarket.config import get_settings
-from alphamarket.connectors.base import CredentialKind, OwnershipProof, RateLimited, Throttle
+from alphamarket.connectors import addresses
+from alphamarket.connectors.base import (
+    CredentialKind,
+    OwnershipProof,
+    RateLimited,
+    ReconcileMode,
+    Throttle,
+)
 from alphamarket.connectors.registry import (
     SUPPORTED_VENUES,
     aggregator_register_user,
@@ -158,11 +165,16 @@ def verification_tier(account: VenueAccount) -> str:
     `fills_only`: fills verified, the venue exposes no balance to check;
     `daily_verified`: reconciled, but the venue only reports end of day
     (IBKR Flex, SnapTrade), a weaker claim labelled as such (wave2);
+    `positions_verified`: the venue has no balance, but its perp positions
+    are checked nightly; cash is reconstructed by Koine, not checked against
+    the venue (ReconcileMode.POSITIONS, GMX wallet mode);
     `unclaimed`: ownership not yet proven, nothing shown publicly."""
     if not account.claimed:
         return "unclaimed"
     profile = get_profile(account.venue)
     if not profile.balance_observable:
+        if profile.reconcile_mode is ReconcileMode.POSITIONS:
+            return "positions_verified"
         return "fills_only"
     return "daily_verified" if profile.daily_resolution else "reconciled"
 
@@ -461,6 +473,15 @@ def connect_account(
     limiter = get_web_limiter(request.app) if request is not None else None
     connector, evidence, anchor = web_venue_call(limiter, payload.venue, key_id, _verify_and_anchor)
 
+    # An address venue stores the address in its kind's normal form (EVM
+    # lowercased, Solana as given; connectors/addresses.py).
+    stored_key_id = key_id
+    if pending is None and not profile.needs_secret:
+        try:
+            stored_key_id = addresses.normalize(profile.address_kind, key_id)
+        except addresses.InvalidAddress as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+
     key_proves_ownership = profile.ownership is OwnershipProof.KEY
     if pending is not None:
         # Re-read the row under a lock (Postgres FOR UPDATE, held until the
@@ -483,7 +504,7 @@ def connect_account(
             user_id=user.id,
             venue=payload.venue,
             venue_env=venue_env,
-            key_id=key_id.lower() if not profile.needs_secret else key_id,
+            key_id=stored_key_id,
             # The key goes to venue_credentials (credentials.store below); the
             # legacy column is no longer written.
             encrypted_private_key=None,

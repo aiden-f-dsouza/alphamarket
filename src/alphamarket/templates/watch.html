@@ -9,6 +9,7 @@
   .wrow2.head { padding-top:10px; padding-bottom:10px; }
   .wrow2 .r { text-align:right; }
   @media (max-width:1000px) { .wl-head { grid-template-columns:minmax(0,1fr); gap:24px; } .wrow2 { grid-template-columns:minmax(0,1fr) 80px; } .wrow2 .hide { display:none; } }
+  {% include "_address_hints.css" %}
 {% endblock %}
 {% block content %}
 {% if notice %}<div class="notice" role="status" style="border-color:var(--brand);color:var(--text)">{{ notice }}</div>{% endif %}
@@ -38,7 +39,7 @@
       {% if venues|length > 1 %}
       <label class="field"><span class="label">Venue</span><select name="venue">{% for v, label in venues %}<option value="{{ v }}" {{ "selected" if form.venue == v }}>{{ label }}</option>{% endfor %}</select></label>
       {% else %}<input type="hidden" name="venue" value="{{ venues[0][0] }}">{% endif %}
-      <label class="field"><span class="label">{{ venues[0][1] if venues|length == 1 else "Public" }} address</span><input class="mono" name="address" required pattern="0[xX][0-9a-fA-F]{40}" maxlength="42" autocomplete="off" spellcheck="false" placeholder="0x…" value="{{ form.address }}"></label>
+      <label class="field"><span class="label">{{ venues[0][1] if venues|length == 1 else "Public" }} address</span><input class="mono" name="address" required maxlength="{{ address_ui.maxlength }}" autocomplete="off" spellcheck="false" placeholder="{{ address_ui.placeholder }}" value="{{ form.address }}">{% include "_address_hints.html" %}</label>
       <label class="field"><span class="label">Label (optional)</span><input name="label" maxlength="60" placeholder="Only you see this" value="{{ form.label }}"></label>
       <button class="btn" type="submit">{{ m.icon("plus", 14) }}Add to watchlist</button>
     </form>

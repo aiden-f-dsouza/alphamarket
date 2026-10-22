@@ -595,6 +595,17 @@ CREATORS = (
         watch=True,
         key_id=WATCH_ADDRESS,
     ),
+    # On-chain perp venues (docs/onchain_perps_plan.md S8): each venue branch
+    # adds its one watched synthetic address inside its own marked block, a
+    # CreatorSpec with watch=True like "whale" above.
+    # ---- venue-lighter ----
+    # ---- end venue-lighter ----
+    # ---- venue-pacifica ----
+    # ---- end venue-pacifica ----
+    # ---- venue-gmx_arbitrum ----
+    # ---- end venue-gmx_arbitrum ----
+    # ---- venue-nado ----
+    # ---- end venue-nado ----
 )
 
 # (investor email local part, strategy handle, dollars, drawdown limit bps, days before the end)
@@ -612,6 +623,14 @@ ALLOCATIONS = (
 WATCHES = (
     ("investor", "whale", "Funding-aware perp whale"),
     ("analyst", "whale", "BTC momentum book to study"),
+    # ---- venue-lighter ----
+    # ---- end venue-lighter ----
+    # ---- venue-pacifica ----
+    # ---- end venue-pacifica ----
+    # ---- venue-gmx_arbitrum ----
+    # ---- end venue-gmx_arbitrum ----
+    # ---- venue-nado ----
+    # ---- end venue-nado ----
 )
 FOLLOWS = (
     ("investor", ("northwind", "tidewater", "meridian", "isobar", "lantern", "fedwatch")),
@@ -2327,11 +2346,37 @@ def migrate(url: str) -> None:
 LEADERBOARD_PERIODS = ("day", "week", "month", "all")
 
 
+def _hyperliquid_board_address(i: int) -> str:
+    """Invented ("c0de" repeated, never a real person's), plus the seeded
+    watched address at rank 3 so the investor sees one row on their watchlist."""
+    return WATCH_ADDRESS if i == 2 else "0x" + f"c0de{i:04x}" + "c0de" * 8
+
+
+# Seeded discover boards: venue -> the synthetic address of row i. Each venue
+# branch adds its line inside its own marked block (onchain_perps_plan S8).
+LEADERBOARD_SEEDS = {
+    "hyperliquid": _hyperliquid_board_address,
+    # ---- venue-lighter ----
+    # ---- end venue-lighter ----
+    # ---- venue-pacifica ----
+    # ---- end venue-pacifica ----
+    # ---- venue-gmx_arbitrum ----
+    # ---- end venue-gmx_arbitrum ----
+    # ---- venue-nado ----
+    # ---- end venue-nado ----
+}
+
+
 def seed_leaderboards(db, fetched_at: datetime) -> None:
-    """Synthetic Hyperliquid leaderboard snapshots for /watch/discover (it needs
-    WATCH_DISCOVER_ENABLED=true to show). Invented addresses ("c0de" repeated,
-    never a real person's), plus the seeded watched address so the investor sees
-    one row on their watchlist. Written through the real money path."""
+    """Synthetic leaderboard snapshots for /watch/discover (it needs
+    WATCH_DISCOVER_ENABLED=true to show), one board per period for each venue
+    in LEADERBOARD_SEEDS. Written through the real money and address path
+    (discover.snapshot_row)."""
+    for venue, address_of in LEADERBOARD_SEEDS.items():
+        _seed_board(db, venue, address_of, fetched_at)
+
+
+def _seed_board(db, venue: str, address_of, fetched_at: datetime) -> None:
     from alphamarket import discover
     from alphamarket.connectors.base import LeaderboardEntry
 
@@ -2339,11 +2384,12 @@ def seed_leaderboards(db, fetched_at: datetime) -> None:
     for period in LEADERBOARD_PERIODS:
         rows = []
         for i in range(24):
-            address = WATCH_ADDRESS if i == 2 else "0x" + f"c0de{i:04x}" + "c0de" * 8
+            address = address_of(i)
             pnl = 3_100_000 * scale[period] * (0.88**i)
             value = 1_500_000 * (0.9**i) + 40_000
             rows.append(
                 discover.snapshot_row(
+                    venue,
                     LeaderboardEntry(
                         address=address,
                         rank=i + 1,
@@ -2351,10 +2397,10 @@ def seed_leaderboards(db, fetched_at: datetime) -> None:
                         roi=f"{pnl / value * (1 + (i % 5) * 0.15):.4f}",
                         volume=f"{value * (6 + i % 7):.2f}",
                         account_value=f"{value:.2f}",
-                    )
+                    ),
                 )
             )
-        discover.store_snapshot(db, "hyperliquid", period, rows, fetched_at)
+        discover.store_snapshot(db, venue, period, rows, fetched_at)
 
 
 def seed(

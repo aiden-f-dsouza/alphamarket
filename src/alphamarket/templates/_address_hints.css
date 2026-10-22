@@ -1,0 +1,4 @@
+{# Included in a page's style block: show the hint of the venue selected in the form's venue <select> (CSS :has(), no script). A form without a select (one venue) shows its only hint. #}{% if address_ui and address_ui.hints|length > 1 %}
+  .address-hint { display:none; }
+  {% for v, _ in address_ui.hints %}form:has(select[name="venue"] option[value="{{ v }}"]:checked) .address-hint[data-hint-venue="{{ v }}"] { display:block; }
+  {% endfor %}{% endif %}

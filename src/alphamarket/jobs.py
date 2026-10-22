@@ -385,7 +385,7 @@ def watch_cadences(db: Session) -> dict[int, WatchCadence]:
         select(WatchOptout.id)
         .where(
             WatchOptout.venue == VenueAccount.venue,
-            WatchOptout.address == func.lower(VenueAccount.key_id),
+            WatchOptout.address == VenueAccount.key_id,  # both stored normalized
         )
         .exists()
     )

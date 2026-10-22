@@ -500,6 +500,18 @@ PROFILES: dict[str, VenueProfile] = {
         pricing_venue="alpaca",  # no public market data of its own
         max_copy_lag_seconds=DAILY_MAX_COPY_LAG_SECONDS,
     ),
+    # ---- on-chain perps (docs/onchain_perps_plan.md S8) ----
+    # One marked block per venue; each venue branch writes only inside its own.
+    # Every profile there is watch only: credential=ADDRESS with its
+    # address_kind, requires_partner_approval=True (no connect), tos_doc set.
+    # ---- venue-lighter ----
+    # ---- end venue-lighter ----
+    # ---- venue-pacifica ----
+    # ---- end venue-pacifica ----
+    # ---- venue-gmx_arbitrum ----
+    # ---- end venue-gmx_arbitrum ----
+    # ---- venue-nado ----
+    # ---- end venue-nado ----
 }
 
 SUPPORTED_VENUES = tuple(PROFILES)
@@ -604,6 +616,15 @@ _BUILDERS: dict[str, Callable[[str, str, str | None], VenueConnector]] = {
     # ---- venue-ibkr ----
     "ibkr": _build_ibkr,
     "snaptrade": _build_snaptrade,  # venue-snaptrade
+    # ---- on-chain perps (onchain_perps_plan S8): one block per venue ----
+    # ---- venue-lighter ----
+    # ---- end venue-lighter ----
+    # ---- venue-pacifica ----
+    # ---- end venue-pacifica ----
+    # ---- venue-gmx_arbitrum ----
+    # ---- end venue-gmx_arbitrum ----
+    # ---- venue-nado ----
+    # ---- end venue-nado ----
 }
 
 
@@ -669,6 +690,15 @@ _MARKET_DATA_BUILDERS: dict[str, Callable[[str], MarketDataSource]] = {
     # deliberate stub so core code can still call build_market_data("ibkr", ...).
     "ibkr": lambda venue_env: IbkrMarketData(),
     "snaptrade": lambda venue_env: SnapTradeMarketData(),  # ---- venue-snaptrade ----
+    # ---- on-chain perps (onchain_perps_plan S8): one block per venue ----
+    # ---- venue-lighter ----
+    # ---- end venue-lighter ----
+    # ---- venue-pacifica ----
+    # ---- end venue-pacifica ----
+    # ---- venue-gmx_arbitrum ----
+    # ---- end venue-gmx_arbitrum ----
+    # ---- venue-nado ----
+    # ---- end venue-nado ----
 }
 
 
@@ -694,6 +724,16 @@ CASH_AT_PAR: frozenset[str] = (
     MarketDataSource.STABLECOINS_AT_PAR
     | KrakenMarketData.STABLECOINS_AT_PAR
     | hyperliquid.HyperliquidMarketData.STABLECOINS_AT_PAR
+    # ---- on-chain perps (onchain_perps_plan S8): one block per venue, each
+    # adding `| <Venue>MarketData.STABLECOINS_AT_PAR` if it has codes of its own ----
+    # ---- venue-lighter ----
+    # ---- end venue-lighter ----
+    # ---- venue-pacifica ----
+    # ---- end venue-pacifica ----
+    # ---- venue-gmx_arbitrum ----
+    # ---- end venue-gmx_arbitrum ----
+    # ---- venue-nado ----
+    # ---- end venue-nado ----
 )
 
 

@@ -130,6 +130,10 @@ FOLLOWER_EQUITY_ZERO = "follower_equity_zero"
 INSTRUMENT_UNKNOWN = "instrument_unknown"  # a signal without an instrument (never emitted)
 ENGINE_ERROR = "engine_error"  # the engine raised on this signal; rolled back alone
 LATE_SIGNAL = "late_signal"  # booking it would cross a split already past in the book
+# The venue's instrument is marked not copyable (Instrument.copyable False:
+# synthetic equities, FX, commodities on crypto perp venues). Signals are
+# still recorded; only the paper copy is skipped.
+NOT_COPYABLE = "not_copyable"
 
 CENT_MICROS = 10_000
 
@@ -490,6 +494,8 @@ def _precheck(signal: Signal, instrument: Instrument | None, profile: VenueProfi
         return STALE_SIGNAL
     if instrument is None:
         return INSTRUMENT_UNKNOWN
+    if instrument.copyable is False:  # checked before sizing
+        return NOT_COPYABLE
     if instrument.quote_asset not in CASH_AT_PAR:
         return NON_USD_QUOTE
     return None

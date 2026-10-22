@@ -46,6 +46,7 @@ def snap(session_factory, period="day", n=4, venue="hyperliquid"):
     """n rows: rank i+1, pnl falling with rank, roi rising with rank."""
     rows = [
         discover.snapshot_row(
+            venue,
             LeaderboardEntry(
                 address=addr(i + 1),
                 rank=i + 1,
@@ -53,7 +54,7 @@ def snap(session_factory, period="day", n=4, venue="hyperliquid"):
                 roi=f"0.{i + 1}0",
                 volume="500000",
                 account_value=None if i == 0 else "250000.5",
-            )
+            ),
         )
         for i in range(n)
     ]
@@ -119,7 +120,8 @@ def test_rows_are_numbered_by_list_position_not_venue_rank(client, session_facto
     # still start at 1, and under ROI sort the venue's pnl rank means nothing.
     rows = [
         discover.snapshot_row(
-            LeaderboardEntry(address=addr(n), rank=n, pnl=str(1_000 - n), roi=f"0.0{n}")
+            "hyperliquid",
+            LeaderboardEntry(address=addr(n), rank=n, pnl=str(1_000 - n), roi=f"0.0{n}"),
         )
         for n in (2, 3, 5)
     ]

@@ -5,6 +5,7 @@ Exit code 0 = safe to point real users at this deployment.
 """
 
 import sys
+from pathlib import Path
 
 from sqlalchemy import text
 
@@ -87,10 +88,67 @@ def security_problems(s) -> list[str]:
     return problems
 
 
+ROOT = Path(__file__).resolve().parent.parent
+TOS_SECTION = "## Terms-of-service position"
+# A venue doc whose terms position carries one of these is not cleared for
+# prod (docs/onchain_perps_plan.md S9): UNREAD until the terms are found and
+# read, PENDING COUNSEL until counsel (or the venue, in writing) answers.
+UNCLEARED_MARKERS = ("Position: UNREAD", "Position: PENDING COUNSEL")
+
+
+def tos_position(doc_text: str) -> str | None:
+    """The "Terms-of-service position" section of a venue doc (up to the next
+    level-2 heading), or None when the doc has no such section."""
+    lines = doc_text.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip() == TOS_SECTION:
+            body = []
+            for rest in lines[i + 1 :]:
+                if rest.startswith("## "):
+                    break
+                body.append(rest)
+            return "\n".join(body)
+    return None
+
+
+def watch_venue_problems(s, root: Path = ROOT) -> list[str]:
+    """Every venue open for watching (WATCH_VENUES) needs a terms doc whose
+    terms position is cleared: present, with a Terms-of-service position
+    section, and no UNREAD / PENDING COUNSEL marker in it (invariant 10)."""
+    from alphamarket.connectors.registry import PROFILES
+
+    problems: list[str] = []
+    for venue in [v.strip() for v in s.watch_venues.split(",") if v.strip()]:
+        profile = PROFILES.get(venue)
+        if profile is None:
+            problems.append(f"WATCH_VENUES lists {venue!r}, which is not a known venue")
+            continue
+        # The profile's tos_doc, else the conventional path: Polymarket's doc
+        # exists but is deliberately not on its profile (no consent paragraph
+        # on its connect screen yet; docs/venues/polymarket.md).
+        doc = profile.tos_doc or f"docs/venues/{venue}.md"
+        path = root / doc
+        if not path.is_file():
+            problems.append(f"WATCH_VENUES lists {venue}, which has no terms doc ({doc})")
+            continue
+        section = tos_position(path.read_text(encoding="utf-8"))
+        if section is None:
+            problems.append(f"{doc} has no '{TOS_SECTION[3:]}' section ({venue})")
+            continue
+        for marker in UNCLEARED_MARKERS:
+            if marker in section:
+                problems.append(
+                    f"WATCH_VENUES lists {venue}, whose terms position is '{marker}' "
+                    f"({doc}); keep it out of prod until it is cleared"
+                )
+    return problems
+
+
 def main() -> int:
     s = get_settings()
     problems: list[str] = []
     problems += security_problems(s)
+    problems += watch_venue_problems(s)
 
     if s.secret_key == "dev-only-change-me" or len(s.secret_key) < 32:
         problems.append("SECRET_KEY is the dev default or too short")

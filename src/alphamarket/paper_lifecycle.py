@@ -249,9 +249,20 @@ def _max_age() -> timedelta:
 # ---- funding -----------------------------------------------------------------------
 
 
-def funding_payment_micros(qty: Fraction, mark: Fraction, rate: Fraction) -> int:
-    """payment = -q x mark x rate (USD), floored to the micro. A long pays a
-    positive rate; a short receives it."""
+def funding_payment_micros(
+    qty: Fraction, mark: Fraction, rate: Fraction, short_rate: Fraction | None = None
+) -> int:
+    """One funding payment in USD micros, floored to the micro (credits round
+    down, debits round up: against the follower). q is signed (+ long).
+
+        long  (q > 0):                       -q x mark x rate
+        short (q < 0), short_rate set:        q x mark x short_rate
+        short (q < 0), short_rate None:      -q x mark x rate (symmetric)
+
+    `rate` > 0 means longs pay; `short_rate` > 0 means shorts pay (asymmetric
+    venues, FundingRate.short_rate)."""
+    if qty < 0 and short_rate is not None:
+        return floor_micros(qty * mark * short_rate)
     return floor_micros(-qty * mark * rate)
 
 
@@ -421,6 +432,7 @@ def apply_funding(db: Session, allocation: Allocation, now: datetime) -> int:
                 continue
             try:
                 rate = parse_price(row.rate)
+                short_rate = parse_price(row.short_rate) if row.short_rate is not None else None
                 mark = _funding_mark(db, inst, row)
             except (ArithmeticError, TypeError, ValueError):
                 # A malformed source row must not wedge every pass (the
@@ -435,7 +447,7 @@ def apply_funding(db: Session, allocation: Allocation, now: datetime) -> int:
             if mark is None:
                 unpriced.append(at)  # retried next pass, until it leaves the window
                 continue
-            payment = funding_payment_micros(position.qty.units, mark, rate)
+            payment = funding_payment_micros(position.qty.units, mark, rate, short_rate)
             rows = paper_book.append_group(
                 db,
                 allocation,

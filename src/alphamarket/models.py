@@ -32,6 +32,7 @@ from sqlalchemy import (
     event,
     false,
     text,
+    true,
 )
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
@@ -548,6 +549,9 @@ class Instrument(Base):
     # ascending (connectors.base.MarginTier), refreshed by the prices_daily job.
     margin_tiers: Mapped[list | None] = mapped_column(JSON, default=None)
     margin_tiers_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # 0019: False = paper copying skips it ("not_copyable"); signals are still
+    # recorded (connectors.base.NormalizedInstrument.copyable).
+    copyable: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
 
     @property
     def label(self) -> str:
@@ -1131,6 +1135,9 @@ class FundingRateRow(Base):
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     rate: Mapped[str] = mapped_column(String(64))  # decimal string per interval
     mark_price: Mapped[str | None] = mapped_column(String(64), default=None)
+    # 0019: what shorts pay (positive = shorts pay) on asymmetric venues; None
+    # = shorts receive `rate` (connectors.base.FundingRate.short_rate).
+    short_rate: Mapped[str | None] = mapped_column(String(64), default=None)
     source: Mapped[str] = mapped_column(String(40))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

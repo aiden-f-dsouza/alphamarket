@@ -24,7 +24,7 @@
     <div class="badges">
       {{ m.operator_badge(page.operator) }}
       {% if page.verified_since %}{% if st and page.incubating %}<span class="badge warn">incubating · {{ st.track_days }}/90 days</span>{% else %}{{ m.verified("Verified from venue data", st.track_days if st else None) }}{% endif %}{% endif %}
-      {% if page.verification_tier == "fills_only" %}<span class="badge">fills verified · balance not reconciled</span>{% elif page.reconciled is not none %}<span class="badge {{ 'good pulse' if page.reconciled else 'bad' }}">{% if page.reconciled %}<i></i>reconciled last night{% else %}{{ m.icon("x", 12, "currentColor", 2) }}reconciliation diverged{% endif %}</span>{% endif %}
+      {% if page.verification_tier == "fills_only" %}<span class="badge">fills verified · balance not reconciled</span>{% elif page.verification_tier == "positions_verified" and page.reconciled %}<span class="badge good">positions matched last night · cash reconstructed</span>{% elif page.reconciled is not none %}<span class="badge {{ 'good pulse' if page.reconciled else 'bad' }}">{% if page.reconciled %}<i></i>reconciled last night{% else %}{{ m.icon("x", 12, "currentColor", 2) }}reconciliation diverged{% endif %}</span>{% endif %}
       {% if page.verification_tier == "daily_verified" %}<span class="badge">daily verified · end-of-day data</span>{% endif %}
       {% if page.activity_flags and page.activity_flags.count %}<a class="badge warn" href="/verification">{{ m.icon("x", 12, "currentColor", 2) }}unsupported activity · {{ page.activity_flags.count }} skipped</a>{% endif %}
       {% if page.venue_env not in ("prod", "live") %}<span class="badge warn">{{ page.venue_env }} environment</span>{% endif %}

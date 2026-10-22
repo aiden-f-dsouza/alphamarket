@@ -183,6 +183,7 @@ def _normalized(inst: Instrument) -> NormalizedInstrument:
         min_notional=inst.min_notional,
         multiplier=inst.multiplier,
         expiry=inst.expiry,
+        copyable=inst.copyable,
     )
 
 
@@ -1048,6 +1049,7 @@ def _refresh_funding(db: Session, source, inst: Instrument, now: datetime) -> No
                 at=at,
                 rate=rate.rate,
                 mark_price=rate.mark_price,
+                short_rate=rate.short_rate,
                 source=inst.venue,
             )
         )

@@ -30,7 +30,7 @@
     <div class="badges">
       <span class="badge">{{ m.icon("lock", 12, "currentColor") }}private watch · not a Koine member</span>
       {% if st %}<span class="badge">{{ st.track_days }} days observed</span>{% endif %}
-      {% if page.verification_tier == "fills_only" %}<span class="badge">fills from public data · balance not reconciled</span>{% elif page.reconciled is not none %}<span class="badge {{ 'good' if page.reconciled else 'bad' }}">{% if page.reconciled %}balance matched last night{% else %}{{ m.icon("x", 12, "currentColor", 2) }}reconciliation diverged{% endif %}</span>{% endif %}
+      {% if page.verification_tier == "fills_only" %}<span class="badge">fills from public data · balance not reconciled</span>{% elif page.verification_tier == "positions_verified" and page.reconciled %}<span class="badge good">positions matched last night · cash reconstructed</span>{% elif page.reconciled is not none %}<span class="badge {{ 'good' if page.reconciled else 'bad' }}">{% if page.reconciled %}balance matched last night{% else %}{{ m.icon("x", 12, "currentColor", 2) }}reconciliation diverged{% endif %}</span>{% endif %}
     </div>
     <h1 style="font-size:44px;overflow-wrap:anywhere">{{ page.display_name }}</h1>
     <div class="stack" style="gap:6px">

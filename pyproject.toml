@@ -23,6 +23,7 @@ dependencies = [
     "pyotp>=2.10.0",
     "segno>=1.6.6",
     "eth-account>=0.14.0",
+    "eth-utils>=6.0,<6.1",  # connectors/addresses.py imports it directly (EIP-55)
     "pyjwt>=2.15.0",
     "defusedxml>=0.7.1",
     "websockets>=15.0",

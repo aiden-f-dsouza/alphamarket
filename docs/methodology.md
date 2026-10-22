@@ -104,6 +104,25 @@ strategy is in:
   window, early returns are understated rather than overstated. A trader who
   never redeems a losing position keeps it open at cost on this curve; the
   mark-to-market figures show the truth.
+- **Positions verified nightly, cash reconstructed** (on-chain perp venues
+  whose positions are funded straight from the wallet, with no account
+  balance at the venue): fills are pulled from the venue's public data, and
+  every night each open perp position (its signed size) is checked against
+  the venue's own position, within the venue's documented quantity rounding.
+  The cash is **not** checked: the venue keeps none for the address, so
+  Koine reconstructs it from the trades, and the venue's page for the
+  account says how. A position outside its tolerance quarantines the
+  strategy, as under "Reconciliation v2"; the cash never can.
+
+  ```
+  for each perp position in either vector (a missing side counts as 0):
+      divergence = venue size - ledger size        (atoms, signed)
+      ok         = |divergence| <= the venue's position tolerance (atoms)
+  ```
+
+  Example: with a tolerance of 2 atoms, a ledger long of 1.500000000000 ETH
+  against a venue report of 1.500000000001 ETH (1 atom at 12 dp) passes;
+  1.500000000003 (3 atoms) quarantines.
 - **Unclaimed**: a wallet address anyone could have pasted. The trader
   proves ownership by putting a Koine code in their venue profile bio; until
   Koine sees it there, nothing about the account is shown publicly.
@@ -969,7 +988,11 @@ allocation started. A signal Koine observed more than 6 hours after the fill
 (3 days on venues that only publish daily reports: IBKR, SnapTrade) is
 skipped as stale, because a follower could not have traded near that price.
 Instruments not quoted in USD or a stablecoin held at par (see "Daily prices
-and fallback pricing") are skipped. Every skip is recorded with its reason and
+and fallback pricing") are skipped. So are instruments the venue lists that
+Koine marks **not copyable** ("not copyable": synthetic US stocks and ETFs,
+pre-IPO names, currencies and commodities on crypto perp venues, until
+counsel confirms they may be paper-copied for US users); the creator's
+signal is still recorded and shown, only the paper copy is skipped. Every skip is recorded with its reason and
 counted on the follower's portfolio. A signal that makes the paper engine
 fail is skipped on its own ("engine error") and logged for us to fix, so it
 never holds back the follower's later signals, funding or liquidation check.
@@ -1087,6 +1110,21 @@ payment = -q x mark x rate        (q signed: + long, - short)
 mark    = the rate's own mark price, else a quote within 15 minutes of it,
           else the last complete daily close before that day
 ```
+
+A positive rate means longs pay and shorts receive it. Some venues charge the
+two sides differently (GMX: adaptive funding plus borrowing per side) and
+publish what shorts pay as its own rate (positive means shorts pay). Then a
+short pays its own side's rate instead:
+
+```
+long  (q > 0):                     payment = -q x mark x rate
+short (q < 0), short rate given:   payment =  q x mark x short_rate
+short (q < 0), no short rate:      payment = -q x mark x rate   (as above)
+```
+
+Example: short 2 ETH at mark 2,500 with rate 0.0001 and short rate 0.00003
+pays 2 x 2,500 x 0.00003 = 0.15 (-150,000 micro-dollars); on a venue without a
+short rate the same short would receive 2 x 2,500 x 0.0001 = 0.50.
 
 A rate with no position at that moment pays nothing. A rate with no mark yet
 is never estimated: it is retried on later passes (the day's close or a

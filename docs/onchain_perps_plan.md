@@ -347,6 +347,36 @@ file (W-L exit). Test both markers.
   intact. Today `test_discover_view.py:62-71` pins lowercasing for EVM only;
   that test stays.
 
+### Scaffold status (2026-10-22, branch `onchain-perps`)
+
+Landed: S1-S9 as written, with these deviations (venue agents read them):
+
+- **Synthetic Solana addresses start `De3o`, not `De30`**: base58 has no `0`
+  (nor `O`, `I`, `l`). Use `demo.synthetic_solana_address(tag)` for a
+  well-formed 44-character one; fixtures replace real Solana addresses the
+  same way.
+- `discover.select_rows(venue, entries, blocked, *, dropped=None)` takes the
+  venue too (it calls `snapshot_row(venue, entry)`). The refresh job log
+  gains `(venue, "invalid_addresses")` and `(venue, "private_removed")` counts
+  only when non-zero. Existing discover tests changed only at their
+  `snapshot_row` / `select_rows` call sites (the venue argument).
+- `discover.sweep_private(db, venue, source)` is the S5 sweep; it runs after
+  the venue's snapshots commit, in its own try block.
+- Preflight (S9) reads `profile.tos_doc`, else `docs/venues/<venue>.md`:
+  Polymarket's doc exists but is deliberately not on its profile (no consent
+  paragraph on its connect screen), and it is in prod `WATCH_VENUES`.
+- The S1 test uses public Solana program ids and keys generated in the test
+  rather than the Pacifica fixture address (a real, privacy-flagged trader).
+- `NormalizedInstrument.copyable` follows the venue's latest description on
+  every upsert (like lot sizes): a connector must set it the same way on its
+  fill instruments and in `fetch_instruments`.
+- Registry, demo and seed blocks have start and end markers
+  (`# ---- venue-<v> ----` / `# ---- end venue-<v> ----`); write inside them.
+- **Still open (main session, before merge):** the S4 read-only prod check
+  that every stored EVM `venue_accounts.key_id` (ADDRESS venues) and
+  `watch_optouts.address` is already lowercase. The scaffold dropped
+  `func.lower` on the strength of the two normalizers that wrote them.
+
 ---
 
 ## 3. Venue workstreams (parallel, one git worktree each)

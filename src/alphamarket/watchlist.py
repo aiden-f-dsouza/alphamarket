@@ -1,6 +1,7 @@
 """Private watchlist (docs/copy_strategies_plan.md section 2).
 
-A logged-in user adds a public Hyperliquid or Polymarket address; Koine
+A logged-in user adds a public address on a watchable venue (Hyperliquid,
+Polymarket; on-chain perp venues per docs/onchain_perps_plan.md); Koine
 ingests its public fills through the normal pipeline and the user can see its
 stats and paper-tail it. Nothing about the address reaches a public surface
 (invariant 4): its strategy has kind "watch", which `public.is_visible`
@@ -21,7 +22,6 @@ no social handles, no cross-venue matching.
 import hashlib
 import hmac
 import logging
-import re
 from dataclasses import dataclass
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -33,8 +33,9 @@ from sqlalchemy.orm import Session
 from alphamarket import audit
 from alphamarket.auth import current_user
 from alphamarket.config import get_settings
+from alphamarket.connectors import addresses
 from alphamarket.connectors.base import OwnershipProof
-from alphamarket.connectors.registry import build_connector, get_profile
+from alphamarket.connectors.registry import build_connector, build_market_data, get_profile
 from alphamarket.db import get_db
 from alphamarket.ingest import is_asset_venue
 from alphamarket.jobs import JobKind, enqueue
@@ -62,7 +63,6 @@ router = APIRouter(prefix="/api/watch", tags=["watchlist"])
 # Venues with public per-address data. Which of them are open is a setting
 # (`watch_venues`): see open_venues.
 WATCHABLE_VENUES = ("hyperliquid", "polymarket")
-ADDRESS_RE = re.compile(r"^0x[0-9a-f]{40}$")
 LABEL_MAX = 60
 # The system user's address fails email validation (a reserved TLD), so
 # nobody can sign up or log in as it; auth refuses `is_system` users anyway.
@@ -73,6 +73,7 @@ NOT_FOUND = "Not on your watchlist"
 OPTED_OUT = "The owner of this address has asked not to be tracked."
 VERIFY_FIRST = "Verify your email address before adding to your watchlist."
 FULL = "The watchlist is not taking new addresses right now. Try again later."
+VENUE_PRIVATE = "The owner of this address has turned on privacy on {venue}."
 
 
 class AlreadyListed(Exception):
@@ -126,21 +127,26 @@ def open_venues() -> tuple[str, ...]:
     return tuple(v for v in WATCHABLE_VENUES if v in wanted)
 
 
+def _normalized(venue: str, raw: str) -> str:
+    """The venue's stored form of `raw` (connectors/addresses.py: EVM
+    lowercased, Solana as given); 422 with the kind's hint otherwise."""
+    try:
+        return addresses.normalize(get_profile(venue).address_kind, raw)
+    except addresses.InvalidAddress as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
 def normalize_address(venue: str, raw: str) -> str:
-    """Lowercased `0x` + 40 hex for an open watchable venue; 422 otherwise."""
+    """The stored form of an address on an open watchable venue; 422 otherwise."""
     venues = open_venues()
     if venue not in venues:
         names = " and ".join(get_profile(v).display_name for v in venues) or "no"
         raise HTTPException(status_code=422, detail=f"Only {names} addresses can be watched")
-    address = (raw or "").strip().lower()
-    if not ADDRESS_RE.match(address):
-        raise HTTPException(status_code=422, detail="Enter a 0x address (42 characters)")
-    return address
+    return _normalized(venue, raw)
 
 
-def short_address(address: str) -> str:
-    """0x12ab…89cd: enough to tell addresses apart on a page."""
-    return f"{address[:6]}…{address[-4:]}" if len(address) > 12 else address
+# 0x12ab…89cd / 9GN1…AxUh: enough to tell addresses apart on a page.
+short_address = addresses.short
 
 
 def clean_label(label: str | None) -> str:
@@ -163,7 +169,7 @@ def listed_strategy(db: Session, venue: str, address: str) -> Strategy | None:
         .join(VenueAccount, VenueAccount.id == Strategy.venue_account_id)
         .where(
             VenueAccount.venue == venue,
-            func.lower(VenueAccount.key_id) == address,
+            VenueAccount.key_id == address,  # stored normalized, like `address`
             VenueAccount.is_watch.is_(False),
             VenueAccount.claimed_at.is_not(None),
         )
@@ -238,6 +244,17 @@ def tailable_strategy_or_404(db: Session, user: User, slug: str) -> Strategy:
 # ---- add / remove ---------------------------------------------------------------
 
 
+def _owner_private(venue: str, venue_env: str, address: str, throttle) -> bool:
+    """The venue's own privacy flag for `address` (MarketDataSource.
+    owner_private), checked once when a new watch is created. Only venues
+    that override the hook make a request; the base hook answers None
+    without one (building a market data source makes no call)."""
+    source = build_market_data(venue, venue_env)
+    if throttle is not None:
+        source.set_throttle(throttle)
+    return source.owner_private(address) is True
+
+
 def _track(db: Session, venue: str, address: str, actor: User, request: Request | None):
     """Create the shared watch account and its strategy: one venue call unit
     (the address exists, the anchor), exactly the anchoring a connect does,
@@ -259,6 +276,11 @@ def _track(db: Session, venue: str, address: str, actor: User, request: Request 
             reject_target=("watch_address", venue),
             throttle=throttle,
         )
+        if _owner_private(venue, venue_env, address, throttle):
+            raise HTTPException(
+                status_code=422,
+                detail=VENUE_PRIVATE.format(venue=get_profile(venue).display_name),
+            )
         return evidence, take_anchor(connector)
 
     limiter = get_web_limiter(request.app) if request is not None else None
@@ -576,10 +598,7 @@ def normalize_optout_address(venue: str, raw: str) -> str:
     if venue not in WATCHABLE_VENUES:
         names = " and ".join(get_profile(v).display_name for v in WATCHABLE_VENUES)
         raise HTTPException(status_code=422, detail=f"Only {names} addresses can opt out")
-    address = (raw or "").strip().lower()
-    if not ADDRESS_RE.match(address):
-        raise HTTPException(status_code=422, detail="Enter a 0x address (42 characters)")
-    return address
+    return _normalized(venue, raw)
 
 
 def optout_gate(user: User) -> None:
@@ -669,9 +688,6 @@ def perform_optout(
     crypto/stock tail closes inline, as a manual Stop does
     (paper_lifecycle.close_now); a close that fails is retried by the next
     mirror pass."""
-    from alphamarket.paper_lifecycle import close_now
-    from alphamarket.portfolio import stop_allocation  # portfolio imports us
-
     claim = start_optout(db, user, venue, raw_address)
     if claim.already:
         return OptoutResult(venue, claim.address, already=True)
@@ -679,20 +695,8 @@ def perform_optout(
 
     optout = WatchOptout(venue=venue, address=claim.address, proved_by_user_id=user.id)
     db.add(optout)
-    watches_removed = 0
-    stopped: list[Allocation] = []
     account = watch_account(db, venue, claim.address)
-    strategy = strategy_of(db, account) if account is not None else None
-    if strategy is not None:
-        watches_removed = db.execute(delete(Watch).where(Watch.strategy_id == strategy.id)).rowcount
-        for allocation in db.scalars(
-            select(Allocation).where(
-                Allocation.strategy_id == strategy.id,
-                Allocation.status == AllocationStatus.ACTIVE,
-            )
-        ).all():
-            stop_allocation(db, allocation, "optout", commit=False)
-            stopped.append(allocation)
+    watches_removed, stopped = _remove_watchers(db, account, "optout")
     try:
         db.flush()  # the unique (venue, address): a concurrent opt-out wins
     except IntegrityError:
@@ -711,9 +715,69 @@ def perform_optout(
         },
     )
     db.commit()
+    _close_stopped(db, stopped, "opt-out")
+    return OptoutResult(venue, claim.address, False, watches_removed, len(stopped))
+
+
+def _remove_watchers(
+    db: Session, account: VenueAccount | None, reason: str
+) -> tuple[int, list[Allocation]]:
+    """The removal half shared by an opt-out and a venue privacy flag: delete
+    every Watch of the account's strategy (all users) and stop each ACTIVE
+    tail of it with `reason`. No commit. Returns (watches removed, stopped
+    allocations); the caller closes the stopped ones after committing."""
+    from alphamarket.portfolio import stop_allocation  # portfolio imports us
+
+    strategy = strategy_of(db, account) if account is not None else None
+    if strategy is None:
+        return 0, []
+    removed = db.execute(delete(Watch).where(Watch.strategy_id == strategy.id)).rowcount
+    stopped: list[Allocation] = []
+    for allocation in db.scalars(
+        select(Allocation).where(
+            Allocation.strategy_id == strategy.id,
+            Allocation.status == AllocationStatus.ACTIVE,
+        )
+    ).all():
+        stop_allocation(db, allocation, reason, commit=False)
+        stopped.append(allocation)
+    return removed, stopped
+
+
+def _close_stopped(db: Session, stopped: list[Allocation], what: str) -> None:
+    """Close each stopped crypto/stock tail inline, as a manual Stop does
+    (paper_lifecycle.close_now); a close that fails is retried by the next
+    mirror pass."""
+    from alphamarket.paper_lifecycle import close_now
+
     for allocation in stopped:
         try:
             close_now(db, allocation)
         except Exception:
-            logger.exception("opt-out: closing allocation %s deferred", allocation.id)
-    return OptoutResult(venue, claim.address, False, watches_removed, len(stopped))
+            logger.exception("%s: closing allocation %s deferred", what, allocation.id)
+
+
+def remove_private_watch(db: Session, account: VenueAccount) -> tuple[int, int]:
+    """The venue says the owner of this watched address turned its privacy
+    flag on (MarketDataSource.private_addresses; discover.refresh sweeps):
+    remove every watch of it and stop its tails, exactly as an opt-out does,
+    but WITHOUT a watch_optouts row: the flag can be turned off again, and
+    watch_optouts is append-only. New watches are refused at _track while the
+    flag stays on. One transaction, then the stopped tails close. Returns
+    (watches removed, tails stopped)."""
+    removed, stopped = _remove_watchers(db, account, "venue_private")
+    audit.record(
+        db,
+        audit.AuditAction.WATCH_VENUE_PRIVATE,
+        actor_user_id=None,
+        target_type="venue_account",
+        target_id=account.id,
+        details={
+            "venue": account.venue,
+            "watches_removed": removed,
+            "tails_stopped": len(stopped),
+        },
+    )
+    db.commit()
+    _close_stopped(db, stopped, "venue privacy")
+    return removed, len(stopped)

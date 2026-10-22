@@ -27,7 +27,7 @@
     {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
 
     {% if claim_message %}
-    <form method="post" action="/dashboard/connect/claim/{{ account.id }}" class="card" autocomplete="off" data-claim-form data-claim-address="{{ account.key_id }}">
+    <form method="post" action="/dashboard/connect/claim/{{ account.id }}" class="card" autocomplete="off" data-claim-form data-claim-kind="{{ profile.address_kind }}" data-claim-address="{{ account.key_id }}">
       <div class="body" style="padding:28px;gap:20px">
         <div class="stack" style="gap:8px">
           <span class="label">Message to sign</span>

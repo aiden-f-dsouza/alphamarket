@@ -1,0 +1,1 @@
+{# One hint per venue in address_ui.hints (watch_pages.address_ui); with a venue <select>, _address_hints.css shows the selected venue's only. #}{% for v, hint in address_ui.hints %}<span class="note address-hint" data-hint-venue="{{ v }}">{{ hint }}</span>{% endfor %}

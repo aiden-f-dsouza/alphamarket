@@ -54,6 +54,12 @@ class AuditAction(StrEnum):
     # (watchlist.perform_optout); target: the watch_optouts row; details: venue,
     # watches removed, tails stopped. No address in details.
     WATCH_OPTOUT = "watch.optout"
+    # The venue reports the owner of a watched address turned its own privacy
+    # flag on (Pacifica privacy_mode; watchlist.remove_private_watch, swept by
+    # discover.refresh). Target: the watch venue account; details: venue,
+    # watches removed, tails stopped. No address in details, and no
+    # watch_optouts row (the flag can be turned off again).
+    WATCH_VENUE_PRIVATE = "watch.venue_private"
 
 
 @dataclass(frozen=True)

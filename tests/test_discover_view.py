@@ -24,7 +24,8 @@ def addr(n: int) -> str:
 
 def row(n: int, pnl: str, roi: str | None, rank: int) -> dict:
     return discover.snapshot_row(
-        LeaderboardEntry(address=addr(n).upper().replace("0X", "0x"), rank=rank, pnl=pnl, roi=roi)
+        "hyperliquid",
+        LeaderboardEntry(address=addr(n).upper().replace("0X", "0x"), rank=rank, pnl=pnl, roi=roi),
     )
 
 
@@ -58,6 +59,7 @@ def _watch(db, system: User, user: User, n: int) -> Strategy:
 
 def test_snapshot_row_is_integer_micros_and_lowercased():
     r = discover.snapshot_row(
+        "hyperliquid",
         LeaderboardEntry(
             address="0xABCdef0000000000000000000000000000000001",
             rank=3,
@@ -65,7 +67,7 @@ def test_snapshot_row_is_integer_micros_and_lowercased():
             roi="0.25",
             volume="10",
             account_value=None,
-        )
+        ),
     )
     assert r == {
         "address": "0xabcdef0000000000000000000000000000000001",

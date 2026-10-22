@@ -142,7 +142,7 @@ def test_hyperliquid_leaderboard_parses_ranks_and_drops_identity():
     assert "placeholder-name" not in dumped and "prize" not in dumped
     assert all(set(e.model_dump()) == ENTRY_FIELDS for b in boards.values() for e in b)
     # every figure fits integer micros
-    assert all(discover.snapshot_row(e) for b in boards.values() for e in b)
+    assert all(discover.snapshot_row("hyperliquid", e) for b in boards.values() for e in b)
 
 
 @respx.mock
@@ -263,7 +263,7 @@ def test_select_rows_filters_and_unions_pnl_and_roi(settings):
         e(6, 6, "400", "0.95", "15000"),  # opted out
         e(7, 7, "300", "0.01", "80000"),
     ]
-    rows = discover.select_rows(entries, blocked={addr(6)})
+    rows = discover.select_rows("hyperliquid", entries, blocked={addr(6)})
     # Survivors 1, 3, 4, 5, 7. Top 2 by pnl: 1 (900), 3 (700). Top 2 by roi:
     # 4 (0.90), 5 (0.70). Union in pnl order: 1, 3, 4, 5.
     assert [_n(r["address"]) for r in rows] == [1, 3, 4, 5]
@@ -283,7 +283,7 @@ def test_select_rows_drops_a_reported_zero_volume(settings):
         LeaderboardEntry(address=addr(2), rank=2, pnl="800", volume="0.000001"),
         LeaderboardEntry(address=addr(3), rank=3, pnl="700"),  # volume not reported: kept
     ]
-    rows = discover.select_rows(entries, blocked=set())
+    rows = discover.select_rows("hyperliquid", entries, blocked=set())
     assert [_n(r["address"]) for r in rows] == [2, 3]
 
 

@@ -298,8 +298,8 @@ def upsert_instrument(
     db: Session, venue: str, inst: NormalizedInstrument, seen_at: datetime
 ) -> Instrument:
     """The instrument row for (venue, symbol), created on first sight with a
-    symbol_history row. Lot sizes and precision follow the venue's latest
-    description; type and assets are identity and never change here."""
+    symbol_history row. Lot sizes, precision and `copyable` follow the venue's
+    latest description; type and assets are identity and never change here."""
     query = select(Instrument).where(Instrument.venue == venue, Instrument.symbol == inst.symbol)
     row = db.scalar(query)
     if row is None:
@@ -315,6 +315,7 @@ def upsert_instrument(
             "min_notional": inst.min_notional,
             "multiplier": inst.multiplier,
             "expiry": inst.expiry,
+            "copyable": inst.copyable,
             "first_seen_at": seen_at,
         }
         if db.get_bind().dialect.name == "postgresql":
@@ -348,7 +349,14 @@ def upsert_instrument(
             venue,
             inst.symbol,
         )
-    for attr in ("qty_decimals", "qty_step_atoms", "min_qty_atoms", "min_notional", "multiplier"):
+    for attr in (
+        "qty_decimals",
+        "qty_step_atoms",
+        "min_qty_atoms",
+        "min_notional",
+        "multiplier",
+        "copyable",
+    ):
         if getattr(row, attr) != getattr(inst, attr):
             setattr(row, attr, getattr(inst, attr))
     stored_expiry = aware(row.expiry) if row.expiry is not None else None
