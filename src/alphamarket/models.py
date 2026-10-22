@@ -418,6 +418,19 @@ class Allocation(Base):
     last_signal_id: Mapped[int] = mapped_column(Integer, default=0)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # ---- copy tickets (migration 0019, copy_tickets.py) ----
+    # Each new paper fill also becomes a ticket the user may place by hand.
+    copy_tickets: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # Set each time copy_tickets goes off -> on; only paper fills created at or
+    # after it issue tickets (nothing earlier is replayed).
+    copy_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    copy_email: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # The user's own read-only account on the strategy's venue that their real
+    # copies are matched against (copy_tickets.match_tickets). Never a watch
+    # account, never someone else's.
+    copy_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("venue_accounts.id"), index=True, default=None
+    )
 
 
 class MirrorFill(Base):
@@ -1367,3 +1380,66 @@ def _enforce_append_only_watch(session: Session, flush_context, instances) -> No
     for obj in session.deleted:
         if isinstance(obj, WatchOptout):
             raise AppendOnlyViolation("WatchOptout rows are append-only; cannot delete")
+
+
+# ---- copy tickets (0019) ----
+
+
+class CopyTicketStatus(StrEnum):
+    OPEN = "open"  # issued; the page suggests placing it until expires_at
+    DONE = "done"  # the user says they placed it
+    SKIPPED = "skipped"  # the user says they will not
+    EXPIRED = "expired"  # past expires_at without being matched or marked
+    MATCHED = "matched"  # seen on the user's connected account (possibly partial)
+
+
+class CopyTicket(Base):
+    """One paper fill of an allocation with copy tickets on, written as an
+    order the user may place THEMSELVES on the venue (copy_tickets.py).
+    Koine never places it. Mutable on purpose (status, the match), like
+    mirror_skips: not a ledger fact, so not append-only. Exactly one source:
+    a binary mirror_fills row or an asset mirror_asset_fills row (reason
+    "signal"); the unique source ids make issuing idempotent."""
+
+    __tablename__ = "copy_tickets"
+    __table_args__ = (
+        CheckConstraint(
+            "(mirror_fill_id IS NULL) <> (mirror_asset_fill_id IS NULL)",
+            name="ck_copy_tickets_one_source",
+        ),
+        _decimals_check("qty_decimals", "copy_tickets"),
+        Index("ix_copy_tickets_status_expires", "status", "expires_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    allocation_id: Mapped[int] = mapped_column(ForeignKey("allocations.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    signal_id: Mapped[int] = mapped_column(ForeignKey("signals.id"))
+    mirror_fill_id: Mapped[int | None] = mapped_column(
+        ForeignKey("mirror_fills.id"), unique=True, default=None
+    )
+    mirror_asset_fill_id: Mapped[int | None] = mapped_column(
+        _BigId, ForeignKey("mirror_asset_fills.id"), unique=True, default=None
+    )
+    venue: Mapped[str] = mapped_column(String(40))
+    instrument_id: Mapped[int | None] = mapped_column(ForeignKey("instruments.id"), default=None)
+    ticker: Mapped[str] = mapped_column(String(160))  # the venue's symbol
+    label: Mapped[str] = mapped_column(String(160))  # how it reads on a page
+    side: Mapped[str] = mapped_column(String(10))  # yes | no | long | short
+    action: Mapped[str] = mapped_column(String(10))  # buy | sell
+    qty_atoms: Mapped[int] = mapped_column(BigInteger)  # binary: count_micros
+    qty_decimals: Mapped[int] = mapped_column(Integer)  # binary: 6
+    paper_price: Mapped[str] = mapped_column(String(64))  # the paper fill's price
+    creator_price: Mapped[str] = mapped_column(String(64))  # the creator's fill price
+    # The creator's trade as a share of their equity just before it, in bps
+    # (the impersonal size); NULL when the notional or the equity is unknown.
+    stake_bps: Mapped[int | None] = mapped_column(Integer, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(12), default=CopyTicketStatus.OPEN)
+    status_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    matched_qty_atoms: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    matched_price: Mapped[str | None] = mapped_column(String(64), default=None)  # VWAP
+    matched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # The user's fills used: "fill:<id>" (binary) / "asset_fill:<id>" (asset).
+    matched_refs: Mapped[list | None] = mapped_column(JSON, default=None)

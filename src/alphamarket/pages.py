@@ -26,7 +26,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from alphamarket import auth, credentials, demo, mfa, ratelimit
+from alphamarket import auth, copy_tickets, credentials, demo, mfa, ratelimit
 from alphamarket.account_status import account_status
 from alphamarket.analytics import latest_stats
 from alphamarket.charts import drawdown_window, polyline, ticks
@@ -45,6 +45,7 @@ from alphamarket.follows import (
 from alphamarket.marks import sigil, tag_color
 from alphamarket.models import (
     Allocation,
+    AllocationStatus,
     EquitySnapshot,
     Follow,
     Instrument,
@@ -745,6 +746,8 @@ def tail_form_fields(
         "track_days": st["track_days"] if st else None,
         "terms": paper_terms(venue)["rows"] if venue in PROFILES else [],
         "pricing_rows": PRICING_ROWS,
+        # Copy tickets (copy_tickets.py): the form's opt-in, only while the feature is on.
+        "copy_available": copy_tickets.enabled(),
     }
 
 
@@ -830,6 +833,7 @@ def tail_form(
     allocation: str = Form(""),
     drawdown_limit_bps: str = Form(str(DEFAULT_DRAWDOWN_BPS)),
     confirm: str | None = Form(None),
+    copy_on: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
     """Start a paper tail: tails.create_allocation does every check (paper
@@ -841,7 +845,7 @@ def tail_form(
     if user is None:
         return RedirectResponse(login_url(f"/s/{strategy.slug}/tail"), status_code=303)
     return start_tail_form(
-        request, db, user, strategy, allocation, drawdown_limit_bps, confirm, _tail_ctx
+        request, db, user, strategy, allocation, drawdown_limit_bps, confirm, _tail_ctx, copy_on
     )
 
 
@@ -854,6 +858,7 @@ def start_tail_form(
     drawdown_limit_bps: str,
     confirm: str | None,
     tail_ctx: Callable[..., dict],
+    copy_on: str | None = None,
 ) -> Response:
     """The tail form's POST for a strategy the caller has already resolved
     (public here, a private watch in watch_pages): the paper-only box, then
@@ -872,7 +877,10 @@ def start_tail_form(
             payload = AllocationIn(
                 strategy_slug=strategy.slug, allocation=amount, drawdown_limit_bps=bps
             )
-            create_allocation(db, user, payload)
+            created = create_allocation(db, user, payload)
+            if copy_on == "on" and copy_tickets.enabled():
+                # The form's opt-in: copy tickets from this tail's first paper fill.
+                copy_tickets.set_copy_settings(db, user, created, True, False, None)
         except ValidationError:
             error = "Choose a drawdown limit from the list."
         except HTTPException as exc:
@@ -924,6 +932,7 @@ PORTFOLIO_NOTICES = {
     "sold at the current quote (one with no fresh quote, such as a stock after hours, closes "
     "when the market quotes it again); prediction-market positions run to settlement. Its "
     "history stays here.",
+    "copy_saved": "Copy ticket settings saved. New tickets appear on your copy tickets page.",
 }
 
 
@@ -1204,6 +1213,17 @@ def portfolio(request: Request, notice: str = "", db: Session = Depends(get_db))
             handles[v["strategy_slug"]] = owner.display_name if owner else ""
         p = portfolio_view(summary, handles, watched=watched)
         p["activity"] = _portfolio_activity(db, ids)
+        if copy_tickets.enabled():
+            # Each active tail's copy ticket settings and stats, by allocation id.
+            p["copy_tickets"] = {
+                a.id: copy_tickets.allocation_copy_context(db, user, a)
+                for a in db.scalars(
+                    select(Allocation).where(
+                        Allocation.user_id == user.id,
+                        Allocation.status == AllocationStatus.ACTIVE,
+                    )
+                ).all()
+            }
         # w3-seed: a seeded demo investor's paper book is sample data (invariant 7).
         return _render(
             request,

@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Copy tickets · Koine{% endblock %}
+{% block nav_active %}copy{% endblock %}
+{% block style %}
+  .ct-head { display:grid; grid-template-columns:minmax(0,1fr) 380px; gap:48px; align-items:start; }
+  .trow { display:grid; grid-template-columns:minmax(0,1fr) 110px 110px 110px 92px minmax(200px,auto); gap:16px; align-items:center; padding:14px 20px; border-bottom:1px solid var(--line); }
+  .trow:last-child { border-bottom:0; }
+  .trow.head { padding-top:10px; padding-bottom:10px; }
+  .trow .r { text-align:right; }
+  .trow .acts { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; }
+  .trow .acts form { margin:0; }
+  .hrow { display:grid; grid-template-columns:minmax(0,1fr) 100px 110px 120px 100px; gap:16px; align-items:center; padding:12px 20px; border-bottom:1px solid var(--line); }
+  .hrow:last-child { border-bottom:0; }
+  .hrow .r { text-align:right; }
+  .side-buy { color:var(--good); } .side-sell { color:var(--bad); }
+  @media (max-width:1000px) {
+    .ct-head { grid-template-columns:minmax(0,1fr); gap:24px; }
+    .trow { grid-template-columns:minmax(0,1fr) 90px; } .trow .hide { display:none; } .trow .acts { grid-column:1 / -1; justify-content:flex-start; }
+    .hrow { grid-template-columns:minmax(0,1fr) 90px; } .hrow .hide { display:none; }
+  }
+{% endblock %}
+{% block content %}
+{% if notice %}<div class="notice" role="status" style="border-color:var(--brand);color:var(--text)">{{ notice }}</div>{% endif %}
+{% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+
+<div class="ct-head">
+  <div class="stack" style="gap:14px">
+    <span class="label">Copy tickets · {{ open|length }} open</span>
+    <h1 style="font-size:44px">Trades you can place yourself</h1>
+    <p class="text2" style="font-size:16px;line-height:1.6;max-width:640px">Each trade your paper tails copy is written here as an order{% if sized %} sized to your paper allocation{% else %}, with its size as a share of the creator's equity{% endif %}. Placing it is up to you, by hand, on the venue. When you pick your own connected account for a tail, Koine looks for your real fill after each sync and shows what you got next to the paper price.</p>
+    <span class="small muted" style="display:inline-flex;align-items:center;gap:6px">{{ m.icon("lock", 12, "var(--muted)") }}Only you see this page. Koine never places an order in any account.</span>
+  </div>
+  <div class="card ink"><div class="body" style="padding:20px 24px;gap:10px">
+    <span class="label">Read this first</span>
+    <p style="font-size:14px;line-height:1.6;margin:0">{{ disclaimer }}</p>
+    <span class="small text2">A ticket stops being suggested once its price is stale (an hour after the creator's trade on most venues). A sell is a ticket too: place it only if you copied the trade it closes.</span>
+  </div></div>
+</div>
+
+<div class="stack" style="gap:10px">
+  <span class="label">Open tickets</span>
+  {% if open %}
+  <div class="card">
+    <div class="trow head"><span class="label">Trade</span><span class="label r hide">Paper price</span><span class="label r hide">Creator price</span><span class="label r hide">Of equity</span><span class="label r">Expires in</span><span class="label r">You</span></div>
+    {% for t in open %}
+    <div class="trow">
+      <div class="stack" style="gap:4px;min-width:0">
+        <span style="font-size:16px;font-weight:500;overflow-wrap:anywhere"><span class="side-{{ t.action }}">{{ t.action|upper }}</span> {{ t.side|upper }}{% if sized %} <span class="mono">{{ t.qty }}</span>{% endif %} {{ t.label }}</span>
+        <span class="mono small muted">{{ t.venue_label }}{% if t.label != t.ticker %} · {{ t.ticker }}{% endif %}{% if t.action == "sell" %} · closes a position: only if you copied the opening trade{% endif %}</span>
+      </div>
+      <span class="mono r hide">{{ m.price(t.paper_price) }}</span>
+      <span class="mono r text2 hide">{{ m.price(t.creator_price) }}</span>
+      <span class="mono r text2 hide">{{ "%.2f%%"|format(t.stake_pct * 100) if t.stake_pct is not none else "—" }}</span>
+      <span class="mono r">{{ t.expires_in }}</span>
+      <div class="acts">
+        {% if t.place_url %}<a class="btn sm" href="{{ t.place_url }}" target="_blank" rel="noopener noreferrer">Place on {{ t.venue_label }}</a>{% else %}<span class="small muted">Place it at your broker</span>{% endif %}
+        <form method="post" action="/copy/{{ t.id }}/done"><button class="btn secondary sm" type="submit">Done</button></form>
+        <form method="post" action="/copy/{{ t.id }}/skip"><button class="btn secondary sm" type="submit">Skip</button></form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="card plain"><div class="body"><span class="muted">No open tickets. {% if not allocations %}Turn copy tickets on for a paper tail on your <a href="/portfolio" style="text-decoration:underline">portfolio</a>; each trade it copies from then on appears here.{% else %}New ones appear here as your paper tails copy trades.{% endif %}</span></div></div>
+  {% endif %}
+</div>
+
+{% if allocations %}
+<div class="stack" style="gap:10px">
+  <span class="label">By paper tail</span>
+  <div class="card"><div class="body" style="gap:4px;padding:16px 24px">
+    <div class="kv">
+    {% for a in allocations %}
+      <div><span>{{ a.name }}{% if not a.enabled %} <span class="muted">(tickets off)</span>{% endif %}</span><span>{{ a.stats.issued }} issued · {{ a.stats.matched }} matched · {{ a.stats.done }} done · {{ a.stats.skipped }} skipped · {{ a.stats.expired }} expired{% if a.stats.median_slippage_bps is not none %} · median slippage {{ "%+.1f"|format(a.stats.median_slippage_bps) }} bps{% endif %}</span></div>
+    {% endfor %}
+    </div>
+    <span class="mono small muted" style="padding-top:8px">Slippage is your real price against the paper fill, positive when worse for you. Settings live on your <a href="/portfolio" class="text2" style="text-decoration:underline">portfolio</a>.</span>
+  </div></div>
+</div>
+{% endif %}
+
+{% if history %}
+<div class="stack" style="gap:10px">
+  <span class="label">History</span>
+  <div class="card">
+    <div class="hrow head"><span class="label">Trade</span><span class="label r">Status</span><span class="label r hide">Paper price</span><span class="label r hide">Your price</span><span class="label r hide">Slippage</span></div>
+    {% for t in history %}
+    <div class="hrow">
+      <div class="stack" style="gap:4px;min-width:0">
+        <span style="font-weight:500;overflow-wrap:anywhere"><span class="side-{{ t.action }}">{{ t.action|upper }}</span> {{ t.side|upper }}{% if sized %} <span class="mono">{{ t.qty }}</span>{% endif %} {{ t.label }}</span>
+        <span class="mono small muted">{{ t.venue_label }} · {{ t.created_at[:16]|replace("T", " ") }} UTC{% if sized and t.matched_qty %} · matched {{ t.matched_qty }}{% if t.partial %} (partial){% endif %}{% endif %}</span>
+      </div>
+      <span class="mono r small {{ 'good' if t.status == 'matched' else 'muted' }}">{{ t.status }}</span>
+      <span class="mono r hide">{{ m.price(t.paper_price) }}</span>
+      <span class="mono r hide">{{ m.price(t.matched_price) if t.matched_price else "—" }}</span>
+      <span class="mono r hide {{ ('bad' if t.slippage_bps > 0 else 'good') if t.slippage_bps is not none else 'muted' }}">{{ "%+.1f bps"|format(t.slippage_bps) if t.slippage_bps is not none else "—" }}</span>
+    </div>
+    {% if t.can_done %}<form method="post" action="/copy/{{ t.id }}/done" style="padding:0 20px 10px"><button class="btn secondary sm" type="submit">I placed it</button></form>{% endif %}
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<p class="mono small muted" style="line-height:1.6">How tickets are sized, when they expire and how a real fill is matched: <a href="/verification" class="text2" style="text-decoration:underline">methodology, "Copy tickets"</a>.</p>
+{% endblock %}

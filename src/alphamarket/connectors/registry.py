@@ -84,6 +84,9 @@ PROFILES: dict[str, VenueProfile] = {
         fee_rounding_micros=100,  # fee_cost has four decimals
         ownership=OwnershipProof.KEY,
         asset_classes=("prediction",),  # wave2
+        # copy tickets: market pages are /markets/<series>/<slug>/...; the
+        # slug is not in the ticker, so no per-market link [VERIFY].
+        trade_home_url="https://kalshi.com/markets",
     ),
     "polymarket": VenueProfile(
         venue="polymarket",
@@ -121,6 +124,8 @@ PROFILES: dict[str, VenueProfile] = {
             "and lifetime stats come from Polymarket's public wallet stats. Volume counts "
             "whole UTC days. Polymarket publishes no ROI or cash balance."
         ),
+        # copy tickets: event pages are /event/<slug>; tickers are token ids.
+        trade_home_url="https://polymarket.com",
     ),
     # ---- venue-kraken ----
     "kraken": VenueProfile(
@@ -176,6 +181,10 @@ PROFILES: dict[str, VenueProfile] = {
         # P7: WS v2 `executions` queues a sync (legs need Ledgers rows). Only
         # keys that also carry the optional WebSocket permission stream.
         stream_mode=StreamMode.NUDGE,
+        # copy tickets: the canonical pair page, checked 2026-10-22 (BTC/USD ->
+        # /app/trade/btc-usd, its <link rel="canonical">).
+        trade_url="https://pro.kraken.com/app/trade/{base_lower}-{quote_lower}",
+        trade_home_url="https://pro.kraken.com/app/trade",
     ),
     # ---- venue-hyperliquid ----
     "hyperliquid": VenueProfile(
@@ -222,6 +231,10 @@ PROFILES: dict[str, VenueProfile] = {
         # P7: `userFills` frames are the REST fill objects, ingested directly.
         stream_mode=StreamMode.FILLS,
         stream_users_per_ip=hyperliquid.WS_USERS_PER_IP,
+        # copy tickets: perps trade at /trade/<COIN> (a single-page app, so
+        # any path loads; spot pair names are not checked) [VERIFY].
+        trade_url="https://app.hyperliquid.xyz/trade/{symbol}",
+        trade_home_url="https://app.hyperliquid.xyz/trade",
     ),
     # ---- venue-coinbase ----
     "coinbase": VenueProfile(
@@ -267,6 +280,9 @@ PROFILES: dict[str, VenueProfile] = {
         asset_classes=("crypto",),  # wave2
         # P7: the `user` channel reports orders, not fills: it queues a sync.
         stream_mode=StreamMode.NUDGE,
+        # copy tickets: per-product pages refuse automated checks (403), so
+        # the link is Advanced Trade itself [VERIFY /advanced-trade/spot/<id>].
+        trade_home_url="https://www.coinbase.com/advanced-trade",
     ),
     # ---- venue-binanceus ----
     "binanceus": VenueProfile(
@@ -331,6 +347,10 @@ PROFILES: dict[str, VenueProfile] = {
         ),
         paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
         asset_classes=("crypto",),  # wave2
+        # copy tickets: /spot-trade/<base>_<quote>, checked 2026-10-22 (the BTC
+        # page links /spot-trade/btc_usdt).
+        trade_url="https://www.binance.us/spot-trade/{base_lower}_{quote_lower}",
+        trade_home_url="https://www.binance.us/spot-trade",
     ),
     "alpaca": VenueProfile(
         venue="alpaca",
@@ -391,6 +411,7 @@ PROFILES: dict[str, VenueProfile] = {
         paper_fee_model=PaperFeeModel.US_EQUITY_REGULATORY,
         regulatory_fees=US_EQUITY_REGULATORY_FEES,  # wave2
         asset_classes=("equities",),
+        trade_home_url="https://app.alpaca.markets",  # copy tickets: no per-symbol page
     ),
     # ---- venue-ibkr ----
     "ibkr": VenueProfile(
@@ -450,6 +471,8 @@ PROFILES: dict[str, VenueProfile] = {
         asset_classes=("equities",),
         pricing_venue="alpaca",  # no public market data of its own
         max_copy_lag_seconds=DAILY_MAX_COPY_LAG_SECONDS,
+        # copy tickets: Client Portal; orders are placed there or in TWS.
+        trade_home_url="https://www.interactivebrokers.com/portal/",
     ),
     # ---- venue-snaptrade ----
     "snaptrade": VenueProfile(
@@ -513,6 +536,8 @@ PROFILES: dict[str, VenueProfile] = {
         asset_classes=("equities",),
         pricing_venue="alpaca",  # no public market data of its own
         max_copy_lag_seconds=DAILY_MAX_COPY_LAG_SECONDS,
+        # copy tickets: orders go through the user's own broker, whichever it
+        # is, so there is no one link (trade_url and trade_home_url stay None).
     ),
 }
 

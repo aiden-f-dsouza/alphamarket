@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from alphamarket import (
     aggregator_jobs,
+    copy_tickets,
     credentials,
     discover,
     email,
@@ -203,6 +204,38 @@ def handle_signals(ctx: JobContext) -> None:
                 priority=ctx.job.priority,
             )
     db.commit()
+    if ctx.account is not None:
+        _match_copies(db, ctx.account)
+
+
+def _match_copies(db: Session, account: VenueAccount) -> None:
+    """Copy tickets: match this account's new real fills to the tickets of
+    its owner's tails that check copies against it. A failure here never
+    fails the signals job."""
+    try:
+        n = copy_tickets.match_tickets(db, account, utcnow())
+        if n:
+            logger.info("account %s: %d copy tickets matched", account.id, n)
+    except Exception:
+        db.rollback()
+        logger.exception("copy ticket matching failed for account %s", account.id)
+
+
+def _issue_copies(db: Session, allocation: Allocation) -> None:
+    """Copy tickets for the paper fills this pass made, then one email for
+    the new open ones. Runs after process_allocation committed (the row
+    lock is gone): a concurrent pass issuing the same ticket loses on the
+    unique source id (copy_tickets.issue_tickets). Never breaks mirroring."""
+    if not allocation.copy_tickets:
+        return
+    try:
+        issued = copy_tickets.issue_tickets(db, allocation, utcnow())
+        if issued:
+            logger.info("allocation %s: %d copy tickets issued", allocation.id, len(issued))
+            copy_tickets.notify_new_tickets(db, allocation, issued)
+    except Exception:
+        db.rollback()
+        logger.exception("copy tickets failed for allocation %s", allocation.id)
 
 
 @register_handler(JobKind.MIRROR)
@@ -214,6 +247,13 @@ def handle_mirror(ctx: JobContext) -> None:
     strategy_id = (ctx.job.payload or {}).get("strategy_id")
     if strategy_id is not None:
         q = q.where(Allocation.strategy_id == strategy_id)
+    elif copy_tickets.enabled():
+        # The global sweep (every sync tick) also expires open copy tickets.
+        try:
+            copy_tickets.expire_tickets(db, utcnow())
+        except Exception:
+            db.rollback()
+            logger.exception("copy ticket expiry failed")
     for allocation_id in db.scalars(q).all():
         # The global `mirror` job and per-strategy `mirror:strategy:<id>` jobs
         # can run at once on different workers. mirror_pending reads
@@ -242,6 +282,8 @@ def handle_mirror(ctx: JobContext) -> None:
         except Exception:
             db.rollback()
             logger.exception("mirroring failed for allocation %s", allocation.id)
+            continue
+        _issue_copies(db, allocation)
 
 
 @register_handler(JobKind.PRICES)
