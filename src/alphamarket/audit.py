@@ -54,6 +54,11 @@ class AuditAction(StrEnum):
     # (watchlist.perform_optout); target: the watch_optouts row; details: venue,
     # watches removed, tails stopped. No address in details.
     WATCH_OPTOUT = "watch.optout"
+    # ---- copy tickets (copy_tickets.py) ----
+    # target: the allocation; details: enabled, email, account_id (an id only).
+    COPY_SETTINGS = "copy.settings"
+    COPY_TICKET_DONE = "copy.ticket_done"  # target: the copy_tickets row
+    COPY_TICKET_SKIP = "copy.ticket_skip"
 
 
 @dataclass(frozen=True)

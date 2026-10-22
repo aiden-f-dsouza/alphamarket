@@ -1237,6 +1237,92 @@ of 20 would have paid 0.04). Cash 9,211.96 + 812 - 0.02 = 10,023.94.
 
 <!-- wave2:p8-pages -->
 
+## Copy tickets
+
+A paper tail can also hand out copy tickets. A ticket is one trade the paper
+tail copied, written as an order the follower may place **themselves**, by
+hand, on the venue. Koine does not place it and cannot: it only ever holds
+read-only access, and there is no button that sends an order anywhere. The
+"Place on" link opens the venue's own page and nothing more.
+
+**Where a ticket comes from.** Each new paper fill of the tail, from the
+moment tickets were turned on (nothing earlier is replayed): on a
+prediction market every paper fill, on crypto and stock venues every paper
+fill copied from a signal. Paper liquidations, stop closes, funding and
+corporate actions issue no ticket. A ticket carries the paper fill's
+instrument, side, action, quantity and price, the creator's own price, and
+the creator's trade as a share of their equity just before it:
+
+```
+prediction markets:  share = count x price / creator equity before
+crypto and stocks:   share = notional / creator equity before
+                     stored in basis points, rounded half up; blank when
+                     the notional or the equity is unknown
+```
+
+Example: a creator with $10,000 buys 0.1 BTC at $60,000 ($6,000): a 60%
+share. A $1,000 paper tail copies 0.01 BTC at the ask, $60,030, so the
+ticket reads "buy 0.01 BTC/USD at 60,030 (creator 60,000), 60% of the
+creator's equity". Where sizing to the follower's allocation is switched
+off, the quantity is not shown at all: only the trade and the share.
+
+A sell is a ticket too: it is worth placing only if the follower copied the
+trade it closes, and the page says so.
+
+**Expiry.** A ticket is suggested for one hour after the creator's fill (a
+venue may set its own window): after that the price is stale, so the page
+stops offering the trade and the ticket reads "expired". A ticket issued
+after its window (a late signal) is stored as expired from the start, so
+the history still shows the trade that could not be caught. The follower
+can mark a ticket "done" (placed) or "skipped".
+
+**Matching a real copy.** When the follower picks their own connected,
+read-only account on that venue, each sync of that account checks their
+real fills against the tickets:
+
+- same instrument (on prediction markets the same market and side), same
+  action (buy or sell);
+- filled between the creator's fill and 24 hours after the ticket was
+  issued;
+- each real fill counts for at most one ticket. Tickets are matched oldest
+  first, and fills are taken oldest first until the ticket's quantity is
+  reached; a fill that crosses it counts only for the part needed and is
+  used up. A smaller copy stays matched with the smaller quantity, and keeps
+  taking later fills in the window until it is whole.
+- open, done and expired tickets can all match: a late copy still counts.
+  A skipped ticket never matches.
+
+The matched price is the volume-weighted average of the quantities counted:
+
+```
+matched price = sum(q_i x p_i) / sum(q_i)
+```
+
+Example: a 0.01 BTC ticket and real buys of 0.004 at 60,000, 0.004 at
+60,100 and 0.004 at 60,200: the third counts for 0.002, so the matched
+price is (240 + 240.4 + 120.4) / 0.01 = 60,080.
+
+**Slippage** compares the real price with the paper fill, in basis points,
+signed so that a positive number is worse for the follower:
+
+```
+buy:   slippage = (matched - paper) / paper x 10,000
+sell:  slippage = (paper - matched) / paper x 10,000
+```
+
+Example: paper buy at 0.40, real buy at 0.41: (0.41 - 0.40) / 0.40 =
++250 bps. Paper sell at 100, real sell at 99.50: +50 bps. In the BTC
+example above, (60,080 - 60,030) / 60,030 = +8.3 bps. Per tail the page
+shows how many tickets were issued, matched, marked done, skipped and
+expired, and the median slippage of the matched ones (the mean of the two
+middle values for an even count).
+
+**What a ticket is not.** Koine does not place orders. A ticket is the
+creator's trade sized to the follower's paper allocation (or, unsized, the
+same trade for every follower); it is not a recommendation or advice, the
+price moves after the creator's fill, and the paper result is not what a
+real order would get.
+
 ## Reading an asset strategy's page
 
 A strategy on a crypto or stock venue is valued by the asset statistics (the

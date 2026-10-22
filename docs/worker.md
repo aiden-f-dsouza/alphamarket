@@ -39,8 +39,8 @@ Postgres is the only queue (decision E3: no Redis). Enqueueing is idempotent
 | `prices_daily` | venue | `prices.run_daily`: missing daily closes, perp margin tiers, corporate actions for held equities; CoinGecko fallback | worker.py (wave 2) |
 | `stats` | global | Strategy stats (asset venues: `analytics_v2`), incubation promotion, allocation valuations. Waits (up to 1 h) while any `reconcile` or `prices_daily` is still active | worker.py |
 | `housekeeping` | global | Prunes rate-limit counters, dead sessions and tokens, old asset quotes, finished jobs; abandons stale pending connects; verifies a random sample of 50 paper book checkpoints against a full replay and drops any that disagree (the next `mirror` pass rebuilds them) | worker.py (wave 2) |
-| `signals` | account or global | Creator fills to signals; then queues `mirror` for that strategy | worker.py |
-| `mirror` | strategy or global | Paper copying: signals and settlements to allocations | worker.py |
+| `signals` | account or global | Creator fills to signals; then queues `mirror` for that strategy. For an account, then matches its owner's copy tickets to its real fills (`copy_tickets.match_tickets`, only with `COPY_TICKETS_ENABLED`) | worker.py |
+| `mirror` | strategy or global | Paper copying: signals and settlements to allocations; then copy tickets for each allocation's new paper fills and one email per allocation (`copy_tickets.issue_tickets`, after the pass committed). The global sweep first expires open tickets past `expires_at` | worker.py |
 | `oauth_refresh` | account | Refresh an OAuth access token (`oauth_jobs.run`) | worker.py (wave 2) |
 | `key_rotate` | global | Re-encrypt credentials under a new data key | P3 |
 | `scope_recheck` | account | Re-prove a credential is read-only | P3 |
@@ -164,7 +164,9 @@ early and re-spending the shared IP bucket on the same tickers.
 **Mirroring is serialised per allocation.** The global `mirror` sweep and a
 strategy's `mirror` job can run at once on two workers; each pass locks the
 allocation row (`FOR UPDATE SKIP LOCKED`) so a signal is never mirrored twice
-into the append-only `mirror_fills`.
+into the append-only `mirror_fills`. Copy tickets are issued after that
+commit, outside the lock: a ticket is unique per paper fill, so a second
+pass racing for it loses on the unique key and issues (and emails) nothing.
 
 ## Outbound rate limits
 
