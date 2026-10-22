@@ -1,0 +1,82 @@
+[
+ {
+  "tx_type": "L1Deposit",
+  "hash": "00000000001d9bca3d00000130000000000000000000000000000000000000000000000000000000",
+  "time": "2026-09-22T06:44:15.802Z",
+  "pubdata": {
+   "l1_deposit_pubdata_v2": {
+    "account_index": "714710",
+    "l1_address": "0x00000000000000000000000000000000000000A1",
+    "asset_index": "USDC",
+    "route_type": "PERPS",
+    "accepted_amount": "999999.005166"
+   }
+  },
+  "pubdata_type": "L1DepositV2",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L1Deposit",
+  "hash": "00000000001d93f53d00000130000000000000000000000000000000000000000000000000000000",
+  "time": "2026-09-19T06:43:44.932Z",
+  "pubdata": {
+   "l1_deposit_pubdata_v2": {
+    "account_index": "714710",
+    "l1_address": "0x00000000000000000000000000000000000000A1",
+    "asset_index": "USDC",
+    "route_type": "PERPS",
+    "accepted_amount": "10000000.000000"
+   }
+  },
+  "pubdata_type": "L1DepositV2",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L1Deposit",
+  "hash": "00000000001d75732900000130000000000000000000000000000000000000000000000000000000",
+  "time": "2026-09-09T12:09:47.371Z",
+  "pubdata": {
+   "l1_deposit_pubdata_v2": {
+    "account_index": "714710",
+    "l1_address": "0x00000000000000000000000000000000000000A1",
+    "asset_index": "USDC",
+    "route_type": "PERPS",
+    "accepted_amount": "3999999.800000"
+   }
+  },
+  "pubdata_type": "L1DepositV2",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L1Deposit",
+  "hash": "00000000001d69b52900000130000000000000000000000000000000000000000000000000000000",
+  "time": "2026-09-07T00:41:15.414Z",
+  "pubdata": {
+   "l1_deposit_pubdata_v2": {
+    "account_index": "714710",
+    "l1_address": "0x00000000000000000000000000000000000000A1",
+    "asset_index": "USDC",
+    "route_type": "PERPS",
+    "accepted_amount": "3000000.000001"
+   }
+  },
+  "pubdata_type": "L1DepositV2",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L1Deposit",
+  "hash": "00000000001d4baf2900000130000000000000000000000000000000000000000000000000000000",
+  "time": "2026-08-27T19:12:35.338Z",
+  "pubdata": {
+   "l1_deposit_pubdata_v2": {
+    "account_index": "714710",
+    "l1_address": "0x00000000000000000000000000000000000000A1",
+    "asset_index": "USDC",
+    "route_type": "PERPS",
+    "accepted_amount": "5000100.000000"
+   }
+  },
+  "pubdata_type": "L1DepositV2",
+  "status": "nothing_to_execute"
+ }
+]

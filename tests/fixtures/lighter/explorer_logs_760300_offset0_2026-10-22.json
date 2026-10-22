@@ -1,0 +1,2132 @@
+[
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000002033012bdd000001a164e3befe000000000000000000000000000000000000000000000000",
+  "time": "2026-10-22T18:33:29.598Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 7,
+    "is_taker_ask": 0,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "268998",
+    "fee_account_index": "0",
+    "price": "1.304077",
+    "size": "30"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "verified"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "59b3710565219c23756039e2da8fb596d2a6c0a35c38779d22d2bc67d90bb30f3759a5238ef53073",
+  "time": "2026-10-22T18:33:29.598Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 7,
+    "is_taker_ask": 0,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "268998",
+    "fee_account_index": "0",
+    "price": "1.304065",
+    "size": "805",
+    "funding_rate_prefix_sum": 156489106882
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "verified"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "b36e07174f2799cea88aa343a1a8ba52492f93cbd895cfa0b18c84379628f391cc2cf9caf1989b82",
+  "time": "2026-10-22T15:13:57.894Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "281474976656674",
+    "fee_account_index": "0",
+    "price": "81498.6",
+    "size": "0.01000",
+    "funding_rate_prefix_sum": 118188584325
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "74e316d0f5b783d45ef0dd46a03384076904c7919bd2e7bf6da8c7731604f193ba2ef07623827c4d",
+  "time": "2026-10-22T09:03:29.484Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "726722",
+    "fee_account_index": "0",
+    "price": "81807.8",
+    "size": "0.01000",
+    "funding_rate_prefix_sum": 118129662009
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "2741c33750c68624f5a3d417aae3dd174c2b7f243fef0b4c588be7b7ac43b305d672759471691686",
+  "time": "2026-10-22T08:20:12.051Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 34,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "281474976573252",
+    "fee_account_index": "0",
+    "price": "82069.8",
+    "size": "0.01000",
+    "funding_rate_prefix_sum": 118119838797
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "010c3238a9a3fa281ed7999e6ce8c14d296dff8287c61e79c0f63c4cb8edcf76e7f6b33c2e8b548c",
+  "time": "2026-10-22T07:11:21.495Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "2180",
+    "fee_account_index": "0",
+    "price": "82308.2",
+    "size": "0.01000",
+    "funding_rate_prefix_sum": 118109969781
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "abdbaa5d215670f7dba2356edb41b35d1616ceab2dbd15ab8f70397a936c41fe793ce943070c8481",
+  "time": "2026-10-22T06:35:48.27Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 38,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "281474976623827",
+    "fee_account_index": "0",
+    "price": "82527.7",
+    "size": "0.02000"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "42e71314082fb4721cfaf3f7e61c4d0f715bf13f3ab401f672c4e72c33f27c141d65bf745eec7861",
+  "time": "2026-10-22T06:11:06.893Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "309602",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "82750.0",
+    "size": "0.03447"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "6955488062d5c340777cb3f6f23bfa9c433bb2a5b6730bd2d0e28bc1e2a80b80e47544dfe2c87248",
+  "time": "2026-10-22T06:03:47.213Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "integrator_taker_fee_collector_index": "728755",
+    "taker_account_index": "760277",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "82750.0",
+    "size": "0.00012"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "executed"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000002021268e86000001a1623551dc000000000000000000000000000000000000000000000000",
+  "time": "2026-10-22T06:03:43.964Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "720225",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "82750.0",
+    "size": "0.03425"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "6ea2f54dce0459963a13f09e508ae70f350245a509202eebba2e91cfac93e7bedc34b30787e73752",
+  "time": "2026-10-22T06:03:40.907Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "281474976470603",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "82750.0",
+    "size": "0.00090"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "41fb07c9f346e5e4da7308ad0090ad2ee02aff5726214ec0491b8d85dfd69ff710db90502281b152",
+  "time": "2026-10-22T06:03:40.787Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "738628",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "82750.0",
+    "size": "0.00026",
+    "funding_rate_prefix_sum": 118100070165
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "8959ce5ad71312365f122ebf005a518f3f6eb41f92920604428abe259761a353993951a50a1c5c32",
+  "time": "2026-10-22T01:36:19.28Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 7,
+    "is_taker_ask": 1,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "16547",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "1.358300",
+    "size": "543"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "e6fdee9993838aa37f2ce42c1a449d260a061f9b0120706b6fa789aeec18cd2a43c157ed8b05d631",
+  "time": "2026-10-22T01:36:19.197Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 7,
+    "is_taker_ask": 1,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "281474976482456",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "1.358300",
+    "size": "147"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "3c79ceffcf77a013d47140495cffaf91cd889465dcb1c0734c18743b81f8eb8d84b2b1c3a625face",
+  "time": "2026-10-22T01:36:19.132Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 7,
+    "is_taker_ask": 1,
+    "maker_fee": 0,
+    "taker_fee": 50,
+    "taker_account_index": "751760",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "1.358300",
+    "size": "10",
+    "funding_rate_prefix_sum": 156267682903
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000002011693969000001a15f3fbf5a000000000000000000000000000000000000000000000000",
+  "time": "2026-10-21T16:16:15.706Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "182306",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "84619.2",
+    "size": "0.01000",
+    "funding_rate_prefix_sum": 118039182450
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "000000200e4dac43000001a15ee39343000000000000000000000000000000000000000000000000",
+  "time": "2026-10-21T14:35:35.107Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "713041",
+    "fee_account_index": "0",
+    "price": "84120.4",
+    "size": "0.00979"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "a0d8cb274afb5cb1fe86d6530bd72393b9f759f2c9cf3058c5f1bf94e08e93151f0741fab429c7e5",
+  "time": "2026-10-21T14:35:35.107Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 38,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "27927",
+    "fee_account_index": "0",
+    "price": "84136.7",
+    "size": "0.00021"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "000000200dcf3d14000001a15ed7cbb3000000000000000000000000000000000000000000000000",
+  "time": "2026-10-21T14:22:43.123Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "611325",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83950.0",
+    "size": "0.01000"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "0a11c0266afe473dc2d6f5c41d424902fb5f3971d40e3b7a8252712fb92968e4b5166f4af6a2b794",
+  "time": "2026-10-21T13:05:17.646Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 32,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "388044",
+    "fee_account_index": "0",
+    "price": "83717.7",
+    "size": "0.01000",
+    "funding_rate_prefix_sum": 118031571054
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "executed"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "00000020073e3678000001a15dc544a6000000000000000000000000000000000000000000000000",
+  "time": "2026-10-21T09:22:51.686Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 7,
+    "is_taker_ask": 1,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "702386",
+    "fee_account_index": "0",
+    "price": "1.358300",
+    "size": "24"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "b50631ec6a9a91035d2d819f704a5ac4ca4db40ac41cf68efdc1ccfeb539fb9f6d36cf44fb4eedf5",
+  "time": "2026-10-21T09:22:51.686Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 7,
+    "is_taker_ask": 1,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "268998",
+    "fee_account_index": "0",
+    "price": "1.358300",
+    "size": "676",
+    "funding_rate_prefix_sum": 156004096291
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2UpdateLeverage",
+  "hash": "dfde4d6faa988176dcf5c87ea98846e11ceee05616586cbc4a12079ef445464bfd2373bd8fd798ab",
+  "time": "2026-10-21T09:21:56.046Z",
+  "pubdata": {
+   "l2_update_leverage_pubdata": {
+    "account_index": "760300",
+    "market_index": 7,
+    "initial_margin_fraction": 1000,
+    "margin_mode": 0
+   }
+  },
+  "pubdata_type": "L2UpdateLeverage",
+  "status": "executed"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000002007257057000001a15dc011d8000000000000000000000000000000000000000000000000",
+  "time": "2026-10-21T09:17:11Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "397711",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83600.0",
+    "size": "0.01000",
+    "funding_rate_prefix_sum": 118014055286
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "5ff72a6560c9e1d88a7ea0b909bcf27b419f070464388192b0816a48741600ef4d3d02be0d6bcc03",
+  "time": "2026-10-21T07:50:30.172Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "242414",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83200.0",
+    "size": "0.00730"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "e56d8709041817082af0e472d34b417b559c05872b7f32813420934d993b39c1a2c067b2fb065669",
+  "time": "2026-10-21T07:50:30.172Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "281474976470606",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83200.0",
+    "size": "0.00139"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "000000200595ba05000001a15d70b61c000000000000000000000000000000000000000000000000",
+  "time": "2026-10-21T07:50:30.172Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 100,
+    "taker_account_index": "713843",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83200.0",
+    "size": "0.00003"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "000000200595b903000001a15d70b5cf000000000000000000000000000000000000000000000000",
+  "time": "2026-10-21T07:50:30.095Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "281474976473964",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83200.0",
+    "size": "0.00001"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "b086a13c943c0239b077e79d8078d6a508f10c9b922bf737a697714587e8f2b1e65740640f1d0b10",
+  "time": "2026-10-21T07:50:29.67Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 50,
+    "integrator_taker_fee": 250,
+    "integrator_taker_fee_collector_index": "755668",
+    "taker_account_index": "759679",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83200.0",
+    "size": "0.00108"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "000000200595aa68000001a15d70b3b7000000000000000000000000000000000000000000000000",
+  "time": "2026-10-21T07:50:29.559Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 100,
+    "taker_account_index": "710759",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83200.0",
+    "size": "0.00003"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "cf927d928566d41bec432014c57e44a27605841d36888a321a466232a8a1d390e023952d6dd8fd44",
+  "time": "2026-10-21T07:50:29.434Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "281474976495379",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83200.0",
+    "size": "0.00026"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "5a522854c0e7b66241fc09413ee768f34ab0e82d6d64e245b9c6a07cb65210e502d2d9f17670d48e",
+  "time": "2026-10-21T07:50:29.434Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "281474976475766",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83200.0",
+    "size": "0.00902"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "4036542adc785125a470bb61acf39f53abb71bf3587f259511c332032a8a94505fde4ff6a4ebfed6",
+  "time": "2026-10-21T07:50:29.397Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "281474976473964",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83200.0",
+    "size": "0.00068"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "5fb0ecd4170b5b5694b24dd24aaaaa9448f0bed36dba05a9e69c3acb04fbc2180133e782e151a20d",
+  "time": "2026-10-21T07:50:29.343Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "281474976623630",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83200.0",
+    "size": "0.00020"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "c482b5ea3ba741ebc1052e997d6c16cf11ff0e842f716456a78ddc541b331d72e5e491a31e595d8b",
+  "time": "2026-10-21T07:36:01.123Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "737089",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83200.0",
+    "size": "0.02975"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "executed"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "00000020055c80aa000001a15d637363000000000000000000000000000000000000000000000000",
+  "time": "2026-10-21T07:36:01.123Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 280,
+    "taker_account_index": "195174",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83200.0",
+    "size": "0.03118",
+    "funding_rate_prefix_sum": 117994089314
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "executed"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "00000020055c80a7000001a15d637363000000000000000000000000000000000000000000000000",
+  "time": "2026-10-21T07:36:01.123Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "integrator_taker_fee": 900,
+    "integrator_taker_fee_collector_index": "281474976617487",
+    "taker_account_index": "281474976541634",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83200.0",
+    "size": "0.02907",
+    "funding_rate_prefix_sum": 117994089314
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2UpdateLeverage",
+  "hash": "07a7fadedeb4c497d9a04f8c43c8e28ab2eeed874fe8916b2c598021babccc2d5f552a7b702dbaac",
+  "time": "2026-10-15T18:33:27.698Z",
+  "pubdata": {
+   "l2_update_leverage_pubdata": {
+    "account_index": "760300",
+    "market_index": 187,
+    "initial_margin_fraction": 3333,
+    "margin_mode": 0
+   }
+  },
+  "pubdata_type": "L2UpdateLeverage",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "5109893e8158a97554b04d1baf0c3642e89fbe4892ace3bd1d12d1841d0556e21df0de07d1189c64",
+  "time": "2026-10-14T20:42:00.116Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 186,
+    "is_taker_ask": 0,
+    "maker_fee": 30,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "11927",
+    "fee_account_index": "0",
+    "price": "56.17",
+    "size": "5.0000",
+    "funding_rate_prefix_sum": 362907032
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "6ca9e2581e0e122b34c9ae69b3b55979debc18726bf491e90624d07bdead07ac5257986ceb33dc8a",
+  "time": "2026-10-14T17:37:23.763Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 186,
+    "is_taker_ask": 0,
+    "maker_fee": 30,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "11927",
+    "fee_account_index": "0",
+    "price": "60.04",
+    "size": "11.0000",
+    "funding_rate_prefix_sum": 362835912
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "5c786f741549efc1f684aef45720cb9dd4d784ed669e3e89f4e4da4cfca356ba4372abcf5eafbd15",
+  "time": "2026-10-14T15:08:38.908Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "281474976529902",
+    "fee_account_index": "0",
+    "price": "81684.1",
+    "size": "0.01000",
+    "funding_rate_prefix_sum": 116483079301
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "6cc4c8f3f8525585f04d7d58b477923d29172640bc82244d076214bc940cfa1fb951e55409ffdc75",
+  "time": "2026-10-14T14:49:50.079Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 32,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "388044",
+    "fee_account_index": "0",
+    "price": "81787.5",
+    "size": "0.01000"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "989cc000852ded246531bb5e9827763cef41d9a6f26bafa70cf4c72704f268c1d1d530865e063900",
+  "time": "2026-10-14T14:19:36.621Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 32,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "388044",
+    "fee_account_index": "0",
+    "price": "82002.7",
+    "size": "0.01000"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "807e8def1b2adbc08901225794d09b9dc752ff766163e5b3b445cb962887dd7e466af13e5b66cc99",
+  "time": "2026-10-14T14:04:34.715Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "726722",
+    "fee_account_index": "0",
+    "price": "82235.4",
+    "size": "0.01000",
+    "funding_rate_prefix_sum": 116473243237
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "53db3869125ca425a005c9cba4075c12018bdeb827246d71e81ed4277596880b513f676b4f5b62f8",
+  "time": "2026-10-14T13:58:52.416Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "270812",
+    "fee_account_index": "0",
+    "price": "82405.1",
+    "size": "0.01000"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "ff89da4795246a1319d2b32f66c2723d56eaa83439adbfa80980632152271528991a18417cc1d591",
+  "time": "2026-10-14T13:19:49.235Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "702384",
+    "fee_account_index": "0",
+    "price": "82437.6",
+    "size": "0.01000",
+    "funding_rate_prefix_sum": 116463362053
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "e5e5bf23249ed3bb9e705c9ebdbdcffa6915df69ef7a888398dd29e3d8cb8e2fe411a86c8e854897",
+  "time": "2026-10-14T12:59:54.234Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "715147",
+    "fee_account_index": "0",
+    "price": "82720.1",
+    "size": "0.01000"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "99bee0bc8941ce0fcb7a9bd44fbbd33e41ae001d2d68d5bec362f2864657c65fe6d8e7e3ff554589",
+  "time": "2026-10-14T12:33:37.25Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "281474976509475",
+    "fee_account_index": "0",
+    "price": "82850.2",
+    "size": "0.01000"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f58f4ee5f000001a13a659fcb000000000000000000000000000000000000000000000000",
+  "time": "2026-10-14T12:31:41.003Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "713044",
+    "fee_account_index": "0",
+    "price": "83052.2",
+    "size": "0.00938"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f58f4ee5e000001a13a659fcb000000000000000000000000000000000000000000000000",
+  "time": "2026-10-14T12:31:41.003Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "702384",
+    "fee_account_index": "0",
+    "price": "83051.8",
+    "size": "0.00013"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f58f4ee5d000001a13a659fcb000000000000000000000000000000000000000000000000",
+  "time": "2026-10-14T12:31:41.003Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 38,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "27927",
+    "fee_account_index": "0",
+    "price": "83048.8",
+    "size": "0.00021"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f58f4ee5c000001a13a659fcb000000000000000000000000000000000000000000000000",
+  "time": "2026-10-14T12:31:41.003Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "702384",
+    "fee_account_index": "0",
+    "price": "83039.7",
+    "size": "0.00013"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "d30aca9adeab3d6950254dd0a453fd8dda4c0b82242b0c7c325c0c0cba2a1893974dbac20312d4ac",
+  "time": "2026-10-14T12:31:41.003Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "integrator_maker_fee": 150,
+    "integrator_maker_fee_collector_index": "724608",
+    "taker_account_index": "760300",
+    "maker_account_index": "281474976494631",
+    "fee_account_index": "0",
+    "price": "83039.0",
+    "size": "0.00015"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "8bde5bf30e5f7b44e146e6826dea4e8f7bf785cfdad477cb72452cde1771f5d77f569e56d69a3103",
+  "time": "2026-10-14T12:30:19.148Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 0,
+    "taker_fee": 238,
+    "taker_account_index": "281474976573252",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83161.4",
+    "size": "0.03140"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f58d94f02000001a13a645f31000000000000000000000000000000000000000000000000",
+  "time": "2026-10-14T12:30:18.929Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "760618",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83161.4",
+    "size": "0.00180"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "3a50d8e5a9c6d4942c7c1dcd0215929a71be2947c827f830c6ff7ab1d73f816ed59309da57bb8def",
+  "time": "2026-10-14T12:30:18.747Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "760620",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83161.4",
+    "size": "0.00240"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f58d93a63000001a13a645e46000000000000000000000000000000000000000000000000",
+  "time": "2026-10-14T12:30:18.694Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 40,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "220807",
+    "fee_account_index": "0",
+    "price": "83157.9",
+    "size": "0.00020"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f58d93a62000001a13a645e46000000000000000000000000000000000000000000000000",
+  "time": "2026-10-14T12:30:18.694Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 40,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "281474976476876",
+    "fee_account_index": "0",
+    "price": "83155.0",
+    "size": "0.00240"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "e06c199d41829384232a23523159b2b3c0c696c93469fd75b84d6d0cb3fe13ea46a72d86a00275a7",
+  "time": "2026-10-14T12:30:18.694Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 40,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "281474976476876",
+    "fee_account_index": "0",
+    "price": "83152.4",
+    "size": "0.00180",
+    "funding_rate_prefix_sum": 116453433325
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "4c2da6669a0571a1bc7091fc036594465856c7b312065abc0580fb6307faeda21493dafe163a050c",
+  "time": "2026-10-14T08:10:06.496Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "317087",
+    "fee_account_index": "0",
+    "price": "84055.1",
+    "size": "0.01000"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "executed"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f54d5dd1a000001a139726658000000000000000000000000000000000000000000000000",
+  "time": "2026-10-14T08:06:01.048Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "292178",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83850.0",
+    "size": "0.03000"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "1189b6589aa1d72cb6632b47bd5dfae27299f3b0fd0aa534ea1fa373189a24b8475d2a482f058529",
+  "time": "2026-10-14T08:06:01.048Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "292178",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83850.0",
+    "size": "0.03000",
+    "funding_rate_prefix_sum": 116413396681
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "2b627fd94e159315114d7a8b9502aed4a7c156ee0d204aac3f3310bfd9b7aab36cef89925cf63dd9",
+  "time": "2026-10-13T20:04:11.203Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "281474976485522",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83300.0",
+    "size": "0.00586"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "a2c6c93066765fbdfdbbd81f23786a547e1384c2e2168faa8536340a17aa2cd0fca383b0591d5ed7",
+  "time": "2026-10-13T20:04:10.821Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "737431",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83300.0",
+    "size": "0.01202"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "ffb7281ebf6b6e8581d8cbf463fc1616950de503ca611cd4cb846ef573812ed8f9a38761ba351d17",
+  "time": "2026-10-13T20:04:10Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "749322",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83300.0",
+    "size": "0.00001",
+    "funding_rate_prefix_sum": 116342432373
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "caaea53540eb8a7b71577985bbc11fad1384674b7540e7dbf04d8e98e0d5aef0f62368a934ef303a",
+  "time": "2026-10-13T20:04:09.913Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "750305",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83300.0",
+    "size": "0.00100"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "477bb643032bd0489a3ae4932850f324d6dae1268bd0f4640a75eda50b73174080a9a782d8fa35db",
+  "time": "2026-10-13T20:04:09.403Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "281474976495379",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83300.0",
+    "size": "0.00012"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "971491065f0221ea7552d90e7021f2becb96e3142cba457788f07d0d0d418405672b82720aae223d",
+  "time": "2026-10-13T20:04:09.109Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "281474976495374",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83300.0",
+    "size": "0.00012"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f4b946bc0000001a136dd82a7000000000000000000000000000000000000000000000000",
+  "time": "2026-10-13T20:04:08.999Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "758901",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83300.0",
+    "size": "0.00087",
+    "funding_rate_prefix_sum": 116342432373
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "5d4e97b1baafcbc42fc675b2273791ad72d63853a6435d8adccab026498f2d140a1dcfc9a7954a78",
+  "time": "2026-10-13T18:38:23.233Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "702384",
+    "fee_account_index": "0",
+    "price": "82962.0",
+    "size": "0.01000",
+    "funding_rate_prefix_sum": 116325784009
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "8dcd0e15dd43933cc13aa993e2ba953c709f3740cd14376bc9b48fe84b2432ec971b426de074d5b6",
+  "time": "2026-10-13T17:51:39.043Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "726722",
+    "fee_account_index": "0",
+    "price": "83028.6",
+    "size": "0.01000"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "0c8b324af5f60be55ab9bf48b08dea23cb530efdfff6653add67cdf29c97112dc1f22c3faf7000db",
+  "time": "2026-10-13T17:12:34.136Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "281474976483190",
+    "fee_account_index": "0",
+    "price": "83142.3",
+    "size": "0.01000"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "a7284347409aa728cf782b713dc90b23732061c9123ecb6d1d13a3fda247fb7802c316866a77f1f9",
+  "time": "2026-10-13T17:07:50.128Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 0,
+    "taker_fee": 280,
+    "taker_account_index": "712334",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83200.0",
+    "size": "0.00898",
+    "funding_rate_prefix_sum": 116326614991
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f48b89b80000001a1363c16f0000000000000000000000000000000000000000000000000",
+  "time": "2026-10-13T17:07:50.128Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 0,
+    "taker_fee": 280,
+    "taker_account_index": "711395",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83200.0",
+    "size": "0.01102",
+    "funding_rate_prefix_sum": 116326614991
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "41e8037fa517836e6ad56cc414ea35824e1a393d0e4e5befebe34ffce89ec74b6c31b9410a440386",
+  "time": "2026-10-13T16:00:00.438Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "292178",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83400.0",
+    "size": "0.01645",
+    "funding_rate_prefix_sum": 116322445791
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "2818dbc765a49bdf3e6f4148a7dfeb05356fb1611a710664d7e61e305b9ab100d60ad60e28dc8880",
+  "time": "2026-10-13T16:00:00.419Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "758901",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83400.0",
+    "size": "0.00100",
+    "funding_rate_prefix_sum": 116322445791
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "fabeb1d05ee942ad69c9e18b0508f5c452bf116fc7061c73e82b1d1e690dde2b6d07265e64a0141d",
+  "time": "2026-10-13T16:00:00.419Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "750305",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83400.0",
+    "size": "0.00100",
+    "funding_rate_prefix_sum": 116322445791
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "94039d237449f59d60ed8b43691aaf84d356eed10bc3839ef8ecae86f01eea6a89518832ead875ba",
+  "time": "2026-10-13T16:00:00.319Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "724248",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83400.0",
+    "size": "0.00100",
+    "funding_rate_prefix_sum": 116322445791
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f4751bdb5000001a135fdfc8e000000000000000000000000000000000000000000000000",
+  "time": "2026-10-13T16:00:00.142Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 280,
+    "taker_account_index": "723853",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83400.0",
+    "size": "0.00055",
+    "funding_rate_prefix_sum": 116322445791
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "8caf61a041fb5b13da0a7c0336a89d812df8ad1207b430ca26418a6ba8d18d5dc9e880fdeeda9f62",
+  "time": "2026-10-13T15:47:30.621Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 0,
+    "taker_fee": 196,
+    "taker_account_index": "281474976483190",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83200.0",
+    "size": "0.00390"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "7a321d2d57ac832b339ab5f27c1e921d4f9994c4667887133b249f2cf671508e8be22c8cb25f394f",
+  "time": "2026-10-13T15:47:30.621Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 0,
+    "taker_fee": 196,
+    "taker_account_index": "281474976483193",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83200.0",
+    "size": "0.02254"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f4707e05a000001a135f28cbd000000000000000000000000000000000000000000000000",
+  "time": "2026-10-13T15:47:30.621Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 0,
+    "taker_fee": 196,
+    "taker_account_index": "281474976483193",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83200.0",
+    "size": "0.01356",
+    "funding_rate_prefix_sum": 116317439991
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "b4e0c0e07ff0e74fb6804c7d0196de7d48c0037da3256f974a7c4ff05c77e644282a026b3613200b",
+  "time": "2026-10-13T14:52:03.594Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 186,
+    "is_taker_ask": 0,
+    "maker_fee": 30,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "11927",
+    "fee_account_index": "0",
+    "price": "63.47",
+    "size": "11.0000",
+    "funding_rate_prefix_sum": 362148472
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2UpdateLeverage",
+  "hash": "f985e063298ea7717940bbcabce5e8fe5c5e946bce8c32ce7885cade7674cae6e795c726ec6eb60d",
+  "time": "2026-10-13T13:36:51.282Z",
+  "pubdata": {
+   "l2_update_leverage_pubdata": {
+    "account_index": "760300",
+    "market_index": 137,
+    "initial_margin_fraction": 3333,
+    "margin_mode": 0
+   }
+  },
+  "pubdata_type": "L2UpdateLeverage",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "50d9104cddeb5da28919076983f649a29d0b80c85b26409be291e17ed87df58308a135ef7fb5f9ec",
+  "time": "2026-10-13T11:03:48.567Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 186,
+    "is_taker_ask": 1,
+    "maker_fee": 0,
+    "taker_fee": 210,
+    "taker_account_index": "11927",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "64.37",
+    "size": "5.0000",
+    "funding_rate_prefix_sum": 362071496
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "d515f00470d9d6300b51a1e2f1230c6f31973ab468f8dac3e1beebba539f5a36d2460822d00b662b",
+  "time": "2026-10-13T10:58:40.587Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 186,
+    "is_taker_ask": 0,
+    "maker_fee": 30,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "11927",
+    "fee_account_index": "0",
+    "price": "64.55",
+    "size": "6.0000",
+    "funding_rate_prefix_sum": 362045712
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "637dc95946ef52105429192c13792e5d31220ef6e1fc8053713c8dfbf68ed1e26519358305096432",
+  "time": "2026-10-13T09:00:28.781Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 0,
+    "taker_fee": 196,
+    "taker_account_index": "726714",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83500.0",
+    "size": "0.02000",
+    "funding_rate_prefix_sum": 116307409210
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "executed"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f3c6c7327000001a1344a506a000000000000000000000000000000000000000000000000",
+  "time": "2026-10-13T08:04:07.914Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "702384",
+    "fee_account_index": "0",
+    "price": "83914.4",
+    "size": "0.00776"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "e9d6a000cfe79b00a32b857e05f3bd8dba5d297518a9f6bb3addff07648b44e0e1101616d331169b",
+  "time": "2026-10-13T08:04:07.914Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 28,
+    "taker_fee": 0,
+    "taker_account_index": "760300",
+    "maker_account_index": "702384",
+    "fee_account_index": "0",
+    "price": "83915.4",
+    "size": "0.00224",
+    "funding_rate_prefix_sum": 116315768040
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "fa2fa6a34ff978b75335985d0a8058d466440576d4e27715a3effbabb36372d1dcd2a27756cf4f5c",
+  "time": "2026-10-13T05:23:26.784Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "292178",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83700.0",
+    "size": "0.00834"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f39fb563e000001a133b733c0000000000000000000000000000000000000000000000000",
+  "time": "2026-10-13T05:23:26.784Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "758901",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83700.0",
+    "size": "0.00076"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f39b60c22000001a133a956aa000000000000000000000000000000000000000000000000",
+  "time": "2026-10-13T05:08:18.218Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "295221",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83500.0",
+    "size": "0.00014"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "executed"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f39b5cdba000001a133a94b1f000000000000000000000000000000000000000000000000",
+  "time": "2026-10-13T05:08:15.263Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "758901",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83500.0",
+    "size": "0.00086"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "7682459e64a9bc456f543d09f0fe73ceb952eccb0e2585906d920cdaada4d318fceae5c665237397",
+  "time": "2026-10-13T05:07:38.688Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "242414",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83500.0",
+    "size": "0.01128"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "executed"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f39b29e65000001a133a8babe000000000000000000000000000000000000000000000000",
+  "time": "2026-10-13T05:07:38.302Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "integrator_taker_fee": 900,
+    "integrator_taker_fee_collector_index": "281474976617487",
+    "taker_account_index": "281474976505147",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83500.0",
+    "size": "0.00119",
+    "funding_rate_prefix_sum": 116310751266
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "executed"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f39b28317000001a133a8b67e000000000000000000000000000000000000000000000000",
+  "time": "2026-10-13T05:07:37.214Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "242414",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83500.0",
+    "size": "0.00582"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "712267f94abb562ab637e5ebcb2e58ce0e516cc43ae724e3efc654d7c5c794ddd40eef6ff5cb875e",
+  "time": "2026-10-13T05:07:35.666Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "750305",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83500.0",
+    "size": "0.00100"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "executed"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f39b2485b000001a133a8b072000000000000000000000000000000000000000000000000",
+  "time": "2026-10-13T05:07:35.666Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "758901",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83500.0",
+    "size": "0.00071",
+    "funding_rate_prefix_sum": 116310751266
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "executed"
+ },
+ {
+  "tx_type": "InternalClaimOrder",
+  "hash": "0000001f393aeb63000001a1338b62e8000000000000000000000000000000000000000000000000",
+  "time": "2026-10-13T04:35:35.272Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "218382",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83470.0",
+    "size": "0.02990",
+    "funding_rate_prefix_sum": 116311585812
+   }
+  },
+  "pubdata_type": "TradeWithFunding",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2CreateOrder",
+  "hash": "44590503c146c3d09088858bb72f4ce11b54b3011cb85d31f226ab8d080b6e728eaa7eeca5f1e8a0",
+  "time": "2026-10-13T03:53:41.558Z",
+  "pubdata": {
+   "trade_pubdata": {
+    "trade_type": 0,
+    "market_index": 1,
+    "is_taker_ask": 0,
+    "maker_fee": 0,
+    "taker_fee": 0,
+    "taker_account_index": "242414",
+    "maker_account_index": "760300",
+    "fee_account_index": "0",
+    "price": "83331.6",
+    "size": "0.00612"
+   }
+  },
+  "pubdata_type": "Trade",
+  "status": "nothing_to_execute"
+ }
+]

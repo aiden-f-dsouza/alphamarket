@@ -602,6 +602,27 @@ CREATORS = (
     # adds its one watched synthetic address inside its own marked block, a
     # CreatorSpec with watch=True like "whale" above.
     # ---- venue-lighter ----
+    # A public Lighter address watched privately: perps, same pipeline as the
+    # Hyperliquid whale ("11de" repeated: obviously synthetic, never anyone's).
+    CreatorSpec(
+        handle="lighterdesk",
+        display_name="Lighter perp desk",
+        venue="lighter",
+        strategy="Watched Lighter address",
+        description="",
+        tags="",
+        history_days=150,
+        cash=60_000,
+        kind="perp",
+        symbols=(("BTC", 0.6), ("ETH", 0.4)),
+        skill=0.58,
+        trades_per_week=3.5,
+        hold_hours=(6, 72),
+        frac=(0.5, 1.2),
+        fee_bps=2.8,
+        watch=True,
+        key_id="0x" + "11de" * 10,
+    ),
     # ---- end venue-lighter ----
     # ---- venue-pacifica ----
     CreatorSpec(
@@ -630,6 +651,10 @@ CREATORS = (
     # ---- end venue-nado ----
 )
 
+# Venues whose seeded accounts trade perps (simulated market data lists the
+# PERP_DP coins and serves funding and margin tiers for them). Derived from
+# CREATORS, so a venue block that adds a perp CreatorSpec needs nothing else.
+
 # (investor email local part, strategy handle, dollars, drawdown limit bps, days before the end)
 ALLOCATIONS = (
     ("investor", "northwind", 2_500, 2_000, 60),
@@ -646,6 +671,7 @@ WATCHES = (
     ("investor", "whale", "Funding-aware perp whale"),
     ("analyst", "whale", "BTC momentum book to study"),
     # ---- venue-lighter ----
+    ("investor", "lighterdesk", "Lighter BTC/ETH desk"),
     # ---- end venue-lighter ----
     # ---- venue-pacifica ----
     ("investor", "pacwhale", "Solana perp book to study"),
@@ -2399,6 +2425,8 @@ def _hyperliquid_board_address(i: int) -> str:
 LEADERBOARD_SEEDS = {
     "hyperliquid": _hyperliquid_board_address,
     # ---- venue-lighter ----
+    # "11c0" repeated (synthetic), with the seeded Lighter watch at rank 3.
+    "lighter": lambda i: "0x" + "11de" * 10 if i == 2 else "0x" + f"11c0{i:04x}" + "11c0" * 8,
     # ---- end venue-lighter ----
     # ---- venue-pacifica ----
     # Invented Solana addresses ("De3o..."), the seeded watched one at rank 3.
@@ -2420,13 +2448,14 @@ def seed_leaderboards(db, fetched_at: datetime) -> None:
     (discover.snapshot_row)."""
     for venue, address_of in LEADERBOARD_SEEDS.items():
         _seed_board(db, venue, address_of, fetched_at)
+    _seed_polymarket_board(db, fetched_at)
 
 
 def _seed_board(db, venue: str, address_of, fetched_at: datetime) -> None:
     from alphamarket import discover
-    from alphamarket.connectors.base import LeaderboardDetails, LeaderboardEntry
+    from alphamarket.connectors.base import LeaderboardEntry
 
-    scale = {"day": 0.012, "week": 0.06, "month": 0.22, "all": 1.0}
+    scale = _LEADERBOARD_SCALE
     for period in LEADERBOARD_PERIODS:
         rows = []
         for i in range(24):
@@ -2447,7 +2476,19 @@ def _seed_board(db, venue: str, address_of, fetched_at: datetime) -> None:
                 )
             )
         discover.store_snapshot(db, venue, period, rows, fetched_at)
-        # Polymarket: pnl from the board, the rest from wallet stats (invented addresses)
+
+
+_LEADERBOARD_SCALE = {"day": 0.012, "week": 0.06, "month": 0.22, "all": 1.0}
+
+
+def _seed_polymarket_board(db, fetched_at: datetime) -> None:
+    """Polymarket's board: pnl from the board, the rest from wallet stats
+    (invented "b0b0" addresses), like discover.refresh stores it."""
+    from alphamarket import discover
+    from alphamarket.connectors.base import LeaderboardDetails, LeaderboardEntry
+
+    scale = _LEADERBOARD_SCALE
+    for period in LEADERBOARD_PERIODS:
         pm_rows = []
         for i in range(24):
             pnl = 1_200_000 * scale[period] * (0.87**i)

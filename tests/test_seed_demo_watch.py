@@ -15,7 +15,7 @@ from sqlalchemy.pool import StaticPool
 
 from alphamarket.analytics import latest_stats
 from alphamarket.config import get_settings
-from alphamarket.connectors import registry
+from alphamarket.connectors import addresses, registry
 from alphamarket.db import Base
 from alphamarket.models import (
     Allocation,
@@ -47,6 +47,7 @@ def test_watch_address_is_well_formed_and_synthetic():
     # Hyperliquid's is first; each on-chain venue adds one in its marked block.
     assert [c.venue for c in watch][0] == "hyperliquid"
     assert {c.venue for c in watch} <= set(registry.PROFILES)
+    assert len({c.key_id for c in watch}) == len(watch)
     assert [c.handle for c in seed_demo.CREATORS if c.house] == ["koinelab"]
     # Every watch and tail names a seeded handle.
     handles = {c.handle for c in seed_demo.CREATORS}
@@ -93,13 +94,11 @@ def test_small_seed_has_a_house_strategy_and_a_private_watch(seeded):
         assert lab["operator"] == "koine"
         assert {r["operator"] for slug, r in rows.items() if slug != lab["slug"]} == {"creator"}
 
-        watched = db.scalars(
-            select(Strategy)
-            .join(VenueAccount, VenueAccount.id == Strategy.venue_account_id)
-            .where(Strategy.kind == StrategyKind.WATCH, VenueAccount.venue == "hyperliquid")
-        ).all()
-        assert len(watched) == 1
-        strategy = watched[0]
+        watched = db.scalars(select(Strategy).where(Strategy.kind == StrategyKind.WATCH)).all()
+        assert len(watched) == sum(c.watch for c in seed_demo.CREATORS)
+        strategy = next(
+            s for s in watched if db.get(VenueAccount, s.venue_account_id).venue == "hyperliquid"
+        )
         assert strategy.user_id == system[0].id and strategy.public is False
         assert strategy.slug == f"watch-{strategy.id}"
         assert strategy.name == "Hyperliquid 0xde30…de30"
@@ -145,18 +144,19 @@ def test_seed_stores_leaderboard_snapshots_with_the_watched_address(seeded):
 
     sf, _ = seeded
     with sf() as db:
-        snaps = db.scalars(
-            select(LeaderboardSnapshot).where(LeaderboardSnapshot.venue == "hyperliquid")
-        ).all()
+        snaps = db.scalars(select(LeaderboardSnapshot)).all()
         assert {(s.venue, s.period) for s in snaps} == {
-            (v, p) for v in ("hyperliquid", "polymarket") for p in seed_demo.LEADERBOARD_PERIODS
+            (v, p)
+            for v in (*seed_demo.LEADERBOARD_SEEDS, "polymarket")
+            for p in seed_demo.LEADERBOARD_PERIODS
         }
         for s in snaps:
             assert len(s.rows) == 24
-            assert all(re.fullmatch(r"0x[0-9a-f]{40}", r["address"]) for r in s.rows)
+            kind = registry.get_profile(s.venue).address_kind
+            assert all(addresses.normalize(kind, r["address"]) == r["address"] for r in s.rows)
             if s.venue == "hyperliquid":
                 assert seed_demo.WATCH_ADDRESS in {r["address"] for r in s.rows}
-            else:  # wallet stats merged in, no roi
+            elif s.venue == "polymarket":  # wallet stats merged in, no roi
                 assert s.rows[0]["roi"] is None and s.rows[0]["markets_traded"] is not None
         investor = db.scalar(select(User).where(User.email == f"investor@{seed_demo.EMAIL_DOMAIN}"))
         settings = get_settings()

@@ -1,0 +1,32 @@
+[
+ {
+  "tx_type": "L2StakeAssets",
+  "hash": "92ce9c3d1dfa7868e2c545df88183e3152304453cc8ba2974c19c4a2674aab5b12bfe4e4d8b392b4",
+  "time": "2026-10-22T18:54:38.009Z",
+  "pubdata": {
+   "l2_stake_assets_pubdata": {
+    "account_index": "762954",
+    "staking_pool_index": 281474976624800,
+    "share_amount": "6921664",
+    "lit_amount": "72.82022676"
+   }
+  },
+  "pubdata_type": "L2StakeAssets",
+  "status": null
+ },
+ {
+  "tx_type": "L2MintShares",
+  "hash": "22f914655bf42d113857235ef89b5ead1ec6d56038c3d73799a9ff9111f84f25954d27012ba7753a",
+  "time": "2026-10-22T18:52:14.186Z",
+  "pubdata": {
+   "l2_mint_shares_pubdata": {
+    "account_index": "762954",
+    "public_pool_index": 281474976710654,
+    "share_amount": "473302",
+    "usdc_amount": "1721.474978"
+   }
+  },
+  "pubdata_type": "L2MintShares",
+  "status": "committed"
+ }
+]
