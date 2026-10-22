@@ -38,7 +38,7 @@
       {% else %}<span style="font-weight:500">by {{ page.display_name }}</span><span class="small muted">· {{ page.venue_label if page.is_asset else page.venue }}{% if page.follow %} · {{ page.follow.count }} follower{{ "s" if page.follow.count != 1 }}{% endif %}</span>{% endif %}
       <span style="display:flex;gap:6px;margin-left:6px">{% for t in page.style_tags %}{{ m.cat(t) }}{% endfor %}</span>
       {% if page.follow and not page.follow.own %}
-      {% if page.follow.following %}<form class="inline" method="post" action="/s/{{ page.slug }}/unfollow"><button class="btn secondary sm" type="submit" title="Stop seeing this strategy's trades in your feed">{{ m.icon("check", 14) }}Following · unfollow</button></form>
+      {% if page.follow.following %}<form class="inline" method="post" action="/s/{{ page.slug }}/unfollow"><button class="btn secondary sm" type="submit" title="Stop seeing this strategy's trades in your feed">{{ m.icon("check", 14) }}Following · unfollow</button></form><a class="small text2" href="/feed" style="text-decoration:underline">See your feed</a>
       {% elif user %}<form class="inline" method="post" action="/s/{{ page.slug }}/follow"><button class="btn secondary sm" type="submit" title="See this strategy's trades in your feed">{{ m.icon("plus", 14) }}Follow</button></form>
       {% else %}<a class="btn secondary sm" href="{{ page.follow.login }}" title="Log in to follow">{{ m.icon("plus", 14) }}Follow</a>{% endif %}
       {% endif %}
