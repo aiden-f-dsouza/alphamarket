@@ -45,7 +45,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_DOWN, ROUND_HALF_EVEN, ROUND_UP, Decimal
 from fractions import Fraction
@@ -620,6 +620,9 @@ FOLLOWS = (
 )
 # Their paper tails issue copy tickets (copy_tickets.py) through the seed.
 COPY_TICKET_INVESTOR = "investor"
+# The seeded venues keep a ticket open this long (production: 1 hour, the
+# profile default) so a demo shortly after seeding has open tickets to show.
+DEMO_COPY_TICKET_TTL_SECONDS = 2 * 86_400
 INVESTORS = (("investor", "Demo Investor"), ("analyst", "Demo Analyst"))
 
 
@@ -1866,6 +1869,7 @@ def sim_registry(world: World) -> Iterator[None]:
     build_market_data for this process, and restore the real ones after."""
     builders = dict(registry._BUILDERS)
     market = dict(registry._MARKET_DATA_BUILDERS)
+    profiles = dict(registry.PROFILES)
 
     def connector(venue: str):
         def build(venue_env: str, key_id: str, secret: str | None) -> VenueConnector:
@@ -1892,9 +1896,15 @@ def sim_registry(world: World) -> Iterator[None]:
         registry._BUILDERS[venue] = connector(venue)
     for venue in market:
         registry._MARKET_DATA_BUILDERS[venue] = market_data(venue)
+    for venue, profile in profiles.items():
+        registry.PROFILES[venue] = replace(
+            profile, copy_ticket_ttl_seconds=DEMO_COPY_TICKET_TTL_SECONDS
+        )
     try:
         yield
     finally:
+        registry.PROFILES.clear()
+        registry.PROFILES.update(profiles)
         registry._BUILDERS.clear()
         registry._BUILDERS.update(builders)
         registry._MARKET_DATA_BUILDERS.clear()
@@ -2239,7 +2249,7 @@ class Sim:
             )
             if who == COPY_TICKET_INVESTOR:
                 # Copy tickets from the tail's start: the real mirror jobs issue
-                # them as the simulation runs (most expire; the last hour's stay open).
+                # them as the simulation runs (DEMO_COPY_TICKET_TTL_SECONDS keeps recent ones open).
                 copy_tickets.set_copy_settings(db, user, alloc, True, False, None)
 
     def on_final(self, _arg) -> None:

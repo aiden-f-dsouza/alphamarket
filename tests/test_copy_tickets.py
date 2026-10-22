@@ -755,6 +755,16 @@ def test_done_and_skip_only_for_the_owner(client, session_factory, viewer_world)
         assert db.get(CopyTicket, tid).status == "done"
 
 
+def test_done_from_expired_only_inside_the_match_window(db, kraken, copy_on):
+    # Issued at T; expired tickets may be marked done until T + 24h (MATCH_WINDOW).
+    t = CopyTicket(created_at=START, status=CopyTicketStatus.EXPIRED)
+    assert copy_tickets.can_mark_done(t, "expired", START + timedelta(hours=24))
+    assert not copy_tickets.can_mark_done(t, "expired", START + timedelta(hours=24, seconds=1))
+    assert copy_tickets.can_mark_done(t, "open", START + timedelta(days=30))
+    assert not copy_tickets.can_mark_done(t, "skipped", START)
+    assert not copy_tickets.can_mark_done(t, "matched", START)
+
+
 def test_settings_form_and_json(client, session_factory, viewer_world):
     aid = viewer_world["alloc"]
     resp = client.post(

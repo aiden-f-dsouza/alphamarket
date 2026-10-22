@@ -202,8 +202,9 @@ Scale the staging app's `worker` process to zero.
    copy tickets.
 8. **Copy tickets** (`/copy`, needs `COPY_TICKETS_ENABLED=true` when serving):
    the investor's tails have issued tickets since the seed started, all
-   through the real mirror jobs. Most have expired; trades from the last hour
-   before the seed ended are still open, with a "Place on <venue>" link and
-   Done/Skip. Each tail on `/portfolio` has a Copy tickets panel. Nothing is
+   through the real mirror jobs. The seeded venues keep a ticket open for 2
+   days (production: 1 hour) so the most recent ones are still open, with a
+   "Place on <venue>" link and Done/Skip; older ones show as expired. Re-seed
+   if it has been more than a day or two. Each tail on `/portfolio` has a Copy tickets panel. Nothing is
    matched, because the investor has no account of their own connected.
 9. **Verification** (`/verification`): how each number above is computed.

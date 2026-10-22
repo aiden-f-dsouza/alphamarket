@@ -710,19 +710,27 @@ def owned_ticket(db: Session, user: User, ticket_id: int) -> CopyTicket:
     return ticket
 
 
+def can_mark_done(ticket: CopyTicket, status: str, now: datetime) -> bool:
+    """Done from open, or from expired within MATCH_WINDOW of issue: the same
+    window a real fill must fall in to match, so a stale ticket stops asking."""
+    if status == CopyTicketStatus.OPEN:
+        return True
+    return status == CopyTicketStatus.EXPIRED and now <= aware(ticket.created_at) + MATCH_WINDOW
+
+
 def mark_ticket(
     db: Session, user: User, ticket: CopyTicket, status: str, now: datetime | None = None
 ) -> bool:
-    """The user says they placed it (done: from open or expired) or will not
-    (skipped: from open). Anything else is left as it is (a double click, a
-    ticket matched meanwhile); returns whether it changed. Audited; commits."""
+    """The user says they placed it (done: from open, or expired within
+    MATCH_WINDOW of issue, can_mark_done) or will not (skipped: from open).
+    Anything else is left as it is (a double click, a ticket matched
+    meanwhile); returns whether it changed. Audited; commits."""
     now = now or utcnow()
-    allowed = {
-        CopyTicketStatus.DONE: (CopyTicketStatus.OPEN, CopyTicketStatus.EXPIRED),
-        CopyTicketStatus.SKIPPED: (CopyTicketStatus.OPEN,),
-    }[CopyTicketStatus(status)]
     current = display_status(ticket, now)
-    if current not in allowed:
+    if CopyTicketStatus(status) is CopyTicketStatus.DONE:
+        if not can_mark_done(ticket, current, now):
+            return False
+    elif current != CopyTicketStatus.OPEN:
         return False
     ticket.status, ticket.status_at = status, now
     action = (
@@ -814,7 +822,7 @@ def ticket_view(
         "matched_price": ticket.matched_price,
         "matched_at": aware(ticket.matched_at).isoformat() if ticket.matched_at else None,
         "slippage_bps": _bps_display(slip),
-        "can_done": status in (CopyTicketStatus.OPEN, CopyTicketStatus.EXPIRED),
+        "can_done": can_mark_done(ticket, status, now),
         "can_skip": status == CopyTicketStatus.OPEN,
     }
     if is_sized:

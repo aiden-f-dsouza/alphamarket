@@ -155,7 +155,8 @@ Where the build settles something the plan left open, or differs from it:
 - Accounts the user may pick: their own, same venue, not a watch account,
   status not suspended, disconnected or pending. The venue env is not
   compared.
-- User actions: Done from open or expired, Skip from open; anything else
+- User actions: Done from open, or from expired within 24 hours of issue (the match
+  window; an older ticket stops asking), Skip from open; anything else
   (a double click, a ticket matched meanwhile) leaves the ticket as it is.
   Settings changes and Done/Skip are audited (`copy.settings`,
   `copy.ticket_done`, `copy.ticket_skip`). The settings routes share the
