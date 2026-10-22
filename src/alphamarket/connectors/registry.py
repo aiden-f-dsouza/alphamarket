@@ -8,7 +8,7 @@ Nothing outside connectors/ may import kalshi.py or polymarket.py directly.
 from collections.abc import Callable
 
 from alphamarket.config import KALSHI_BASE_URLS, POLYMARKET_BASE_URLS, get_settings
-from alphamarket.connectors import hyperliquid
+from alphamarket.connectors import hyperliquid, pacifica
 from alphamarket.connectors.alpaca import (
     ALPACA_OAUTH_AUTHORIZE_URL,
     ALPACA_OAUTH_TOKEN_URL,
@@ -507,6 +507,51 @@ PROFILES: dict[str, VenueProfile] = {
     # ---- venue-lighter ----
     # ---- end venue-lighter ----
     # ---- venue-pacifica ----
+    # Watch only (requires_partner_approval=True): no connect form, the watch
+    # path (watchlist._track) works. Terms read 2026-10-22, position PENDING
+    # COUNSEL (docs/venues/pacifica.md), so preflight keeps it out of prod
+    # WATCH_VENUES until counsel answers.
+    "pacifica": VenueProfile(
+        venue="pacifica",
+        display_name="Pacifica",
+        envs=("prod",),
+        credential=CredentialKind.ADDRESS,
+        key_label="Wallet address",
+        secret_label=None,
+        key_help=(
+            "The Solana address of your Pacifica account (32-44 characters, "
+            "case-sensitive). Nothing secret is involved: Pacifica history is "
+            "public. You prove the address is yours by signing a Koine message "
+            "with the wallet (Sign Message in Phantom or Solflare) and pasting the "
+            "signature; signing is not a transaction and cannot move funds."
+        ),
+        balance_observable=True,
+        instrument=InstrumentKind.ASSET,
+        # Binary-era fields; real tick and lot sizes are per instrument (/info).
+        tick_micros=1,
+        contract_step_micros=1,
+        # Taker rate at fee level 0, docs "Get Fee Levels" and /info/fees,
+        # checked 2026-10-22: 0.0004 = 4 bps exactly. (The accounts we recorded
+        # pay 3.2-3.4 bps at levels 3-4.) Whole bps, rounded up.
+        fee_rate_bps=4,
+        fee_rounding_micros=1,  # fees print 6 dp in USDC
+        ownership=OwnershipProof.SIGNED_MESSAGE,  # ed25519 over the Koine claim text
+        readonly_proof=ReadOnlyProof.NONE,
+        transfers_observable=True,
+        history_depth="all",
+        quote_asset="USDC",
+        tos_doc="docs/venues/pacifica.md",
+        requires_partner_approval=True,
+        daily_resolution=False,
+        rate_budgets=(pacifica.RATE_BUDGET,),
+        paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
+        asset_classes=("crypto",),
+        leaderboard_periods=("day", "week", "month", "all"),
+        # `account_trades` frames are the REST rows under short names.
+        stream_mode=StreamMode.FILLS,
+        stream_users_per_ip=pacifica.WS_USERS_PER_IP,
+        address_kind=pacifica.ADDRESS_KIND,
+    ),
     # ---- end venue-pacifica ----
     # ---- venue-gmx_arbitrum ----
     # ---- end venue-gmx_arbitrum ----
@@ -620,6 +665,9 @@ _BUILDERS: dict[str, Callable[[str, str, str | None], VenueConnector]] = {
     # ---- venue-lighter ----
     # ---- end venue-lighter ----
     # ---- venue-pacifica ----
+    "pacifica": lambda venue_env, key_id, secret: pacifica.PacificaConnector(
+        address=key_id, base_url=pacifica.BASE_URLS[venue_env]
+    ),
     # ---- end venue-pacifica ----
     # ---- venue-gmx_arbitrum ----
     # ---- end venue-gmx_arbitrum ----
@@ -694,6 +742,13 @@ _MARKET_DATA_BUILDERS: dict[str, Callable[[str], MarketDataSource]] = {
     # ---- venue-lighter ----
     # ---- end venue-lighter ----
     # ---- venue-pacifica ----
+    "pacifica": lambda venue_env: pacifica.PacificaMarketData(
+        base_url=pacifica.BASE_URLS[venue_env],
+        # step 7: the board is ~7k rows and has no roi, so the top by pnl is all a
+        # snapshot uses; twice its rows leaves room for the opt-outs removed after.
+        leaderboard_keep=2 * get_settings().watch_discover_rows,
+        leaderboard_min_account_value=str(get_settings().watch_discover_min_account_value),
+    ),
     # ---- end venue-pacifica ----
     # ---- venue-gmx_arbitrum ----
     # ---- end venue-gmx_arbitrum ----

@@ -1,0 +1,58 @@
+{
+ "success": true,
+ "data": [
+  {
+   "history_id": 305692737,
+   "order_id": 13847106762,
+   "client_order_id": "00000000-0000-0000-0000-8a0dfbc36774",
+   "parent_id": null,
+   "symbol": "SOL",
+   "amount": "200",
+   "price": "103.66",
+   "entry_price": "107.490396",
+   "fee": "7.04888",
+   "spot_fee": null,
+   "pnl": "759.03031",
+   "event_type": "fulfill_taker",
+   "side": "close_short",
+   "created_at": 1792689500801,
+   "cause": "normal"
+  },
+  {
+   "history_id": 305683497,
+   "order_id": 13846564170,
+   "client_order_id": "00000000-0000-0000-0000-8a0dfbc22ed0",
+   "parent_id": null,
+   "symbol": "BTC",
+   "amount": "0.00168",
+   "price": "81270",
+   "entry_price": "82592.71821",
+   "fee": "0.046421",
+   "spot_fee": null,
+   "pnl": "-0.046421",
+   "event_type": "fulfill_taker",
+   "side": "open_short",
+   "created_at": 1792688433328,
+   "cause": "normal"
+  },
+  {
+   "history_id": 305683495,
+   "order_id": 13846564170,
+   "client_order_id": "00000000-0000-0000-0000-8a0dfbc22ed0",
+   "parent_id": null,
+   "symbol": "BTC",
+   "amount": "0.00156",
+   "price": "81273",
+   "entry_price": "82593.084542",
+   "fee": "0.043107",
+   "spot_fee": null,
+   "pnl": "-0.043107",
+   "event_type": "fulfill_taker",
+   "side": "open_short",
+   "created_at": 1792688433328,
+   "cause": "normal"
+  }
+ ],
+ "next_cursor": "1111U1i46",
+ "has_more": true
+}

@@ -65,7 +65,8 @@ def hl_connector() -> hl.HyperliquidConnector:
 
 def test_streaming_venues_and_modes_come_from_the_profiles():
     venues = streaming_venues()
-    assert set(venues) == {"kraken", "hyperliquid", "coinbase"}
+    onchain = {"lighter", "pacifica", "gmx_arbitrum", "nado"}  # each branch may add one
+    assert set(venues) - onchain == {"kraken", "hyperliquid", "coinbase"}
     assert get_profile("hyperliquid").stream_mode is StreamMode.FILLS
     assert get_profile("kraken").stream_mode is StreamMode.NUDGE
     assert get_profile("coinbase").stream_mode is StreamMode.NUDGE

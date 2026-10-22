@@ -1,0 +1,15 @@
+{
+ "success": true,
+ "data": [
+  {
+   "history_id": 765653,
+   "symbol": "SOL",
+   "side": "bid",
+   "amount": "5.52",
+   "payout": "-0.014988",
+   "rate": "0.0000125",
+   "created_at": 1757419201374
+  }
+ ],
+ "has_more": false
+}

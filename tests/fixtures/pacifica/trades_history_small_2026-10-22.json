@@ -1,0 +1,57 @@
+{
+ "success": true,
+ "data": [
+  {
+   "history_id": 10419061,
+   "order_id": 207721198,
+   "client_order_id": null,
+   "parent_id": null,
+   "symbol": "SOL",
+   "amount": "5.52",
+   "price": "217.31",
+   "entry_price": "217.307935",
+   "fee": "0.47982",
+   "spot_fee": null,
+   "pnl": "-0.46842",
+   "event_type": "fulfill_taker",
+   "side": "close_long",
+   "created_at": 1757421437835,
+   "cause": "normal"
+  },
+  {
+   "history_id": 10407605,
+   "order_id": 207576609,
+   "client_order_id": null,
+   "parent_id": null,
+   "symbol": "SOL",
+   "amount": "3.49",
+   "price": "217.33",
+   "entry_price": "217.307935",
+   "fee": "0.303393",
+   "spot_fee": null,
+   "pnl": "-0.303393",
+   "event_type": "fulfill_taker",
+   "side": "open_long",
+   "created_at": 1757417983986,
+   "cause": "normal"
+  },
+  {
+   "history_id": 10407603,
+   "order_id": 207576609,
+   "client_order_id": null,
+   "parent_id": null,
+   "symbol": "SOL",
+   "amount": "2.03",
+   "price": "217.27",
+   "entry_price": "217.27",
+   "fee": "0.176423",
+   "spot_fee": null,
+   "pnl": "-0.176423",
+   "event_type": "fulfill_taker",
+   "side": "open_long",
+   "created_at": 1757417983986,
+   "cause": "normal"
+  }
+ ],
+ "has_more": false
+}

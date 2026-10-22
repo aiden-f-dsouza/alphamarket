@@ -1,0 +1,26 @@
+{
+    "success": true,
+    "data": {
+        "balance": "951.518416",
+        "fee_level": 0,
+        "maker_fee": "0.00015",
+        "taker_fee": "0.0004",
+        "account_equity": "3002.639487",
+        "cross_account_equity": "630.180263",
+        "spot_market_value": "0",
+        "spot_collateral": "0",
+        "available_to_spend": "203.254275",
+        "available_to_withdraw": "203.254275",
+        "pending_balance": "0",
+        "pending_interest": "0",
+        "total_margin_used": "2479.970573",
+        "cross_mmr": "106.731497",
+        "positions_count": 3,
+        "orders_count": 0,
+        "stop_orders_count": 4,
+        "spot_balances": [],
+        "updated_at": 1792695941944
+    },
+    "error": null,
+    "code": null
+}

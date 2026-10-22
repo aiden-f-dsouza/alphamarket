@@ -1,0 +1,47 @@
+{
+ "success": true,
+ "data": [
+  {
+   "oracle_price": "81382.155769",
+   "bid_impact_price": "81407",
+   "ask_impact_price": "81408",
+   "funding_rate": "0.0000125",
+   "next_funding_rate": "0.0000125",
+   "created_at": 1792695603679
+  },
+  {
+   "oracle_price": "81209.872324",
+   "bid_impact_price": "81242",
+   "ask_impact_price": "81243",
+   "funding_rate": "0.0000125",
+   "next_funding_rate": "0.0000125",
+   "created_at": 1792692003680
+  },
+  {
+   "oracle_price": "81280.097617",
+   "bid_impact_price": "81242.541949",
+   "ask_impact_price": "81244.468908",
+   "funding_rate": "0.0000125",
+   "next_funding_rate": "0.0000125",
+   "created_at": 1792688403680
+  },
+  {
+   "oracle_price": "81680.322324",
+   "bid_impact_price": "81712",
+   "ask_impact_price": "81713",
+   "funding_rate": "0.0000125",
+   "next_funding_rate": "0.0000125",
+   "created_at": 1792684803680
+  },
+  {
+   "oracle_price": "81881.664047",
+   "bid_impact_price": "81876.000901",
+   "ask_impact_price": "81899",
+   "funding_rate": "0.0000125",
+   "next_funding_rate": "0.0000125",
+   "created_at": 1792681203680
+  }
+ ],
+ "next_cursor": "1111Jwo1M",
+ "has_more": true
+}

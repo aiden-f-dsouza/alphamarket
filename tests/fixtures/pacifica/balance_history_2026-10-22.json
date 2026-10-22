@@ -1,0 +1,42 @@
+{
+ "success": true,
+ "data": [
+  {
+   "amount": "280166.763308",
+   "balance": "701155.141285",
+   "pending_balance": "0",
+   "event_type": "deposit_release",
+   "created_at": 1791244975783
+  },
+  {
+   "amount": "-50000",
+   "balance": "422810.21203",
+   "pending_balance": "280166.763308",
+   "event_type": "withdraw",
+   "created_at": 1791212404483
+  },
+  {
+   "amount": "19833.236692",
+   "balance": "469665.487632",
+   "pending_balance": "280166.763308",
+   "event_type": "deposit",
+   "created_at": 1790951543554
+  },
+  {
+   "amount": "175000.0112",
+   "balance": "450539.272678",
+   "pending_balance": "0",
+   "event_type": "deposit",
+   "created_at": 1790946773054
+  },
+  {
+   "amount": "56000",
+   "balance": "309795.615436",
+   "pending_balance": "0",
+   "event_type": "deposit",
+   "created_at": 1780320276021
+  }
+ ],
+ "next_cursor": "1111N1yuR",
+ "has_more": true
+}

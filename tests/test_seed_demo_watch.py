@@ -15,6 +15,7 @@ from sqlalchemy.pool import StaticPool
 
 from alphamarket.analytics import latest_stats
 from alphamarket.config import get_settings
+from alphamarket.connectors import registry
 from alphamarket.db import Base
 from alphamarket.models import (
     Allocation,
@@ -43,7 +44,9 @@ def test_watch_address_is_well_formed_and_synthetic():
     assert re.fullmatch(r"0x[0-9a-f]{40}", seed_demo.WATCH_ADDRESS)
     assert seed_demo.WATCH_ADDRESS == "0x" + "de30" * 10  # not a generated or real address
     watch = [c for c in seed_demo.CREATORS if c.watch]
-    assert [c.venue for c in watch] == ["hyperliquid"]
+    # Hyperliquid's is first; each on-chain venue adds one in its marked block.
+    assert [c.venue for c in watch][0] == "hyperliquid"
+    assert {c.venue for c in watch} <= set(registry.PROFILES)
     assert [c.handle for c in seed_demo.CREATORS if c.house] == ["koinelab"]
     # Every watch and tail names a seeded handle.
     handles = {c.handle for c in seed_demo.CREATORS}
@@ -90,7 +93,11 @@ def test_small_seed_has_a_house_strategy_and_a_private_watch(seeded):
         assert lab["operator"] == "koine"
         assert {r["operator"] for slug, r in rows.items() if slug != lab["slug"]} == {"creator"}
 
-        watched = db.scalars(select(Strategy).where(Strategy.kind == StrategyKind.WATCH)).all()
+        watched = db.scalars(
+            select(Strategy)
+            .join(VenueAccount, VenueAccount.id == Strategy.venue_account_id)
+            .where(Strategy.kind == StrategyKind.WATCH, VenueAccount.venue == "hyperliquid")
+        ).all()
         assert len(watched) == 1
         strategy = watched[0]
         assert strategy.user_id == system[0].id and strategy.public is False
@@ -138,7 +145,9 @@ def test_seed_stores_leaderboard_snapshots_with_the_watched_address(seeded):
 
     sf, _ = seeded
     with sf() as db:
-        snaps = db.scalars(select(LeaderboardSnapshot)).all()
+        snaps = db.scalars(
+            select(LeaderboardSnapshot).where(LeaderboardSnapshot.venue == "hyperliquid")
+        ).all()
         assert {(s.venue, s.period) for s in snaps} == {
             ("hyperliquid", p) for p in seed_demo.LEADERBOARD_PERIODS
         }
