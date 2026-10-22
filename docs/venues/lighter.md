@@ -427,40 +427,7 @@ with the rest.
 - Paper fee: 3 bps of notional (Premium taker 2.8 bps at 0 LIT staked,
   rounded up; Standard accounts pay 0), so paper copies are never flattered.
 
-## Methodology notes (for docs/methodology.md)
+## Methodology notes
 
-For the main session to merge (plan section 4 item 6):
+Merged into docs/methodology.md (served at /methodology) on 2026-10-22; edit them there.
 
-**Lighter: realized PnL (reconstructed).** Lighter's public data gives each
-trade's price, size and side, not its PnL. Koine replays every trade of each
-account index from its first one, per market, on Lighter's own average-cost
-book: it keeps the position and the "entry quote" (|position| x average
-entry price, in USDC to 6 dp). A trade on the same side adds its notional to
-the entry quote. A trade on the other side keeps
-floor(entry quote x |position after| / |position before|) and realizes the
-difference between the notional received and the entry quote closed (for a
-long; the reverse for a short). A trade larger than the position closes all
-of it at the trade price and opens the rest at that price. Worked example:
-buy 2 @ 100, buy 1 @ 130 (entry 110), sell 1.5 @ 120 realizes +15.00,
-sell 2.5 @ 90 realizes -30.00 and leaves a short of 1 @ 90. Fees are
-separate legs. Checked against Lighter's own per-trade PnL wherever Lighter
-publishes it: 100 of 100 trades, exact.
-
-**Lighter: funding (reconstructed).** Lighter charges funding every hour
-but publishes it per account only to the account holder. Koine books, for
-each hour and each perp market where the account index held a position just
-before the hour, -position x the market's published funding for that hour
-(USD per unit, 8 dp; positive when longs pay). The position comes from the
-same trade replay. Error per hour: at most half a unit of the 8th decimal
-times the position; over a full sample history the reconstructed cash
-matched Lighter's to 0.0000025 USDC. An hour is booked once Lighter has
-published its value; an hour with no published value between published
-ones is booked as no funding.
-
-**Lighter: fees.** Computed by Koine from Lighter's published fee rate on
-each trade (millionths of notional), exactly; Lighter states rates, not
-amounts.
-
-**Lighter: composite account.** One watched address is every Lighter
-account index it owns (master and sub-accounts); transfers between them are
-internal and move nothing.

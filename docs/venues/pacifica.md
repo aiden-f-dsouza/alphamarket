@@ -387,33 +387,7 @@ offers its addresses as watch candidates. See counsel Q2 and Q4.
   are marked `copyable=False` until counsel Q3 answers. An unknown symbol is
   also not copyable.
 
-## Methodology notes (for docs/methodology.md)
+## Methodology notes
 
-**Pacifica realized PnL and fees.** Pacifica reports one `pnl` per fill that is
-already net of that fill's fee. Koine books the fee as a `FEE` leg (negative)
-and the realized profit as `pnl + fee` (a `REALIZED_PNL` leg), so the two legs
-sum to Pacifica's `pnl` exactly. Example: closing 200 SOL short from an average
-entry of 107.490396 at 103.66 reports `pnl` 759.03031 and `fee` 7.04888, so
-Koine books REALIZED_PNL +766.07919 and FEE -7.04888 (sum +759.03031).
+Merged into docs/methodology.md (served at /methodology) on 2026-10-22; edit them there.
 
-**Pacifica cash.** The reconciled cash is Pacifica's `balance` (before
-settlement of unrealized profit and loss) plus the margin held in isolated
-positions, because the venue's own equity formula is `balance + unrealized PnL
-+ isolated margin`. The ledger replays deposits, withdrawals, sub-account
-transfers, realized PnL net of fees, and funding.
-
-**Pacifica running balance is not chained.** `balance` on a balance-history row
-is the account's cash right after that row **including** trading, funding and
-interest booked since the previous row (fixture: after a 175,000 deposit the
-balance was 450,539.272678, after the next 19,833.236692 deposit 469,665.487632,
-a difference that trading explains). It is a post-event figure but its legs
-arrive on separate page streams, newest page first, and the ledger's
-`balance_chain_breaks` checks in ingestion order, which cannot be time order
-here; the venue also rounds `amount` and `balance` independently, so a merged
-time-ordered replay breaks by 1e-6 on rows (checked on 4,593 merged rows of one
-account). So Koine never sets `balance_after_atoms` for Pacifica and relies on
-the whole-vector reconcile against `GET /account`.
-
-**Pacifica deposits.** Each `deposit` or `deposit_release` is booked when it
-reaches `balance`; the pending part of a split deposit is not cash until its
-release.

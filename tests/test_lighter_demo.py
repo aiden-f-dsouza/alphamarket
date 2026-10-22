@@ -45,7 +45,7 @@ def test_static_demo_has_a_lighter_discover_tab():
 def test_seed_declares_one_synthetic_lighter_watch():
     (spec_,) = (c for c in seed_demo.CREATORS if c.venue == "lighter")
     assert spec_.watch and spec_.kind == "perp" and spec_.key_id == LIGHTER_WATCH
-    assert "lighter" in seed_demo.PERP_VENUES
+    assert seed_demo.perp_sim("lighter")
     assert ("investor", spec_.handle, "Lighter BTC/ETH desk") in seed_demo.WATCHES
     board = seed_demo.LEADERBOARD_SEEDS["lighter"]
     addresses = [board(i) for i in range(24)]

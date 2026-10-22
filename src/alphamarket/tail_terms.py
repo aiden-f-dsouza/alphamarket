@@ -74,14 +74,14 @@ def paper_terms(venue: str) -> dict:
         )
         stale = "3 days (end-of-day reports)" if venue in ("ibkr", "snaptrade") else "6 hours"
     else:
-        costs = f"{name} taker fee, {rate}" + (", plus funding" if venue == "hyperliquid" else "")
+        costs = f"{name} taker fee, {rate}" + (", plus funding" if profile.perps else "")
         fee_row = (
             "Fees",
             f"{name}'s taker fee, {rate} of notional, on every paper fill"
             + (
                 ". Perp funding is paid or received every hour, and a position past its "
                 "maintenance margin is liquidated, as at the venue."
-                if venue == "hyperliquid"
+                if profile.perps
                 else "."
             ),
         )

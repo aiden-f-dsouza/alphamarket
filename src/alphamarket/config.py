@@ -210,8 +210,9 @@ class Settings(BaseSettings):
     # one: tiny accounts dominate any ROI ordering.
     watch_discover_min_account_value: int = 10_000
     # Venues whose public addresses can be watched (comma-separated, from
-    # watchlist.WATCHABLE_VENUES). Polymarket stays off until counsel answers
-    # the data clause in its terms (docs/venues/polymarket.md).
+    # watchlist.WATCHABLE_VENUES). Off by default; prod sets it in fly.toml
+    # [env], and preflight refuses a venue whose terms doc is UNREAD or
+    # PENDING COUNSEL (docs/venues/<venue>.md).
     watch_venues: str = "hyperliquid"
     # Addresses tracked across all users: protects the venues' outbound budget
     # (Hyperliquid's weight limits and 10 websocket users per IP) for creators.

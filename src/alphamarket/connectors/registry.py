@@ -183,6 +183,7 @@ PROFILES: dict[str, VenueProfile] = {
     # ---- venue-hyperliquid ----
     "hyperliquid": VenueProfile(
         venue="hyperliquid",
+        perps=True,
         display_name="Hyperliquid",
         envs=("prod",),
         credential=CredentialKind.ADDRESS,
@@ -527,6 +528,7 @@ PROFILES: dict[str, VenueProfile] = {
     # prod WATCH_VENUES until counsel Q1 (or a written Lighter answer).
     "lighter": VenueProfile(
         venue="lighter",
+        perps=True,
         display_name="Lighter",
         envs=("prod",),
         credential=CredentialKind.ADDRESS,
@@ -577,6 +579,7 @@ PROFILES: dict[str, VenueProfile] = {
     # WATCH_VENUES until counsel answers.
     "pacifica": VenueProfile(
         venue="pacifica",
+        perps=True,
         display_name="Pacifica",
         envs=("prod",),
         credential=CredentialKind.ADDRESS,
@@ -611,6 +614,8 @@ PROFILES: dict[str, VenueProfile] = {
         paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
         asset_classes=("crypto",),
         leaderboard_periods=("day", "week", "month", "all"),
+        # the board has pnl, volume and equity; no roi
+        leaderboard_columns=("pnl", "volume", "account_value"),
         # `account_trades` frames are the REST rows under short names.
         stream_mode=StreamMode.FILLS,
         stream_users_per_ip=pacifica.WS_USERS_PER_IP,

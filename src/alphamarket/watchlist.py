@@ -62,7 +62,9 @@ router = APIRouter(prefix="/api/watch", tags=["watchlist"])
 
 # Venues with public per-address data. Which of them are open is a setting
 # (`watch_venues`): see open_venues.
-WATCHABLE_VENUES = ("hyperliquid", "polymarket")
+# Prod opens a subset through WATCH_VENUES; preflight refuses a venue whose
+# terms doc is UNREAD or PENDING COUNSEL (Lighter and Pacifica, 2026-10-22).
+WATCHABLE_VENUES = ("hyperliquid", "polymarket", "lighter", "pacifica")
 LABEL_MAX = 60
 # The system user's address fails email validation (a reserved TLD), so
 # nobody can sign up or log in as it; auth refuses `is_system` users anyway.

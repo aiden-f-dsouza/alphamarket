@@ -101,8 +101,8 @@ def test_small_seed_through_the_real_pipeline(demo_db, demo_on):
         # Seeded slugs are the clean names, without the id suffix of a real connect.
         creators = [c for c in seed_demo.CREATORS if not c.watch]
         assert {seed_demo.slugify(c.strategy) for c in creators} == set(venues)
-        assert len(watched) == sum(c.watch for c in seed_demo.CREATORS)
-        assert all(w.slug == f"watch-{w.id}" for w in watched)
+        assert len(watched) == 1  # the Hyperliquid whale; the total is checked above
+        assert all(w.slug == f"watch-{w.id}" for w in all_watched)
         # The Hyperliquid whale (on-chain venue blocks add one watch each).
         watched = [
             w for w in watched if db.get(VenueAccount, w.venue_account_id).venue == "hyperliquid"

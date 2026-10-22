@@ -231,6 +231,9 @@ class VenueProfile:
     # "at most 10 unique users" across websocket user subscriptions per IP).
     # None: no documented cap.
     stream_users_per_ip: int | None = None
+    # The venue's instruments are perpetuals: hourly funding and liquidation
+    # apply to its paper tails (tail_terms says so).
+    perps: bool = False
     # ---- on-chain perps scaffold (docs/onchain_perps_plan.md S1/S2) ----
     # How an ADDRESS venue's identifier is validated and stored
     # (connectors/addresses.py). Read only when credential is ADDRESS.

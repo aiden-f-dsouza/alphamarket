@@ -1,5 +1,17 @@
 # On-chain perp DEXs as watchable venues: build plan (2026-10-22)
 
+**Status (2026-10-22, branch `onchain-perps`):** wave 1 integrated. Scaffold
+(S1-S9), Lighter and Pacifica connectors, and the GMX G0 note
+(`docs/venues/gmx_arbitrum.md`) are merged with `main` (including the
+per-venue discover columns, #42/#43). Lighter and Pacifica are in
+`WATCHABLE_VENUES` and the demo; both terms docs say `Position: PENDING
+COUNSEL`, so preflight keeps them out of prod `WATCH_VENUES`. Integration
+added `VenueProfile.perps` (tail terms name funding and liquidation for every
+perp venue) and merged both venues' methodology notes into
+`docs/methodology.md`. Open: founder decisions 4-5 (GMX account model, read
+the G0 note), the S4 prod check that stored EVM addresses are lowercase,
+counsel Q1-Q4, smoke runs from Fly iad, GMX G1 and Nado (wave 2).
+
 Scope: add on-chain perp DEXs as **watch + discover** venues (a public address
 pasted into `/watch`, a venue leaderboard on `/watch/discover`, paper tailing
 only). This plan covers watching, not wallet connects: every new profile ships

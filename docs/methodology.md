@@ -659,6 +659,80 @@ individually verified. Staking rewards and borrow/lend interest are treated
 as flows, not returns (a small understatement), until they are verified
 against a real account.
 
+## Lighter accounts (watch only)
+
+Lighter is watched by public address only; nobody connects a Lighter
+account. These rules turn its public data into the same ledger as every
+other venue.
+
+**Lighter: realized PnL (reconstructed).** Lighter's public data gives each
+trade's price, size and side, not its PnL. Koine replays every trade of each
+account index from its first one, per market, on Lighter's own average-cost
+book: it keeps the position and the "entry quote" (|position| x average
+entry price, in USDC to 6 dp). A trade on the same side adds its notional to
+the entry quote. A trade on the other side keeps
+floor(entry quote x |position after| / |position before|) and realizes the
+difference between the notional received and the entry quote closed (for a
+long; the reverse for a short). A trade larger than the position closes all
+of it at the trade price and opens the rest at that price. Worked example:
+buy 2 @ 100, buy 1 @ 130 (entry 110), sell 1.5 @ 120 realizes +15.00,
+sell 2.5 @ 90 realizes -30.00 and leaves a short of 1 @ 90. Fees are
+separate legs. Checked against Lighter's own per-trade PnL wherever Lighter
+publishes it: 100 of 100 trades, exact.
+
+**Lighter: funding (reconstructed).** Lighter charges funding every hour
+but publishes it per account only to the account holder. Koine books, for
+each hour and each perp market where the account index held a position just
+before the hour, -position x the market's published funding for that hour
+(USD per unit, 8 dp; positive when longs pay). The position comes from the
+same trade replay. Error per hour: at most half a unit of the 8th decimal
+times the position; over a full sample history the reconstructed cash
+matched Lighter's to 0.0000025 USDC. An hour is booked once Lighter has
+published its value; an hour with no published value between published
+ones is booked as no funding.
+
+**Lighter: fees.** Computed by Koine from Lighter's published fee rate on
+each trade (millionths of notional), exactly; Lighter states rates, not
+amounts.
+
+**Lighter: composite account.** One watched address is every Lighter
+account index it owns (master and sub-accounts); transfers between them are
+internal and move nothing.
+
+## Pacifica accounts (watch only)
+
+Pacifica is watched by public Solana address only; nobody connects a
+Pacifica account.
+
+**Pacifica realized PnL and fees.** Pacifica reports one `pnl` per fill that is
+already net of that fill's fee. Koine books the fee as a `FEE` leg (negative)
+and the realized profit as `pnl + fee` (a `REALIZED_PNL` leg), so the two legs
+sum to Pacifica's `pnl` exactly. Example: closing 200 SOL short from an average
+entry of 107.490396 at 103.66 reports `pnl` 759.03031 and `fee` 7.04888, so
+Koine books REALIZED_PNL +766.07919 and FEE -7.04888 (sum +759.03031).
+
+**Pacifica cash.** The reconciled cash is Pacifica's `balance` (before
+settlement of unrealized profit and loss) plus the margin held in isolated
+positions, because the venue's own equity formula is `balance + unrealized PnL
++ isolated margin`. The ledger replays deposits, withdrawals, sub-account
+transfers, realized PnL net of fees, and funding.
+
+**Pacifica running balance is not chained.** `balance` on a balance-history row
+is the account's cash right after that row **including** trading, funding and
+interest booked since the previous row (fixture: after a 175,000 deposit the
+balance was 450,539.272678, after the next 19,833.236692 deposit 469,665.487632,
+a difference that trading explains). It is a post-event figure but its legs
+arrive on separate page streams, newest page first, and the ledger's
+`balance_chain_breaks` checks in ingestion order, which cannot be time order
+here; the venue also rounds `amount` and `balance` independently, so a merged
+time-ordered replay breaks by 1e-6 on rows (checked on 4,593 merged rows of one
+account). So Koine never sets `balance_after_atoms` for Pacifica and relies on
+the whole-vector reconcile against `GET /account`.
+
+**Pacifica deposits.** Each `deposit` or `deposit_release` is booked when it
+reaches `balance`; the pending part of a split deposit is not cash until its
+release.
+
 ## Alpaca accounts (US stocks and ETFs)
 
 **Source.** Alpaca's account activities (every fill and every non-trade cash
