@@ -348,6 +348,13 @@ only, and the server always rebuilds the message from the code it stored, so
 a signature made for a different code or account is refused. Signing is not a
 transaction and Koine never asks for a seed phrase or private key.
 
+On Solana-based venues the address is itself the wallet's ed25519 public key.
+You sign the same kind of message with your wallet's "Sign Message" (Phantom,
+Solflare) and paste the signature; there is no browser-wallet button for
+these yet. Koine checks it as an ed25519 signature over the exact bytes of
+the message it rebuilt, against that public key, and refuses anything else.
+Solana addresses are case-sensitive and are stored exactly as given.
+
 ## Opting an address out of watchlists
 
 Signed-in members can privately watch any public Hyperliquid or Polymarket
@@ -359,6 +366,15 @@ Polymarket), and Koine then removes it from every watchlist, stops any paper
 tail of it, and refuses to add it again. Koine keeps an append-only record of
 the opt-out (venue and address, and the account that proved it) so that it
 stays in force, and writes an audit row for it.
+
+Some venues let a trader hide their address from the venue's own public
+leaderboard (Pacifica's privacy mode). Koine treats that setting as an
+opt-out for as long as it is on: such an address cannot be added, and
+existing watches of it are removed (and tails stopped, with an audit row)
+whenever Koine refreshes that venue's leaderboard. Because the venue can turn
+the setting off again, this is not written to the permanent opt-out record.
+The venue publishes the setting only on its leaderboard, so an address that
+is not listed there cannot be checked; the signed opt-out covers it.
 
 ## SnapTrade connections
 

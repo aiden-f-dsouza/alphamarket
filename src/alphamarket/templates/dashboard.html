@@ -86,10 +86,12 @@
   {% if row.snapshots %}
   <div class="body">
     <div class="spread" style="align-items:baseline"><span class="label">Nightly reconciliation</span>{% if st %}<span class="mono small muted">{{ st.n_fills }} fills{% if not v2 %} · {{ st.n_settlements }} settlements{% endif %} · stats as of {{ st.as_of.strftime("%Y-%m-%d") }}</span>{% endif %}</div>
+    {% set positions_only = row.profile.reconcile_mode == "positions" %}
+    {% if positions_only %}<span class="small muted">Positions are compared with the venue; cash is reconstructed from fills and not compared (the venue reports no balance).</span>{% endif %}
     <table>
       <tr><th>Run (UTC)</th><th class="num">Venue balance</th><th class="num">Computed cash</th><th class="num">Divergence</th><th>Result</th></tr>
       {% for snap in row.snapshots %}
-      <tr><td class="text2">{{ snap.as_of.strftime("%Y-%m-%d %H:%M") }}</td><td class="num">{{ m.usd(snap.venue_balance_micros / 1000000, 4) }}</td><td class="num">{{ m.usd(snap.computed_cash_micros / 1000000, 4) }}</td><td class="num muted">{{ m.usd(snap.divergence_micros / 1000000, 4) }}</td>
+      <tr><td class="text2">{{ snap.as_of.strftime("%Y-%m-%d %H:%M") }}</td>{% if positions_only %}<td class="num muted" colspan="3">cash not compared · positions only</td>{% else %}<td class="num">{{ m.usd(snap.venue_balance_micros / 1000000, 4) }}</td><td class="num">{{ m.usd(snap.computed_cash_micros / 1000000, 4) }}</td><td class="num muted">{{ m.usd(snap.divergence_micros / 1000000, 4) }}</td>{% endif %}
         <td>{% if snap.reconciled %}<span class="good" style="display:inline-flex;align-items:center;gap:6px">{{ m.icon("check", 14, "var(--good)", 2) }}match</span>{% else %}<span class="bad" style="display:inline-flex;align-items:center;gap:6px">{{ m.icon("x", 14, "var(--bad)", 2) }}DIVERGED</span>{% endif %}</td></tr>
       {% endfor %}
     </table>

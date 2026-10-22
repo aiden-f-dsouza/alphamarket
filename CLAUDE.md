@@ -129,14 +129,21 @@ deliberately out of scope).
   `alpaca.py` (OAuth), `ibkr.py` (Flex XML, daily), `snaptrade.py`
   (aggregator, daily). `registry.py` (`PROFILES`, `get_profile`,
   `build_connector(venue, env, key_id, secret, account_ref)`,
-  `build_market_data`) is the only import path core code may use
+  `build_market_data`) is the only import path core code may use; its
+  `# ---- venue-<v> ----` blocks (also in `demo.py`, `scripts/seed_demo.py`)
+  are where on-chain venue branches write. `addresses.py` (pure: address
+  kinds EVM/SOLANA via `VenueProfile.address_kind`, `normalize` (EVM
+  lowercased, Solana case-sensitive as given; every stored or compared
+  address goes through it, never `.lower()`), `short`, base58, EIP-55,
+  `verify_ed25519` for Solana claims). Plan: docs/onchain_perps_plan.md
 - `alembic/` — migrations, hand-written for ledger tables (0009 ledger v2,
   0010 jobs, 0011 auth, 0012 vault/audit, 0013 wave 2: signals v2, paper
   asset book, market data, consent, activity flags; 0014 market data
   coverage, 0015 `users.is_demo`, 0016 paper book checkpoints (a cache,
   not append-only) and mirror ledger indexes; 0017 `users.is_house` /
   `is_system`, `strategies.kind`, `watches`, `watch_optouts`; 0018
-  `leaderboard_snapshots`, a mutable cache)
+  `leaderboard_snapshots`, a mutable cache; 0019 on-chain perps scaffold:
+  `funding_rates.short_rate`, `instruments.copyable`)
 - `docs/methodology.md` — public methodology page source; every ledger/stats
   formula lands here alongside its unit test. `docs/security.md` (served at
   /security), `docs/launch.md` (M5 outreach), `docs/deploy.md` + `Dockerfile`

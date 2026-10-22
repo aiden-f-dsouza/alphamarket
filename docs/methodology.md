@@ -1175,11 +1175,23 @@ once.
 
 A paper tail stops when its drawdown passes the follower's limit, when the
 follower presses Stop, when the follower removes a watched trader they were
-tailing, or when the trader opts out of being watched. From then on no new
+tailing, or when the trader opts out of being watched (a signed message, or
+the venue's own privacy setting, below). From then on no new
 trade is copied, and every crypto and stock position is closed: the follower
 sees what the tail actually ended with, not a paper position left open
 forever. Prediction-market positions are not sold: they run to settlement,
 as described under "Paper tailing".
+
+**A venue's own privacy setting.** Some venues let a trader hide their
+address from the venue's public leaderboard (Pacifica's privacy mode). Koine
+honours it as an opt-out for as long as it is on: an address with the setting
+on cannot be added to a watchlist, and each time Koine refreshes that venue's
+leaderboard (several times a day) every watch of an address shown with the
+setting on is removed and its tails stopped. Unlike a signed opt-out, this is
+not recorded as permanent: if the trader turns the setting off, the address
+can be watched again. The limit: the venue publishes the setting only on its
+leaderboard, so an address that is not on the leaderboard cannot be checked
+at all. For such an address the signed opt-out is the only route.
 
 **Price.** Each position closes at the venue's public quote, on the side a
 real order would take:

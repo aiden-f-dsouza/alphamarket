@@ -265,6 +265,27 @@ def test_polymarket_connect_stores_no_secret_and_starts_unclaimed(client, user, 
     assert client.get(f"/api/strategies/{slug}").status_code == 404
 
 
+@respx.mock(assert_all_called=False)
+def test_address_connect_rejects_a_malformed_address_before_any_venue_call(
+    client, user, session_factory
+):
+    _mock_polymarket()
+    resp = client.post(
+        "/venues",
+        json={
+            "venue": "polymarket",
+            "key_id": "0x1234",
+            "strategy_name": "Weather fade",
+            "consent_sha256": consent("polymarket"),
+        },
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "Enter a 0x address (42 characters)"
+    assert respx.calls.call_count == 0  # no venue request, no limiter tokens
+    with session_factory() as db:
+        assert db.scalars(select(VenueAccount)).all() == []
+
+
 @respx.mock
 def test_polymarket_claim_requires_code_in_bio(client, user, session_factory):
     _mock_polymarket()

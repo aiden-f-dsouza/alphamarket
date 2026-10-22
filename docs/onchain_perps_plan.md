@@ -108,7 +108,7 @@ def verify_ed25519(address: str, message: str, signature: str) -> bool
     # signature as base58, base64 or 0x-hex of 64 bytes; cryptography's Ed25519PublicKey;
     # message is the exact UTF-8 claim text (Phantom/Solflare signMessage signs raw bytes)
 HINT: dict[AddressKind, str]           # "Enter a 0x address (42 characters)" / "Enter a Solana address (32-44 characters, case-sensitive)"
-INPUT_PATTERN: dict[AddressKind, str]  # HTML pattern + maxlength per kind
+PLACEHOLDER: dict[AddressKind, str]    # input placeholder per kind; MAX_INPUT_LENGTH = 66 (no HTML pattern, S6)
 SIGN_HELP: dict[AddressKind, str]      # "personal_sign / EIP-191" vs "Sign Message in Phantom/Solflare, paste the signature"
 ```
 
@@ -320,7 +320,7 @@ of these:
 Venue branches write only inside their own block. Do the same in `demo.py`
 (discover sample venues) and `scripts/seed_demo.py` (watch seeds). In
 `demo._discover_address(venue, i)`, the scaffold makes synthetic addresses
-kind-aware: Solana gets base58 `De30…`, still obviously synthetic.
+kind-aware: Solana gets base58 `De3o…` (base58 has no `0`), still obviously synthetic.
 
 ### S9. Preflight
 
@@ -372,10 +372,40 @@ Landed: S1-S9 as written, with these deviations (venue agents read them):
   fill instruments and in `fetch_instruments`.
 - Registry, demo and seed blocks have start and end markers
   (`# ---- venue-<v> ----` / `# ---- end venue-<v> ----`); write inside them.
+- **`private_addresses()` and `owner_private(address)` work on normalized
+  addresses only.** A connector passes every board address through
+  `addresses.normalize(profile.address_kind, raw)` before putting it in the
+  private set or comparing it in `owner_private`: `discover.sweep_private`
+  matches the set against stored `key_id`s by exact equality, so a raw board
+  string (an EVM address in mixed case, a Solana one with whitespace) never
+  matches and the watch is silently kept.
+- `addresses.INPUT_PATTERN` (S1) was dropped: no form serves a single kind
+  with a pattern (S6 drops it everywhere). Inputs use `PLACEHOLDER` and
+  `MAX_INPUT_LENGTH` (66); the server validates.
+- `ReconcileMode` is a plain `StrEnum` (equality, hashing and `==` work);
+  compare with `is` or `==`.
+- Review fixes: the dashboard's nightly-reconciliation table says "cash not
+  compared · positions only" for a POSITIONS-mode venue (its snapshots store
+  zero cash); the JSON/form connect normalizes an address before any venue
+  call; the privacy sweep intersects the private set with the venue's watch
+  accounts in Python (no IN list of a whole board).
 - **Still open (main session, before merge):** the S4 read-only prod check
   that every stored EVM `venue_accounts.key_id` (ADDRESS venues) and
   `watch_optouts.address` is already lowercase. The scaffold dropped
-  `func.lower` on the strength of the two normalizers that wrote them.
+  `func.lower` (`watchlist.listed_strategy`, `discover._listed_slugs`,
+  `jobs.watch_cadences`) on the strength of the two normalizers that wrote
+  them. If a mixed-case row turns up: a one-off `UPDATE` lowercases
+  `venue_accounts.key_id`, but `watch_optouts` is append-only, so a
+  mixed-case opt-out needs a **new** lowercased row (never an UPDATE).
+  Query (read-only):
+
+  ```sql
+  SELECT venue, count(*) FROM venue_accounts
+   WHERE venue IN ('hyperliquid', 'polymarket') AND key_id <> lower(key_id)
+   GROUP BY venue;
+  SELECT venue, count(*) FROM watch_optouts
+   WHERE address <> lower(address) GROUP BY venue;
+  ```
 
 ---
 
@@ -412,7 +442,8 @@ Common rules for every venue agent:
 - **Fixtures:** start from the research fixtures dir.
   - Trim to the rows the tests need; keep rows verbatim.
   - Replace every address with a synthetic one of the same kind
-    (`0x00…0N` / base58 `De30…N`) as the Hyperliquid leaderboard fixture does.
+    (`0x00…0N` / base58 `De3o…N`, from `demo.synthetic_solana_address(tag)`)
+    as the Hyperliquid leaderboard fixture does.
   - Strip usernames, names and any other identity field.
   - Name files `<endpoint>_<YYYY-MM-DD>.json`.
   - Re-record anything missing with `scripts/record_fixture.py` or the smoke

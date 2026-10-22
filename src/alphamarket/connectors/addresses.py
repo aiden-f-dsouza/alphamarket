@@ -44,13 +44,8 @@ PLACEHOLDER: dict[AddressKind, str] = {
     AddressKind.SOLANA: "Solana address",
 }
 
-# HTML input attributes per kind. A form that serves several kinds (the venue
-# <select> on /watch) drops the pattern and uses the widest maxlength; the
-# server validates either way.
-INPUT_PATTERN: dict[AddressKind, dict[str, str | int]] = {
-    AddressKind.EVM: {"pattern": "0[xX][0-9a-fA-F]{40}", "maxlength": 42},
-    AddressKind.SOLANA: {"pattern": "[1-9A-HJ-NP-Za-km-z]{32,44}", "maxlength": 44},
-}
+# Address inputs carry no HTML pattern: one field can serve several kinds, so
+# it takes the widest maxlength and the server validates (normalize).
 MAX_INPUT_LENGTH = 66  # Nado's bytes32 hex (0x + 64), the widest address in scope
 
 SIGN_HELP: dict[AddressKind, str] = {

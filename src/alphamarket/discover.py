@@ -219,13 +219,18 @@ def sweep_private(db: Session, venue: str, source: MarketDataSource) -> int:
     private = source.private_addresses()
     if not private:
         return 0
-    accounts = db.scalars(
-        select(VenueAccount).where(
-            VenueAccount.is_watch.is_(True),
-            VenueAccount.venue == venue,
-            VenueAccount.key_id.in_(sorted(private)),
+    # Intersect in Python: the venue's watch accounts are bounded (about
+    # watch_max_tracked), while a board's private set can run to thousands of
+    # addresses, which would bind one IN parameter each.
+    accounts = [
+        account
+        for account in db.scalars(
+            select(VenueAccount)
+            .where(VenueAccount.is_watch.is_(True), VenueAccount.venue == venue)
+            .order_by(VenueAccount.id)
         )
-    ).all()
+        if account.key_id in private
+    ]
     for account in accounts:
         remove_private_watch(db, account)
     return len(accounts)

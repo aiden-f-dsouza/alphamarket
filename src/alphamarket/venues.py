@@ -448,6 +448,16 @@ def connect_account(
         # reaches the venue (invariant 10).
         screen = consent.require_consent(db, user, payload.venue, payload.consent_sha256, request)
 
+    # An address venue stores the address in its kind's normal form (EVM
+    # lowercased, Solana as given; connectors/addresses.py). Checked
+    # before any venue call, so a malformed address spends no venue request.
+    stored_key_id = key_id
+    if pending is None and not profile.needs_secret:
+        try:
+            stored_key_id = addresses.normalize(profile.address_kind, key_id)
+        except addresses.InvalidAddress as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+
     venue_env = get_settings().venue_env(payload.venue)
 
     # The venue calls (credential check, read-only proof, the anchor's balance and
@@ -472,15 +482,6 @@ def connect_account(
 
     limiter = get_web_limiter(request.app) if request is not None else None
     connector, evidence, anchor = web_venue_call(limiter, payload.venue, key_id, _verify_and_anchor)
-
-    # An address venue stores the address in its kind's normal form (EVM
-    # lowercased, Solana as given; connectors/addresses.py).
-    stored_key_id = key_id
-    if pending is None and not profile.needs_secret:
-        try:
-            stored_key_id = addresses.normalize(profile.address_kind, key_id)
-        except addresses.InvalidAddress as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from None
 
     key_proves_ownership = profile.ownership is OwnershipProof.KEY
     if pending is not None:

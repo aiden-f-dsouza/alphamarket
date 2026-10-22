@@ -148,7 +148,6 @@ class RegulatoryFees:
     effective: str
 
 
-@dataclass(frozen=True)
 class ReconcileMode(StrEnum):
     """What nightly reconciliation compares for an asset venue (S2)."""
 
@@ -931,15 +930,21 @@ class MarketDataSource(_Throttled, ABC):
         instance saw with the venue's privacy flag on (a connector collects
         them while dropping those rows; no extra request). None before a
         fetch, or when the venue has no flag. discover.refresh sweeps watches
-        of these addresses once per refresh (watchlist.remove_private_watch)."""
+        of these addresses once per refresh (watchlist.remove_private_watch).
+        Each address MUST already be passed through
+        `addresses.normalize(profile.address_kind, raw)`, never the raw board
+        string: discover.sweep_private matches them against stored key_ids by
+        exact equality, so an un-normalized EVM address would never match."""
         return None
 
     def owner_private(self, address: str) -> bool | None:
-        """A one-off check of one normalized address, used only when a new
-        watch is created (watchlist._track), never per sync. True: treat the
-        address as opted out while the flag is on. False: the flag is off.
-        None: unknown (no flag on this venue, or the address is absent from
-        what the venue publishes)."""
+        """A one-off check of one address, already normalized by
+        `addresses.normalize` (compare the board's rows only after normalizing
+        them the same way), used only when a new watch is created
+        (watchlist._track), never per sync. True: treat the address as opted
+        out while the flag is on. False: the flag is off. None: unknown (no
+        flag on this venue, or the address is absent from what the venue
+        publishes)."""
         return None
 
 

@@ -1338,7 +1338,7 @@ class WatchOptout(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     venue: Mapped[str] = mapped_column(String(40))
-    address: Mapped[str] = mapped_column(String(120))  # lowercased
+    address: Mapped[str] = mapped_column(String(120))  # addresses.normalize (EVM lowercased)
     proved_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

@@ -49,6 +49,7 @@ from alphamarket.models import (
     AnchorBalance,
     AssetReconciliation,
     AuditLog,
+    EquitySnapshot,
     FundingRateRow,
     Instrument,
     LeaderboardSnapshot,
@@ -420,6 +421,39 @@ def test_positions_mode_quarantines_a_mismatched_position(session_factory, posit
         assert reasons == ["reconcile:BTC-S-PERP", "reconcile:ETH-L-PERP"]
 
 
+def test_dashboard_says_cash_is_not_compared_in_positions_mode(
+    client, session_factory, positions_venue
+):
+    signup(client, "p@example.com")
+    with session_factory() as db:
+        user = db.scalar(select(User).where(User.email == "p@example.com"))
+        acct = VenueAccount(
+            user_id=user.id, venue="posx", venue_env="prod", key_id="0x" + "ab" * 20
+        )
+        db.add(acct)
+        db.flush()
+        strategy = Strategy(user_id=user.id, venue_account_id=acct.id, name="P", slug="p")
+        db.add(strategy)
+        db.flush()
+        # What reconcile_positions stores: the cash columns are zeros, unchecked.
+        db.add(
+            EquitySnapshot(
+                strategy_id=strategy.id,
+                as_of=NOW,
+                venue_balance_micros=0,
+                computed_cash_micros=0,
+                divergence_micros=0,
+                tolerance_micros=0,
+                reconciled=True,
+            )
+        )
+        db.commit()
+    page = client.get("/dashboard")
+    assert page.status_code == 200
+    assert "cash not compared · positions only" in page.text
+    assert "$0.0000" not in page.text
+
+
 def test_balances_mode_keeps_its_tiers(monkeypatch, session_factory):
     monkeypatch.setitem(registry.PROFILES, "fillsx", profile("fillsx", balance_observable=False))
     with session_factory() as db:
@@ -429,8 +463,15 @@ def test_balances_mode_keeps_its_tiers(monkeypatch, session_factory):
         acct.claimed_at = NOW
         assert verification_tier(acct) == "fills_only"
     assert registry.get_profile("hyperliquid").reconcile_mode is ReconcileMode.BALANCES
-    assert all(p.position_tolerance_atoms == 0 for p in registry.PROFILES.values())
-    assert all(p.address_kind is AddressKind.EVM for p in registry.PROFILES.values())
+    # Only the venues that predate the scaffold: venue branches add profiles
+    # with their own kinds and tolerances without touching this test.
+    for venue in ("hyperliquid", "polymarket"):
+        assert registry.get_profile(venue).position_tolerance_atoms == 0
+        assert registry.get_profile(venue).address_kind is AddressKind.EVM
+    # A plain StrEnum: members compare and hash apart (a dataclass decorator
+    # once made every member equal).
+    assert ReconcileMode.BALANCES != ReconcileMode.POSITIONS
+    assert len({ReconcileMode.BALANCES: 1, ReconcileMode.POSITIONS: 2}) == 2
 
 
 # ---- S3/S5: the venue's own privacy flag ------------------------------------------------------
@@ -743,5 +784,5 @@ def test_demo_discover_addresses_follow_the_kind(monkeypatch):
     assert is_valid(AddressKind.EVM, evm)
     assert demo._discover_address("polymarket", 0) == "0x" + "2007" + "0" * 30 + "c0ffee"
     view = demo.discover_sample("polymarket", "week", "pnl")
-    assert view.venues == ("hyperliquid", "polymarket")
+    assert view.venues[:2] == ("hyperliquid", "polymarket")
     assert all(is_valid(AddressKind.EVM, r.address) for r in view.rows)
