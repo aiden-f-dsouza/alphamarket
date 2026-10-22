@@ -176,6 +176,11 @@
 <label style="display:flex;align-items:flex-start;gap:12px;font-size:14px;line-height:1.5" class="text2"><input type="checkbox" name="confirm" required {{ "checked" if f.confirmed }} style="width:18px;height:18px;margin:2px 0 0;padding:0;flex-shrink:0{% if accent %};accent-color:{{ accent }}{% endif %}">I understand this is a paper simulation of a strategy with a {% if f.track_days %}{{ f.track_days }}-day{% else %}new{% endif %} record. Paper results are modelled: they assume the quoted price was available in my size, and a real account could do worse.</label>
 {%- endmacro %}
 
+{# Copy tickets opt-in (copy_tickets.py): shown only while COPY_TICKETS_ENABLED is on. #}
+{% macro tail_copy_optin(f, accent="") -%}
+{% if f.copy_available %}<label style="display:flex;align-items:flex-start;gap:12px;font-size:14px;line-height:1.5" class="text2"><input type="checkbox" name="copy_on" value="on" style="width:18px;height:18px;margin:2px 0 0;padding:0;flex-shrink:0{% if accent %};accent-color:{{ accent }}{% endif %}">Also give me copy tickets: each trade this tail copies, written as an order I can place myself on the venue if I choose. Koine never places it.</label>{% endif %}
+{%- endmacro %}
+
 {% macro tail_terms_details(f, summary="How paper fills are priced") -%}
 <details class="tail-details">
   <summary>{{ summary }}</summary>
@@ -198,6 +203,7 @@
   </label>
   <label class="field" for="tail-drawdown"><span class="label">Maximum drawdown</span>{{ tail_drawdown(f, "tail-drawdown") }}</label>
   {{ tail_terms_details(f) }}
+  {{ tail_copy_optin(f) }}
   {{ tail_confirm(f) }}
   <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap"><button class="btn lg" type="submit">Start paper tail</button><a class="small text2" href="{{ f.form_action }}" style="text-decoration:underline">Full details</a></div>
 </form>

@@ -470,3 +470,15 @@ portfolios and live copying are parked there as offshoot ideas.
 Steps 0-3 built on `copy-strategies` (2026-10-07): migration 0017, "Run by
 Koine" badge and filter, the private watchlist (Hyperliquid only until
 counsel clears Polymarket); status in docs/copy_strategies_implementation.md.
+
+Investor flow and copy tickets (2026-10-22): the real `/feed` (Follow was a
+dead end outside demo mode), an inline paper-tail form on strategy and watch
+pages, and a drawdown default set from the strategy's worst drawdown (PR #44).
+Copy tickets (`docs/copy_tickets_plan.md`): a paper tail can issue each of its
+paper fills as an order the user places by hand on the venue. Koine matches
+those orders against the user's own read-only fills and reports slippage
+against the paper fill. Behind `COPY_TICKETS_ENABLED` (off by default);
+`COPY_TICKETS_SIZED=false` drops per-user sizing, which is the tailored part
+regulatory_reference.md section 3 flags. Manual only: no write key, no
+automation; invariant 8 is unchanged. Counsel question to add: whether sized
+tickets or account matching make Koine a CTA/adviser.

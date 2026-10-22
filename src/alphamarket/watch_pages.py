@@ -637,6 +637,7 @@ def watch_tail_form(
     allocation: str = Form(""),
     drawdown_limit_bps: str = Form(str(DEFAULT_DRAWDOWN_BPS)),
     confirm: str | None = Form(None),
+    copy_on: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
     user = _user(request, db)
@@ -644,7 +645,15 @@ def watch_tail_form(
         raise HTTPException(status_code=404)
     w = watch_strategy_or_404(db, user, strategy_id)
     resp = start_tail_form(
-        request, db, user, w.strategy, allocation, drawdown_limit_bps, confirm, _watch_tail_ctx
+        request,
+        db,
+        user,
+        w.strategy,
+        allocation,
+        drawdown_limit_bps,
+        confirm,
+        _watch_tail_ctx,
+        copy_on,
     )
     if resp.status_code != 303:  # the re-rendered form: private like the rest
         resp.headers["Cache-Control"] = "private, no-store"

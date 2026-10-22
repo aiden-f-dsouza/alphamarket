@@ -210,6 +210,18 @@ class VenueProfile:
     # "at most 10 unique users" across websocket user subscriptions per IP).
     # None: no documented cap.
     stream_users_per_ip: int | None = None
+    # ---- copy tickets (copy_tickets.py) ----
+    # The venue's page for trading one instrument, as a str.format template:
+    # {symbol} (the venue's symbol, URL-quoted), {base}/{quote} (canonical
+    # codes) and {base_lower}/{quote_lower}. None: no per-instrument page is
+    # confirmed, so the ticket links to trade_home_url instead. Only a link the
+    # user opens themselves: Koine never pre-fills or submits an order.
+    trade_url: str | None = None
+    # Where the user places orders on the venue in general; None: no link.
+    trade_home_url: str | None = None
+    # A ticket stops being suggested this long after the creator's fill: a
+    # stale price is not a trade the user could still make at that level.
+    copy_ticket_ttl_seconds: int = 3600
 
     @property
     def needs_secret(self) -> bool:

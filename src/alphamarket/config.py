@@ -226,6 +226,14 @@ class Settings(BaseSettings):
     # (housekeeping.report_stuck_closes). A stock over a long weekend waits
     # about 3.5 days, so a week means the quotes really stopped.
     stop_close_alert_days: int = 7
+    # ---- copy tickets (copy_tickets.py, docs/copy_tickets_plan.md) ----
+    # Off by default: every surface (/copy, the JSON routes, the settings
+    # forms) 404s and the worker issues no ticket. Turning it off is the
+    # rollback; the tables stay.
+    copy_tickets_enabled: bool = False
+    # Off shows only the impersonal trade (instrument, side, price, the share of
+    # the creator's equity): no quantity sized to the user's paper allocation.
+    copy_tickets_sized: bool = True
 
 
 @lru_cache
