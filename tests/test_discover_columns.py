@@ -321,7 +321,7 @@ def test_polymarket_page_shows_only_its_columns(client, session_factory, setting
         assert f'class="label r{"" if label == "PnL" else " hide"}">{label}</span>' in html
     assert ">ROI</span>" not in html and "Account value" not in html
     assert ">ROI</a>" not in html  # no roi sort toggle
-    assert ">PnL</a>" in html
+    assert ">PnL</a>" not in html  # one sort only: no sort control at all
     assert "$250,000" in html and "$1,234" in html and "1,234" in html and "$55,000" in html
     assert "Feb 2025" in html
     assert "Polymarket publishes no ROI or cash balance" in html
@@ -329,7 +329,7 @@ def test_polymarket_page_shows_only_its_columns(client, session_factory, setting
     # ?sort=roi on a venue without roi falls back to pnl
     resp = client.get("/watch/discover?venue=polymarket&period=week&sort=roi")
     assert resp.status_code == 200 and "sort=pnl" in resp.text
-    assert 'class="on">PnL</a>' in resp.text
+    assert "sort=roi" not in resp.text  # period tabs link with the fallback sort
 
 
 def test_hyperliquid_page_is_unchanged(client, session_factory, settings):

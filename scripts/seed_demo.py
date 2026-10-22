@@ -2368,9 +2368,10 @@ def seed_leaderboards(db, fetched_at: datetime) -> None:
                 row,
                 LeaderboardDetails(
                     volume=f"{pnl * (4 + i % 6):.2f}",
-                    positions_value=f"{pnl * 0.05 * (1 + i % 4):.2f}",
+                    # lifetime figures scale with all-time pnl, not the period's
+                    positions_value=f"{1_200_000 * 0.87**i * 0.05 * (1 + i % 4):.2f}",
                     markets_traded=60 + i * 37 % 900,
-                    biggest_win=f"{pnl * 0.3:.2f}",
+                    biggest_win=f"{1_200_000 * 0.87**i * 0.2:.2f}",
                     active_since=1_700_000_000 + i * 5_000_000,
                 ),
             )

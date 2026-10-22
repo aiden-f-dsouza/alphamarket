@@ -39,7 +39,7 @@
   <nav class="seg" aria-label="Venue">{% for v in view.venues %}<a href="{{ tab_url(v, view.period, view.sort) }}" class="{{ 'on' if v == view.venue }}">{{ venue_labels[v] }}</a>{% endfor %}</nav>
   {% endif %}
   <nav class="seg" aria-label="Period">{% for p in view.periods %}<a href="{{ tab_url(view.venue, p, view.sort) }}" class="{{ 'on' if p == view.period }}">{{ period_name(p) }}</a>{% endfor %}</nav>
-  <nav class="seg" aria-label="Sort by">{% for s in view.sorts %}<a href="{{ tab_url(view.venue, view.period, s) }}" class="{{ 'on' if s == view.sort }}">{{ view.label(s) }}</a>{% endfor %}</nav>
+  {% if view.sorts | length > 1 %}<nav class="seg" aria-label="Sort by">{% for s in view.sorts %}<a href="{{ tab_url(view.venue, view.period, s) }}" class="{{ 'on' if s == view.sort }}">{{ view.label(s) }}</a>{% endfor %}</nav>{% endif %}
 </div>
 
 {% if view.note %}<p class="small text2" style="line-height:1.6;max-width:760px">{{ view.note }}</p>{% endif %}

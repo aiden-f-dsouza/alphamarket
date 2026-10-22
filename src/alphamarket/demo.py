@@ -1515,13 +1515,16 @@ def discover_sample(venue: str | None, period: str | None, sort: str):
             row = discover.snapshot_row(
                 LeaderboardEntry(address=_discover_address(venue, i), rank=i + 1, pnl=f"{pnl:.2f}")
             )
+            # Lifetime figures scale with an all-time pnl, not the period's: a
+            # biggest win under one day's pnl, or volume 2,000x pnl, reads wrong.
+            lifetime = 2_400_000 * 0.4 * (0.86**i) * rng.uniform(0.85, 1.15)
             discover.merge_details(
                 row,
                 LeaderboardDetails(
-                    volume=volume,
-                    positions_value=f"{round(value * rng.uniform(0.02, 0.4), 2):.2f}",
+                    volume=f"{round(abs(pnl) * rng.uniform(8, 40), 2):.2f}",
+                    positions_value=f"{round(lifetime * rng.uniform(0.05, 0.6), 2):.2f}",
                     markets_traded=rng.randint(40, 1800),
-                    biggest_win=f"{round(abs(pnl) * rng.uniform(0.1, 0.6), 2):.2f}",
+                    biggest_win=f"{round(lifetime * rng.uniform(0.08, 0.35), 2):.2f}",
                     active_since=int(
                         datetime(2023, 1, 1, tzinfo=UTC).timestamp()
                         + rng.randint(0, 3 * 365) * 86400
