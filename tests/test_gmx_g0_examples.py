@@ -7,7 +7,8 @@ through the real valuation engine, so every number the note quotes is
 checked by code. G1 replaces the reference with the connector and keeps the
 expected values.
 
-Fixture rows: tests/fixtures/gmx/g0_examples_2026-10-22.json (README there).
+Fixture rows: tests/fixtures/gmx/g0_examples_2026-10-22.json and
+g0_research_rows_2026-10-22.json (README there).
 """
 
 import json
@@ -23,8 +24,9 @@ from alphamarket import analytics_v2, valuation
 from alphamarket.connectors.base import LegKind
 from alphamarket.money import fixed_to_atoms
 
-FIXTURE = Path(__file__).parent / "fixtures" / "gmx" / "g0_examples_2026-10-22.json"
-ROWS = json.loads(FIXTURE.read_text())
+FIXTURES = Path(__file__).parent / "fixtures" / "gmx"
+ROWS = json.loads((FIXTURES / "g0_examples_2026-10-22.json").read_text())
+RESEARCH = json.loads((FIXTURES / "g0_research_rows_2026-10-22.json").read_text())
 
 USDC = "USDC"
 USDC_DECIMALS = 6
@@ -134,7 +136,9 @@ class Synthetic:
         else:
             self.collateral.pop(a.asset, None)
         self.floor = max(self.floor, sum(self.collateral.values()))
-        if not self.retained and posted < 0 and self.cash > self.floor:
+        # B's invariant (note 2.2): after every action, C <= M. Only a payout can
+        # break it (an increase's deposit leaves F = 0, so C = L <= M).
+        if not self.retained and self.cash > self.floor:
             out = self.cash - self.floor
             self.legs.append(valuation.LegIn(USDC, -out, USDC_DECIMALS, LegKind.WITHDRAWAL, a.at))
             self.cash -= out
@@ -187,9 +191,13 @@ def usd30_fraction(value: Fraction) -> int:
 
 
 ETH = ROWS["eth_short_lifecycle"]
-# Collateral changes (USDC atoms). Increases: K rises by the executed
-# initialCollateralDeltaAmount; the partial close withdrew its
-# initialCollateralDeltaAmount; the full close released the rest.
+# Collateral changes (USDC atoms). REST /v1/trades rows carry no collateral-after,
+# so dK is each row's initialCollateralDeltaAmount (+ on increases, - on decreases),
+# hand-typed here. That this is the change of positionChanges.collateralAmount is
+# an INFERENCE (note 2.5), supported by address B's 20 joined position changes
+# (test_research_collateral_delta_equals_initial_collateral_delta) and by t5: the
+# full close releases 42,010.954459 - 16,127.372685 = 25,883.581774 to the atom.
+# G1 pins it on recorded positionChanges rows of a USDC-collateral address.
 SEQ1 = [
     action(ETH[0], ETH_S, 22_196_954_461),
     action(ETH[1], ETH_S, 9_906_999_999),
@@ -239,6 +247,27 @@ def flows(series):
 
 def drawdown(series) -> Fraction:
     return analytics_v2.index_drawdown(analytics_v2.twr_index(series))
+
+
+def pnl(series) -> int:
+    """P&L net of deposits as analytics_v2.compute_asset_stats takes it: the first
+    point (the anchor day) is the base, so its own flow is not netted again."""
+    return series[-1].equity_micros - series[0].equity_micros - sum(flows(series)[1:])
+
+
+def run_peak(actions, anchor, days):
+    """Option C (note 2.8), Polymarket's convention: the curve shifted by the peak
+    capital invested. For GMX the peak of the cumulative net posting since the
+    anchor is exactly A's total deposits (A deposits only when it is exceeded), so
+    C is A with one deposit of that total placed right after the anchor."""
+    model = Synthetic(True, anchor)
+    for a in actions:
+        model.apply(a)
+    peak = sum(leg.delta_atoms for leg in model.legs if leg.kind is LegKind.DEPOSIT)
+    legs = [leg for leg in model.legs if leg.kind is not LegKind.DEPOSIT]
+    after_anchor = anchor + timedelta(microseconds=1)
+    legs.append(valuation.LegIn(USDC, peak, USDC_DECIMALS, LegKind.DEPOSIT, after_anchor))
+    return valuation.daily_equity_series([], legs, closes(), model.fills, days)
 
 
 # ---- 3.1 cash legs ----------------------------------------------------------------
@@ -336,6 +365,11 @@ def test_example_1_eth_short(retained):
     # Identical in A and B: B's withdrawals are end-of-day flows.
     assert valuation.time_weighted_return(series) == Fraction(46_855_480_790, 42_335_261_656) - 1
     assert drawdown(series) == 1 - Fraction(46_855_480_790, 71_612_569_316)  # 34.57 %
+    # The anchor day's point (07-06) is the base: its 42,335.261656 flow is not netted
+    # again. A: 46,855.480790 - 42,335.261656 = 4,520.219134; B: 42,010.954459
+    # - 42,335.261656 + 4,844.526331 = 4,520.219134 (= 1,180.668692 + 3,663.857639
+    # - 324.307197, the trade's realized net).
+    assert pnl(series) == 4_520_219_134
 
 
 def test_example_1_without_day_start_dating_loses_the_first_day():
@@ -374,6 +408,10 @@ def test_example_2_a_and_b_diverge():
     assert drawdown(b) == 1 - trough_b  # 74.33 %
     assert a_model.cash == 67_074_979_200 and b_model.cash == 42_010_954_459
     assert b_model.floor == 42_010_954_459  # the ETH short's 42,010.954459 stays the floor
+    # The models change the returns, never the dollar P&L:
+    # A: 67,074.979200 - 42,335.261656 = 24,739.717544;
+    # B: 42,010.954459 - 42,335.261656 + 4,844.526331 + 20,219.498410 = 24,739.717544.
+    assert pnl(a) == pnl(b) == 24_739_717_544
 
 
 def test_example_3_day_start_dating_keeps_a_funded_loss():
@@ -388,6 +426,9 @@ def test_example_3_day_start_dating_keeps_a_funded_loss():
             == Fraction(996_493_422, 26_523_587_892) * Fraction(50_504_253_386, 4_757_660_506) - 1
         )  # -60.12 %
         assert drawdown(series) == 1 - Fraction(996_493_422, 26_523_587_892)  # 96.24 %
+        # TWR -60.12 % on a P&L of +20,219.498410 = 50,504.253386 - 26,523.587892
+        # - 3,761.167084: TWR and dollar P&L disagree in sign under A and B alike.
+        assert pnl(series) == 20_219_498_410
         _, late = run(SEQ2, retained, ANCHOR_2, DAYS_2, t1=False)
         assert valuation.daily_returns(late)[1].r is None  # the liquidation day vanishes
         assert (
@@ -395,6 +436,112 @@ def test_example_3_day_start_dating_keeps_a_funded_loss():
             == Fraction(50_504_253_386 - 3_761_167_084, 996_493_422) - 1
         )  # +4,590.76 %
         assert drawdown(late) == 0
+
+
+# ---- 2.8 comparison: B's withdrawals, option C ----------------------------------------
+
+
+def test_b_win_then_loss_at_zero_pnl_shows_a_negative_twr():
+    # Floor 100: one trade wins 50, the next (same 100 posted) loses 50. Dollar P&L 0.
+    # A: r = 150/100 - 1 = +50 %, then 100/150 - 1 = -33.33 %; TWR 1.5 x 2/3 - 1 = 0.
+    # B: the 50 above the floor is a synthetic WITHDRAWAL, so r = (100 + 50)/100 - 1
+    #    = +50 %, then 50/100 - 1 = -50 %; TWR 1.5 x 0.5 - 1 = -25 %. The trader never
+    #    withdrew anything: the wallet still holds the 50.
+    usd = 1_000_000
+    k = "X.00000000-S-PERP"
+    seq = [
+        Action(datetime(2026, 1, 2, 10, tzinfo=UTC), k, 0, "0", 100 * usd, {}),
+        Action(
+            datetime(2026, 1, 2, 14, tzinfo=UTC),
+            k,
+            0,
+            "0",
+            -100 * usd,
+            {LegKind.REALIZED_PNL: 50 * usd},
+        ),
+        Action(datetime(2026, 1, 3, 10, tzinfo=UTC), k, 0, "0", 100 * usd, {}),
+        Action(
+            datetime(2026, 1, 3, 14, tzinfo=UTC),
+            k,
+            0,
+            "0",
+            -100 * usd,
+            {LegKind.REALIZED_PNL: -50 * usd},
+        ),
+    ]
+    anchor = datetime(2026, 1, 1, 12, tzinfo=UTC)
+    days = [date(2026, 1, 1), date(2026, 1, 2), date(2026, 1, 3)]
+    _, a = run(seq, True, anchor, days)
+    _, b = run(seq, False, anchor, days)
+    assert equity(a) == [100 * usd, 150 * usd, 100 * usd]
+    assert equity(b) == [100 * usd, 100 * usd, 50 * usd]
+    assert flows(b) == [100 * usd, -50 * usd, 0]
+    assert valuation.time_weighted_return(a) == 0
+    assert valuation.time_weighted_return(b) == Fraction(-1, 4)
+    assert pnl(a) == pnl(b) == 0
+    # Option C: the peak posting is 100 (all on day 1), so C = A here: TWR 0.
+    assert equity(run_peak(seq, anchor, days)) == equity(a)
+
+
+def test_option_c_peak_invested_capital():
+    # Examples 1 and 2: every deposit is needed on 07-07, so C = A
+    # (+10.68 %, then +58.44 % and a 70.22 % drawdown).
+    c1 = run_peak(SEQ1, ANCHOR_1, DAYS_1)
+    assert equity(c1) == equity(run(SEQ1, True, ANCHOR_1, DAYS_1)[1])
+    assert valuation.time_weighted_return(c1) == Fraction(46_855_480_790, 42_335_261_656) - 1
+    c12 = run_peak(SEQ1 + SEQ2, ANCHOR_1, DAYS_12)
+    assert equity(c12) == equity(run(SEQ1 + SEQ2, True, ANCHOR_1, DAYS_12)[1])
+    assert valuation.time_weighted_return(c12) == Fraction(67_074_979_200, 42_335_261_656) - 1
+    assert drawdown(c12) == 1 - Fraction(21_328_386_320, 71_612_569_316)
+    # Example 3: the peak is 26,523.587892 + 3,761.167084 = 30,284.754976, counted from
+    # the anchor. 09-02: 30,284.754976 - 42.853625 - 25,484.240845 = 4,757.660506, so
+    # r = 4,757.660506 / 30,284.754976 - 1 = -84.29 %; 10-13: 4,757.660506 - 63.675138
+    # + 45,810.268018 = 50,504.253386, r = +961.54 %. TWR = P&L / peak = +66.77 %.
+    c3 = run_peak(SEQ2, ANCHOR_2, DAYS_2)
+    assert equity(c3) == [30_284_754_976, 4_757_660_506, 4_757_660_506, 50_504_253_386]
+    assert valuation.time_weighted_return(c3) == Fraction(50_504_253_386, 30_284_754_976) - 1
+    assert drawdown(c3) == 1 - Fraction(4_757_660_506, 30_284_754_976)  # 84.29 %
+    assert pnl(c3) == 20_219_498_410
+
+
+# ---- dK provenance (note 2.5) and research figures --------------------------------------
+
+
+def test_research_position_change_chain_is_exact():
+    # Address B (WETH collateral, 18 dp), 20 positionChanges over two positions: each
+    # change's collateral after = the previous after +/- collateralDeltaAmount
+    # (+ increase, - decrease), to the wei. 18 links (the first change of each
+    # position has no predecessor in the window).
+    changes = RESEARCH["address_b_position_changes"]
+    assert len(changes) == 20
+    last: dict[str, int] = {}
+    links = 0
+    for c in changes:
+        after, delta = int(c["collateralAmount"]), int(c["collateralDeltaAmount"])
+        key = c["positionKey"]
+        if key in last:
+            sign = 1 if c["type"] == "increase" else -1
+            assert last[key] + sign * delta == after
+            links += 1
+        last[key] = after
+    assert links == 18
+
+
+def test_research_collateral_delta_equals_initial_collateral_delta():
+    # Joined by orderKey, every change's collateralDeltaAmount equals its trade
+    # action's initialCollateralDeltaAmount (6 increases, 14 decreases), while the
+    # increases report non-zero fees beside it: K rose by the order's collateral, the
+    # fees were cash legs, so w = dK - dc = initialCollateralDeltaAmount + fees.
+    changes = RESEARCH["address_b_position_changes"]
+    trades = {t["orderKey"]: t for t in RESEARCH["address_b_trades_by_order_key"]}
+    kinds = []
+    for c in changes:
+        t = trades[c["orderKey"]]
+        assert int(t["initialCollateralDeltaAmount"]) == int(c["collateralDeltaAmount"])
+        kinds.append(c["type"])
+        if c["type"] == "increase":
+            assert int(t["positionFeeAmount"]) - int(t["traderDiscountAmount"]) > 0
+    assert kinds.count("increase") == 6 and kinds.count("decrease") == 14
 
 
 # ---- 4 numeric policy ---------------------------------------------------------------
@@ -439,6 +586,26 @@ def test_quantity_drift_and_full_close_correction():
     assert sum(qtys) == trunc12(exact) == 121_697_951_677_514
     # The XPL close: 690,631.526897078958132301 -> 690,631.526897078958 (132301 dropped).
     assert trunc12(690631526897078958132301) == 690_631_526_897_078_958
+
+
+def test_per_fill_truncation_drift_over_the_research_page():
+    # Address A's ETH/USD [ETH-USDC] short increases of 2026-07-02 in one 300-row
+    # /v1/trades page: 118 rows, 109 with a non-zero size (the others are
+    # collateral-only). Per-fill truncation falls 52 atoms (52e-12 ETH) short of the
+    # truncated sum; the running-position rule falls 0 short.
+    rows = RESEARCH["eth_short_increases_2026_07_02"]
+    assert len(rows) == 118
+    sizes = [int(r["sizeDeltaInTokens"]) for r in rows if int(r["sizeDeltaInTokens"])]
+    assert len(sizes) == 109
+    first4 = [int(r["sizeDeltaInTokens"]) for r in ROWS["eth_short_increases_first4"]]
+    assert sizes[:4] == first4
+    assert trunc12(sum(sizes)) - sum(trunc12(s) for s in sizes) == 52
+    running = previous = booked = 0
+    for s in sizes:
+        running += s
+        booked += trunc12(running) - previous
+        previous = trunc12(running)
+    assert booked == trunc12(sum(sizes))
 
 
 def test_example_1_quantities_have_no_drift():

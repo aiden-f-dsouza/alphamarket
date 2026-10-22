@@ -8,10 +8,16 @@ mapping summary, watchlist, leaderboard, known gaps) in the shape of
 `docs/venues/hyperliquid.md`.
 
 Inputs: `docs/research/2026-10-22-gmx.md`, the raw responses in the research
-fixtures dir, and the rows in `tests/fixtures/gmx/g0_examples_2026-10-22.json`.
-Every number in the worked examples below is checked against the real
-valuation engine by `tests/test_gmx_g0_examples.py`. Amounts are USDC, shown
-at 6 dp; the ledger stores them as integer micros (1.000000 = 1,000,000).
+fixtures dir, and the anonymised rows in `tests/fixtures/gmx/`
+(`g0_examples_2026-10-22.json` for the worked examples,
+`g0_research_rows_2026-10-22.json` for the figures quoted from wider research
+rows). Every number in the worked examples below is checked against the real
+valuation engine by `tests/test_gmx_g0_examples.py`, as are the collateral
+chain (2.1) and the quantity drift (4.2). Other research figures (leaderboard
+medians, market and page counts, fee-impact statistics) are read from the
+research fixtures dir, outside the repo, and are not pinned by a test.
+Amounts are USDC, shown at 6 dp; the ledger stores them as integer micros
+(1.000000 = 1,000,000).
 
 ## Terms-of-service position
 
@@ -26,25 +32,47 @@ use or scraping). Until then, preflight (S9) keeps `gmx_arbitrum` out of prod
 ## Decisions requested (summary)
 
 **Decision 4, account model. Recommendation: B, payout-as-withdrawal with a
-capital floor**, not the plan's A (retained payout). Both are specified and
-worked through below on real fixture trades.
+capital floor, on balance**, over the plan's A (retained payout). The margin
+is narrow: A is the better pick if records on every venue must be measured
+on one basis. Both are specified and worked through below on real fixture
+trades, with C, Koine's existing convention for a venue without a balance
+(Polymarket's return on peak invested capital), as a third option.
 
-- They agree until a trader's profit passes the most collateral it has ever
-  posted at once. After that, A keeps measuring returns against every dollar
-  ever won, and B against the capital the trader actually deploys. On
-  2026-10-22 the median top-100 all-time trader on GMX's own leaderboard had
-  made 1.06x its max capital, so A would report about half of B's daily
-  returns and drawdowns for it. On the month board the median is 0.40x
-  (section 2.8).
+- A and B agree until the trader's profit **since the watch** passes the most
+  collateral posted at once since the watch. After that, A measures returns
+  against every dollar won since the watch, and B against the capital the
+  trader deploys. The dilution builds with time watched. At the median pace
+  of GMX's top-100 month board on 2026-10-22 (PnL 0.395x max capital in a
+  month), A's daily returns and drawdowns are about 0.72x B's after one month
+  of watching; at the week board's median (0.118x), about 0.89x after a
+  week (section 2.8).
 - Paper copying sizes a follower by creator equity (`paper.size_asset_order`).
   Under A that equity grows with banked profit, so the follower's copied
-  leverage shrinks the more successful the creator is. Under B it stays on
-  the scale the creator actually trades.
+  leverage shrinks the more successful the creator is. That is also what
+  happens on every other venue when a trader leaves profit in the account.
+  Under B it stays on the scale the creator actually trades.
 - B is close to GMX's own leaderboard ROI (PnL over max capital), which
   `/watch/discover` shows next to it.
-- Costs of B: more ledger rows (a WITHDRAWAL per profitable close), a raw
-  equity chart that sits flat at the floor while the TWR index rises, and a
-  floor that never comes down.
+- Costs of B:
+  - **Withdrawals the trader never made.** B books a WITHDRAWAL after every
+    profitable close above the floor. A win followed by an equal loss then
+    shows a negative TWR at zero dollar P&L: floor 100, +50 (withdrawn),
+    then -50 gives **-25.00 %** under B and 0.00 % under A, though the
+    trader withdrew nothing (2.8, pinned by a test).
+  - **A different basis from every other venue.** A is how Koine measures a
+    Hyperliquid (or any) trader who leaves profit in the account. B is how it
+    would measure one who withdraws every profit above a floor. Under B, a
+    GMX record's TWR, drawdown, Sharpe, Sortino and risk score sit on a
+    different basis from the other records beside it on `/watch` (and in the
+    marketplace table if a GMX record is ever public). The methodology must
+    say so (section 10).
+  - More ledger rows (a WITHDRAWAL per profitable close or claim above the
+    floor), and the `daily_equity` extras sit at the floor while the TWR
+    index rises (the charts already plot the TWR growth curve).
+- Under either model the base only rises: one large posting dilutes every
+  later return, and that is gameable (2.9, limit 7). And under either model
+  the TWR and the dollar P&L can differ in sign (example 3: -60.12 % on
+  +20,219.50).
 
 Two rules apply under either model, and both are part of the recommendation:
 
@@ -55,7 +83,8 @@ Two rules apply under either model, and both are part of the recommendation:
   needed** (section 2.4). Without this, a loss funded by a same-day deposit
   disappears from the TWR. In worked example 3 the record of a trader who
   was liquidated shows +4,590.76 % with no drawdown, instead of -60.12 %
-  with a 96.24 % drawdown.
+  with a 96.24 % drawdown. T1 recovers the first funded day only when it
+  falls after the anchor day, which is the base of every record (2.4).
 
 **Decision 5, numeric policy. Recommendation: accept**, in this form:
 
@@ -68,8 +97,9 @@ Two rules apply under either model, and both are part of the recommendation:
   position tolerance is **0**.
 - The literal per-fill rule with a full-close correction also works. It
   drifts by up to 1 atom per fill while a position is open: 52 atoms (52e-12
-  ETH) over 109 real fills in one day of the fixtures. It then needs a
-  tolerance, proposed at 1,000,000 atoms (section 4.2).
+  ETH) over 109 real fills in eight hours of one day (pinned on the
+  anonymised rows). It then needs a tolerance, proposed at 1,000,000 atoms
+  (section 4.2).
 - The `positions_verified` tier's public wording is in section 8.
 
 What GMX coverage costs, honestly:
@@ -90,9 +120,11 @@ What GMX coverage costs, honestly:
   back to the wallet. The amount actually sent to the wallet is not public.
 - **Collateral after every change is public.** GraphQL `positionChanges`
   carries `collateralAmount` (after) and `sizeInTokens` (after) for every
-  change of every position, joined to its trade action by `orderKey`. On the
-  fixture address with 20 position changes the chain is exact: each change's
-  collateral before equals the previous collateral after.
+  change of every position, joined to its trade action by `orderKey`. On
+  fixture address B's 20 position changes (WETH collateral, two positions)
+  the chain is exact to the wei: each change's collateral after equals the
+  previous one's plus or minus its `collateralDeltaAmount` (18 links; test
+  `test_research_position_change_chain_is_exact`).
 - **Every cash component of a trade is public:**
   - USD figures: `basePnlUsd`, `totalImpactUsd` / `priceImpactUsd`,
     `swapImpactUsd`, `swapFeeUsd` (30-dp USD).
@@ -151,9 +183,16 @@ Both models book the same cash legs. They differ only in the synthetic flows
 | Event | A: retained payout | B: floor |
 |---|---|---|
 | increase, wallet posts `w > 0` | `DEPOSIT max(0, w - F)` (draw from free cash first) | same |
-| decrease, wallet paid `-w > 0` | nothing: the payout stays as free cash | after the legs, `WITHDRAWAL C - M` if `C > M` |
-| funding claim `x` | FUNDING `+x`, stays | FUNDING `+x`, then the same `C > M` withdrawal |
+| decrease, wallet paid `-w > 0` | nothing: the payout stays as free cash | the invariant below |
+| funding claim `x` | FUNDING `+x`, stays | FUNDING `+x`, then the invariant below |
 | floor | none | `M = max(M, L)` after every action |
+
+**B's invariant:** after every action (its legs, any deposit, then the floor
+update), if `C > M`, book `WITHDRAWAL C - M`. So `C ≤ M` holds after every
+action. Only a payout can break it in practice: an increase that needs a
+deposit leaves `F = 0`, so `C = L ≤ M`, and one that draws on free cash
+lowers `C` by its fees. The rule is stated on `C` and `M`, not on the sign
+of `w`, so it covers trades and claims alike.
 
 Under B, profit first refills the account up to the floor, and only the part
 above it leaves. A loss below the floor stays in the record until profit
@@ -173,17 +212,22 @@ synthetic account follows that rule:
     (exact USDC atoms from `/v1/positions` `collateralAmount`).
 
   So `C = L_anchor`, `F = 0`, and under B `M = L_anchor`.
-- **Before the anchor**, the connector emits the path-independent legs of
-  each action (FILL_BASE, REALIZED_PNL, FEE, INTEREST, FUNDING, LIQUIDATION,
-  claims) for the history display, but no DEPOSIT or WITHDRAWAL. It still
-  replays `K_p`, the exact sizes and the set of in-scope markets from genesis
-  (all path-independent), so its state is complete when it crosses the
-  anchor.
+- **Before the anchor**, the connector emits every leg that does not depend
+  on `C` or `M` (FILL_BASE, REALIZED_PNL, FEE, INTEREST, FUNDING,
+  LIQUIDATION, claims) for the history display, but no DEPOSIT or
+  WITHDRAWAL. It still replays `K_p`, the exact sizes `S_p` and the set of
+  in-scope markets from genesis, so its state is complete when it crosses
+  the anchor.
+  - The cash legs depend only on their own row. FILL_BASE does not: under
+    the running-position rule (4.2) its quantity is `trunc12(S_after) -
+    trunc12(S_before)`, so it depends on `S_before`, which is deterministic
+    from genesis but path-dependent. The pre-anchor replay must carry `S_p`.
 - **At the first action after the anchor**, the connector sets `C := L`
   (and `M := L`) from its replayed `K_p`. From there the rules of 2.2 apply.
   The replayed `L` equals the anchor's `USDC` row, because both are the
-  on-chain collateral of the same positions at the same instant. The G1
-  replay test pins this.
+  on-chain collateral of the same positions at the same instant, provided
+  both indexers have caught up to that instant (section 8, "Anchor timing").
+  The G1 replay test pins this.
 
 Why not start the synthetic cash at genesis, as the plan first read? The
 anchor vector is written synchronously when the address is watched
@@ -220,9 +264,26 @@ Consequences, stated in methodology:
 
 - The equity point of the day before a funded day includes that deposit.
   It is revised when the deposit is ingested.
+- **The stored DEPOSIT leg is dated up to 24 hours before the real
+  transaction.** The ledger and the history display show that date, so the
+  description of the leg carries the real time ("needed at 16:40:10 UTC,
+  counted from the start of the day").
+- **Gains made earlier on the same day before a posting are understated.**
+  A day with gain `G` before a posting `D` (made later that day) returns
+  `G / (E_(d-1) + D)` instead of `G / E_(d-1)`. This is conservative, but it
+  is a real distortion for a trader who adds collateral intraday after a win.
+- **The anchor day is the base, as on every venue.** `compute_asset_stats`
+  starts the series at the anchor day, and the first point's return is never
+  counted. So when the first posting falls on the anchor day itself, its
+  deposit (dated `anchor_at + 1 µs`) and that day's PnL are both in the base
+  `E_0`, and the day's PnL never reaches the TWR. T1 recovers the first
+  funded day only when the anchor precedes it: example 1's +10.68 % (rather
+  than -18.61 %) holds because the anchor is 07-06 and the first posting
+  07-07.
 - `equity_before` a fill (signal sizing) includes deposits needed later the
   same day. For the opening fill of a flat account this is the only
-  non-zero base paper sizing can have.
+  non-zero base paper sizing can have, provided the deposit is already
+  ingested when signals run (section 11, item 8: stream order).
 
 A shared alternative, a per-profile flow timing in `valuation.daily_returns`
 (deposits at the start, withdrawals at the end), gives the same numbers
@@ -238,7 +299,25 @@ from open to full close: 500.039352125288774211 ETH out, and
 account's only activity, watched flat at 2026-07-06 12:00 UTC. Daily closes
 are GMX's ETH `ohlcv` closes.
 
-Actions (all values from the fixture rows; legs per section 3.1):
+Actions (legs per section 3.1). The cash legs come from the fixture rows.
+The `dK` column does not: the rows are REST `/v1/trades` rows, which carry no
+collateral after the change, so `dK` is each row's
+`initialCollateralDeltaAmount` (added on increases, removed on decreases),
+typed into the test by hand. That this is the change of
+`positionChanges.collateralAmount` is an **inference**, supported by two
+checks:
+
+- on address B's 20 position changes joined to its trade actions by
+  `orderKey`, every `collateralDeltaAmount` equals the trade's
+  `initialCollateralDeltaAmount` (6 increases, 14 decreases), and the
+  increases report their fees beside it (test
+  `test_research_collateral_delta_equals_initial_collateral_delta`);
+- here, t5 (the full close) releases 25,883.581774 = 42,010.954459 -
+  16,127.372685 to the atom, which is what the inference predicts for the
+  collateral left after t4.
+
+G1 pins it on recorded `positionChanges` rows of a USDC-collateral address
+(section 11, item 11).
 
 | # | Time (UTC) | Action | Cash legs | `dc` | `dK` | `w = dK - dc` |
 |---|---|---|---|---|---|---|
@@ -267,7 +346,10 @@ Synthetic flows and state after each action:
 
 All three deposits (42,335.261656) are dated 2026-07-06 23:59:59.999999 (T1).
 
-Daily series. The unrealized PnL is 500.039352125288 x (1,801.208570536390 -
+Daily series. 07-06 is the anchor day, which is where the real pipeline
+(`analytics_v2.compute_asset_stats`) starts the series: its point is the
+base of the TWR and its own flow, F(07-06), is not netted again when P&L is
+taken (`net_flows` sums the points after the first). The unrealized PnL is 500.039352125288 x (1,801.208570536390 -
 close), truncated toward zero to the micro:
 
 | Day | ETH close | Unrealized | E (A) | F (A) | E (B) | F (B) | `r_d` (A and B) | TWR index |
@@ -294,9 +376,11 @@ Results:
   chain telescopes).
 - **Max drawdown 34.57 %** under both, = 1 - 46,855.480790 / 71,612.569316
   (from the 07-08 peak).
-- The trade realized +4,520.219134 net (1,180.668692 + 3,663.857639 -
-  324.307197) on 42,335.261656 of synthetic deposits. It had been +29.6k
-  unrealized on 07-08.
+- **P&L net of deposits +4,520.219134** under both: A, 46,855.480790 -
+  42,335.261656; B, 42,010.954459 - 42,335.261656 + 4,844.526331 (its
+  withdrawals are flows after the base). It is the trade's realized net
+  (1,180.668692 + 3,663.857639 - 324.307197) on 42,335.261656 of synthetic
+  deposits. It had been +29.6k unrealized on 07-08.
 - Without T1 the deposits land on 07-07, `E(07-06)` = 0, and the first day
   is undefined. The TWR becomes 46,855.480790 / 57,571.464309 - 1 =
   **-18.61 %**, for a trade that made money.
@@ -367,6 +451,9 @@ The hand formulas:
   - A: 1 - 21,328.386320 / 71,612.569316 = **70.22 %**.
   - B: 1 - (46,855.480790 x 16,483.859989) / (42,010.954459 x 71,612.569316) =
     **74.33 %**.
+- **P&L net of deposits +24,739.717544 under both** (A: 67,074.979200 -
+  42,335.261656; B: 42,010.954459 - 42,335.261656 + 4,844.526331 +
+  20,219.498410). The models change the returns, never the dollar P&L.
 - End equity: A 67,074.979200, B 42,010.954459. A's next trade is measured
   against 1.60x B's base.
 
@@ -392,44 +479,108 @@ open now needs a deposit of 26,523.587892. Later the XPL open needs
 The numbers are the same under A and B: B's 24,023.519119 withdrawal on
 10-13 is an end-of-day flow.
 
+Note the sign: with T1 the TWR is -60.12 % while the P&L net of deposits is
+**+20,219.498410** (50,504.253386 - 26,523.587892 - 3,761.167084), under A
+and B alike. A TWR chains daily returns and ignores how much capital each
+day had: a 96 % loss on 26.5k followed by a 962 % gain on 4.8k compounds to
+a loss. That is the TWR's definition on every venue, not an artefact of
+either model, but a reader of a GMX record will meet it often, because
+collateral swings with every posting. Option C (2.8) gives +66.77 % here.
+
 ### 2.8 Comparison and recommendation
 
-| | A: retained payout | B: floor |
-|---|---|---|
-| Example 1 (one trade from a flat start) | TWR +10.68 %, drawdown 34.57 % | identical |
-| Example 2 (liquidation, then a win) | TWR +58.44 %, drawdown 70.22 % | TWR +63.95 %, drawdown 74.33 % |
-| Liquidation day | -54.48 % (diluted by the 4,844.53 banked in July) | -60.76 % |
-| Base for the next trade | 67,074.98 and growing with every win | 42,010.95 (the most ever posted at once) |
-| Dilution over time | grows without bound with success | none from profit; a one-off large post raises the floor for good |
-| Paper copy sizing (`F / C` in `paper.size_asset_order`) | the follower's mirrored leverage falls as the creator wins | stable on the creator's deployed scale |
-| Raw equity chart | rises with retained profit (intuitive) | flat at the floor after wins; the TWR index carries the story |
-| Ledger rows | fewer | plus one WITHDRAWAL per profitable close or claim above the floor |
-| Cursor state | `C`, `K_p` | `C`, `K_p`, `M` |
-| Relation to GMX's own ROI (`pnlBps` = PnL / maxCapital) | none | same idea (max capital as the base); not the same number (TWR vs PnL ratio) |
-
-How large A's dilution gets on real accounts. Under A, a trader's base after
-a while is roughly the floor plus everything won, so A's daily returns are
-roughly B's divided by (1 + PnL / max capital). GMX publishes both figures
-per address. On 2026-10-22 (`accountPnlRankMetrics`, top 100 by PnL):
-
-| Board | Median PnL / max capital | Addresses above 1.0 | A's returns vs B's (median) |
+| | A: retained payout | B: floor | C: peak invested (Polymarket's convention) |
 |---|---|---|---|
-| all time | 1.055 | 52 | about 0.49x |
-| month | 0.395 | 19 | about 0.72x |
-| week | 0.118 | 6 | about 0.89x |
+| Example 1 (one trade from a flat start) | TWR +10.68 %, drawdown 34.57 % | identical | identical |
+| Example 2 (liquidation, then a win) | TWR +58.44 %, drawdown 70.22 % | TWR +63.95 %, drawdown 74.33 % | as A |
+| Example 3 (funded liquidation, then a win; P&L +20,219.50) | TWR -60.12 %, drawdown 96.24 % | identical | TWR +66.77 %, drawdown 84.29 % |
+| Win 50, then lose 50 on a floor of 100 (P&L 0) | TWR 0.00 % | **TWR -25.00 %** | TWR 0.00 % |
+| Liquidation day (example 2) | -54.48 % (diluted by the 4,844.53 banked in July) | -60.76 % | as A |
+| Base for the next trade | 67,074.98 and growing with every win | 42,010.95 (the most posted at once since the watch) | as A, plus capital first needed later |
+| Dilution over time | grows with profit since the watch | none from profit | as A, and early days diluted by capital needed only later |
+| Basis against other venues | the same: how Koine measures any trader who leaves profit in the account | different: as if every profit above the floor were withdrawn; the methodology must say so | Polymarket's fills-only basis (a P&L ratio, not a TWR over flows) |
+| Paper copy sizing (`F / C` in `paper.size_asset_order`) | the follower's mirrored leverage falls as the creator wins, as on other venues | stable on the creator's deployed scale | as A |
+| Synthetic rows | DEPOSIT when a posting exceeds free cash | DEPOSIT, plus one WITHDRAWAL per profitable close or claim above the floor | none (a computed shift) |
+| Past figures revised | the day before a funded day (T1) | the same | every past return and drawdown, whenever the peak rises |
+| `daily_equity` extras | rise with retained profit | sit at the floor after wins (charts plot the TWR growth curve on every v2 page, so nothing visible changes) | shifted by the peak |
+| Cursor state | `C`, `K_p` | `C`, `K_p`, `M` | `C`, `K_p` |
+| Shared code | S-G1 | S-G1 | S-G1, plus a peak-invested path in `analytics_v2` |
+| Relation to GMX's own ROI (`pnlBps` = PnL / maxCapital) | none | same idea (max capital as the base); not the same number (TWR vs PnL ratio) | close (P&L over peak capital) |
 
-The #1 all-time address (fixture address A): PnL 8,278,357 USD on max
-capital 7,432,165 (`pnlBps` 11,138). Because the account starts at the watch
-anchor (2.3), A's dilution only builds up after the watch, but it builds up
-fastest on exactly the addresses people will watch: the top of the
-leaderboard.
+All figures in this table are pinned by `tests/test_gmx_g0_examples.py`.
 
-**Recommendation: B.** The Koine numbers that matter for a watched GMX
-address are its recent returns, its drawdowns, and a paper-copy size that
-mirrors how it trades. A degrades all three in proportion to how well the
-trader has done. B keeps them on the trader's deployed capital at the cost
-of a floor that only ratchets up. If the founder picks A, everything else in
-this note stands unchanged: drop `M` and the withdrawal rule.
+**B's withdrawals and a zero-P&L record.** The trader posts 100, closes for
++50, posts the same 100 again and closes for -50. Dollar P&L is 0, and the
+trader withdrew nothing: the 50 won first is still in the wallet. Under
+B the 50 above the floor is booked as a WITHDRAWAL, so the second trade
+loses 50 of 100: +50 % then -50 %, TWR **-25.00 %**. Under A it loses 50 of
+150: +50 % then -33.33 %, TWR 0.00 %. B's TWR is the compounded return on
+the capital deployed per trade, which is a defensible reading, but it
+attaches to withdrawals the trader never made, and a reader comparing it with
+the record's P&L will find it hard to follow. (TWR and P&L can also differ
+in sign under A, as example 3 shows; B adds cases A does not have.)
+
+**How large A's dilution gets.** Under A, a trader's base after a while is
+roughly the floor plus everything won **since the watch** (the account
+starts at the anchor, 2.3), so A's daily returns are roughly B's divided by
+(1 + PnL since the watch / max capital since the watch). GMX publishes PnL
+and max capital per address and period (`accountPnlRankMetrics`, each
+period's own figures; the month and all-time `maxCapital` of one address
+differ). On 2026-10-22, top 100 by PnL, if a watched address keeps its
+board's median pace:
+
+| Watched for | Median PnL / max capital (board) | A's returns vs B's |
+|---|---|---|
+| one week | 0.118 (week; 6 of 100 above 1.0) | about 0.89x |
+| one month | 0.395 (month; 19 of 100 above 1.0) | about 0.72x |
+| three months, if the month pace held | 3 x 0.395 | about 0.46x |
+
+The all-time board's median, 1.055 (52 of 100 above 1.0), would give about
+0.49x, but only for an address watched since its first trade, which never
+happens. The #1 all-time address (fixture address A) has made 8,278,357 USD
+on max capital 7,432,165 (`pnlBps` 11,138), so its past is no guide to the
+first months of a watch. The dilution builds fastest on the addresses at the
+top of the boards, which are the ones people will watch.
+
+**Recommendation: B, on balance.** The Koine numbers that matter for a
+watched GMX address are its recent returns, its drawdowns, and a paper-copy
+size that mirrors how it trades. Under A all three drift toward zero in
+proportion to how well the trader has done since the watch (about 0.72x
+after a month at the month board's median pace, and falling). B keeps them
+on the trader's deployed capital. Its price is withdrawals the trader never
+made, with the zero-P&L case above, and a basis that differs from every
+other venue, which the methodology states (section 10).
+
+**When to pick A instead.** If records across venues must mean the same
+thing number for number (a GMX address and a Hyperliquid address side by
+side on `/watch`), A is the right choice. It is exactly how Koine measures
+any trader who leaves profit in the account, it books no withdrawal nobody
+made, and its dilution is the one every other venue already has. If the
+founder picks A, everything else in this note stands unchanged: drop `M` and
+the invariant of 2.2.
+
+**Option C, return on peak invested capital.** The methodology's
+"Verification tiers" gives Polymarket, which has no observable balance
+either, a return on peak invested capital: the ledger is anchored at zero
+cash and the curve is shifted by the deepest the cash went below the anchor.
+The GMX analogue is the peak of the cumulative net posting `sum of w` since
+the anchor. That peak is exactly A's total deposits, because A deposits only
+when it is exceeded, so C is A with every deposit moved to the anchor (test
+`test_option_c_peak_invested_capital`). It needs no synthetic DEPOSIT or
+WITHDRAWAL rows and no T1 backdating, and its total return is P&L over peak
+capital, so it never shows a loss for a profitable record (example 3:
++66.77 % against -60.12 %). It is not proposed:
+
+- The shift is recomputed whenever the peak rises, so every past daily
+  return and drawdown of the record changes after the fact. A and B revise
+  at most the point of the day before a funded day.
+- It has A's dilution by banked profit, and adds one: early returns are
+  measured against capital the trader first posted later (the methodology
+  already says so for Polymarket).
+- Asset venues have no peak-invested path. `stats.peak_invested` serves the
+  binary replay, and `analytics_v2` computes a TWR over ledger flows, so C
+  is a shared change in `analytics_v2` for POSITIONS-mode venues, where A
+  and B need S-G1 alone.
 
 Rejected, for the record. Plain payout-as-withdrawal (no floor), which the
 plan dismissed because flat midnights leave no defined return, is computable
@@ -443,7 +594,7 @@ once deposits follow T1. It is still rejected:
   becomes -55.86 % with a 97.54 % drawdown, for an account that ended up
   over 20,000 USD ahead.
 
-### 2.9 Limits the methodology must state (whichever model)
+### 2.9 Limits the methodology must state
 
 1. **Returns are on collateral, not on the trader's wallet.** GMX positions
    commonly run 10-50x on their collateral, so daily returns are leveraged.
@@ -461,8 +612,19 @@ once deposits follow T1. It is still rejected:
    in these rows. Fees are booked in USDC tokens and PnL in USD, so the
    depeg is not counted: 0.33 on t4's 1,147.98 of fees.
 6. **v1 covers USDC and USDC.e collateral only** (section 3.3).
-7. **Under B, the floor only rises.** One unusually large posting dilutes
-   every later return.
+7. **The base only rises, and that is gameable.** Under B a one-off large
+   posting raises the floor for good. Under A (and C) a posting closed flat
+   stays in the account as retained free cash, or in the peak. Either way it
+   dilutes every later return, every later drawdown and the risk score. It
+   is cheap to do: a collateral top-up of an open position, withdrawn a
+   minute later, costs only execution fees and lowers every later drawdown
+   in proportion. Koine does not correct for it in v1; the methodology says
+   so.
+8. **TWR and dollar P&L can differ in sign** (example 3: -60.12 % on
+   +20,219.50). Collateral swings with every posting, so this happens more
+   often than on a venue with a standing balance. The page shows both.
+9. **Under B only: a different basis from other venues** (2.8), and
+   withdrawals the trader never made.
 
 ## 3. Leg mapping
 
@@ -594,7 +756,11 @@ The dropped parts add up to 1.752502e-12. Then:
 
 - The sum of the truncated fills, 121,697,951,677,513 atoms, is **1 atom
   short** of the truncated position, 121,697,951,677,514.
-- Over all 109 such fills that day the shortfall is 52 atoms (52e-12 ETH).
+- Over all 109 non-zero ETH short increases in the same 300-row page
+  (2026-07-02 09:39 to 17:43 UTC; 118 rows, 9 of them collateral-only) the
+  shortfall is 52 atoms (52e-12 ETH). Test
+  `test_per_fill_truncation_drift_over_the_research_page`; the rows are in
+  `g0_research_rows_2026-10-22.json`.
 - If the short is closed by one decrease of its exact size, per-fill
   truncation books 121,697,951,677,514 back. The ledger is left at **+1
   atom**: a phantom long on an `-S` instrument, whose size must stay ≤ 0.
@@ -642,6 +808,11 @@ a test-covered branch if `S` crosses zero inside such a fill.
 - Daily closes: `/v1/prices/ohlcv?timeframe=1d` of the **index token**,
   decimal strings, used for both `-L` and `-S` instruments of every market
   on that index (section 6).
+  - Koine's day is the UTC day, and the worked examples assume each `close`
+    is the last price before 00:00 UTC of the next day. The recorded candles'
+    `timestamp`s are UTC midnights (for example 1792627200000 ms), which
+    fits, but whether the close is taken at the next midnight and not at
+    some other cut is [VERIFY] (section 12).
 - The unrealized PnL uses `valuation`'s average-cost entry, which equals
   GMX's `sizeInUsd / sizeInTokens` to within the 12-dp quantity truncation.
 
@@ -870,6 +1041,35 @@ The profile has `balance_observable=False`, `reconcile_mode=POSITIONS`,
   - Claimable funding (`claimableLongTokenAmount`,
     `claimableShortTokenAmount`) is not reconciled in v1.
 
+**Anchor timing, a risk to tolerance 0 and to `C`.** The anchor's position
+rows and its `USDC` row come from REST `/v1/positions` (the GMX API's
+indexer), read at `anchor_at`, which is Koine's clock. The fills and `K_p`
+come from the squid, a different indexer, and are compared with
+`anchor_at` by block time. The two indexers lag the chain independently:
+
+- A fill executed in the REST indexer's lag window just before `anchor_at`
+  is missing from the snapshot. Being before the anchor, its legs are
+  display only, so the ledger never counts it.
+- A fill the snapshot already includes but whose block time is after
+  `anchor_at` (clock skew) is counted twice: in the anchor vector and again
+  as a post-anchor fill.
+
+Either way the difference is a whole fill, so the first nightly reconcile
+quarantines the account (under any tolerance, not only 0), and the replayed
+`L` no longer equals the anchor's `USDC` row, so `C` and `M` start wrong.
+`reconcile.take_asset_anchor` already waits out fills within 5 s of
+`anchor_at`, using one `fetch_asset_fills_page(None, t0 - 5 s)`, but the
+connector's 300 s finality margin (rule 7.5) would hide exactly those fills
+from that check. G1 must (section 11, items 10 and 11):
+
+- let that check see fills inside the finality margin (a raw query for the
+  window, no legs) [VERIFY how the connector tells the call from a sync
+  start], and make `fetch_balances` compare the REST snapshot's indexed
+  block or time, if the API exposes one, with the squid's, retrying while
+  either is behind `t0` [VERIFY];
+- include in the replay test a fill seconds before the anchor and one
+  seconds after it.
+
 Proposed wording for the methodology page (the dashboard label "positions
 verified nightly · cash reconstructed" and the note in
 `public.verification_view` already exist):
@@ -911,10 +1111,17 @@ New, found by G0:
 - **S-G3 (cosmetic, before any public GMX record):** an `underlying` rule in
   `valuation.exposure` and the concentration flag that maps
   `<INDEX>.<tag>-<L|S>-PERP` to `<INDEX>` (section 6).
-- **S-G4 (cosmetic, under B):** for POSITIONS-mode venues, the watch page
-  charts the TWR index rather than the raw equity, which sits flat at the
-  floor.
-- **S-G5 (methodology merge):** section 10.
+- **S-G4 (methodology merge):** section 10.
+- **S-G5 (proposed, before G1 merges): no signal before its funding is
+  ingested.** `ingest._sync_assets` runs the asset-fills stream before the
+  events stream, and the SIGNALS job runs after the sync. If a sync stops
+  between the two streams (`BudgetExhausted`, `RateLimited`), a GMX fill is
+  ingested while the DEPOSIT that funds it is not, and its signal gets
+  `creator_equity_unknown` or an equity without the deposit (2.4). Either
+  run the events stream first for synthetic-cash venues (a profile flag
+  read by `_sync_assets`), or have the signals pass skip fills newer than
+  the account's events cursor until it catches up. The main session picks
+  one; G1 tests the chosen order.
 
 Deviations from the plan's W-G text, for the main session to accept:
 
@@ -939,16 +1146,37 @@ between the wallet and a position is worked out from the position's
 collateral before and after the trade (`w = collateral change - cash legs`).
 When a position needs more than the account's free cash, Koine books the
 shortfall as a deposit, dated at the start of that UTC day so that it counts
-as capital for the whole day it was at risk.
+as capital for the whole day it was at risk. The ledger therefore shows the
+deposit up to 24 hours before the trade that needed it; its description
+gives the real time. A gain made earlier the same day, before the posting,
+is measured against the capital including that posting, so it is
+understated. The day the address is watched is the base of the record, as on
+every venue: a position opened and closed on that day does not count in the
+return.
 
 *[Model B]* Payouts first refill the account up to the most collateral it
 has ever had posted at once since it was watched. Anything above that is
 treated as withdrawn, so returns are measured against the capital the
-trader deploys and not against everything they have won.
+trader deploys and not against everything they have won. **These returns
+are on a different basis from Koine's other venues.** Elsewhere, profit the
+trader leaves in the account stays in the base; here it is treated as if
+the trader withdrew it, although they withdrew nothing. Total return,
+drawdown, Sharpe, Sortino and the risk score of a GMX record are therefore
+not directly comparable with those of a record on another venue. One
+consequence: a winning trade followed by an equal losing trade on the same
+collateral shows a negative return (+50 % then -50 %, -25 % in all) while
+the dollar P&L is zero.
 
 *[Model A instead]* Payouts stay in the account. Returns are measured
 against everything the trader has posted and won since the account was
-watched, so recent returns of a very profitable trader are diluted.
+watched, as on any venue where the trader leaves profit in the account, so
+recent returns of a very profitable trader are diluted.
+
+Under either model, capital that was posted once stays in the base: a large
+posting, even one withdrawn a minute later, lowers every later return and
+drawdown. Koine does not correct for this. A return over time (TWR) and the
+dollar P&L can also differ in sign, because collateral grows and shrinks
+with every posting.
 
 Limits (2.9) follow, in plain words.
 
@@ -1032,7 +1260,10 @@ or G1 stops and reports.
      - a page boundary inside one timestamp;
      - a missing join (raises);
      - a claim tie with a trade action in the same second;
-     - the anchor in the middle of a page.
+     - the anchor in the middle of a page;
+     - stream order (S-G5): a sync stopped after the fills stream and
+       before the events stream must not yield a signal sized without the
+       deposit that funds its fill. Stop and report if S-G5 has not landed.
 9. **Restart test** (7.7) over a recorded multi-page history of one
    in-scope address: identical legs from `None` and from every page
    boundary. Also test through `ingest`: re-ingesting gives duplicates
@@ -1043,12 +1274,21 @@ or G1 stops and reports.
       ±trunc12(sizeInTokens), 12, entry_price=fixed_to_decimal_str(entryPrice,
       30), mark_price=...)`;
     - `USDC` = the sum of their `collateralAmount`;
-    - `equity_usd_micros=None`.
+    - `equity_usd_micros=None`;
+    - the anchor-timing guards of section 8 (fills inside the finality
+      margin visible to `take_asset_anchor`'s settle check; the REST
+      snapshot not behind `t0`).
 11. **Replay test** (plan exit). Replaying the recorded history of one
     in-scope address up to the `/v1/positions` snapshot time must give:
     - every size equal to the snapshot's `trunc12(sizeInTokens)` (tolerance 0);
     - every `K_p` equal to `collateralAmount`, exactly;
-    - `L` equal to the anchor's `USDC` row.
+    - `L` equal to the anchor's `USDC` row;
+    - on every recorded change, `collateralAmount` after minus before equal
+      to the joined trade action's `initialCollateralDeltaAmount` (the
+      inference behind the worked examples' `dK`, 2.5), or the examples'
+      `dK` are corrected from the recorded rows;
+    - the same results with a fill a few seconds before the anchor and one
+      a few seconds after it (section 8, "Anchor timing").
 
     Record a fresh in-scope address for this (address B in the G0 fixtures
     is WETH collateral). Anonymise as `tests/fixtures/gmx/README.md`
@@ -1109,3 +1349,13 @@ or G1 stops and reports.
 - Whether `claimableFundingFeeInfos` gives a per-event claimable record with
   token amounts. If it does, booking at accrual becomes possible (5).
 - Squid and API rate limits, and SQD Cloud terms (plan).
+- That `/v1/prices/ohlcv?timeframe=1d` candles are UTC days, each `close`
+  the last price before 00:00 UTC of the next day (the recorded candle
+  timestamps are UTC midnights; the methodology's day boundary and the
+  worked examples assume this).
+- That `initialCollateralDeltaAmount` equals the change of
+  `collateralAmount` on USDC-collateral positions too, including profitable
+  decreases whose fees are paid from PnL (2.5; shown so far on address B's
+  WETH rows and by example 1's t5).
+- Whether the GMX API reports the block or time its `/v1/positions` snapshot
+  is indexed to, for the anchor-timing guard (section 8).
