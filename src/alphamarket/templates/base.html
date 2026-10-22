@@ -210,6 +210,7 @@
   <div class="nav-right">
     {% if user %}
       {% if settings.demo_mode or user %}<a href="/portfolio" class="{{ 'active' if nav == 'portfolio' }}">Portfolio</a>{% endif %}
+      {% if user and settings.copy_tickets_enabled %}<a href="/copy" class="{{ 'active' if nav == 'copy' }}">Copy tickets</a>{% endif %}
       <a href="/watch" class="{{ 'active' if nav == 'watch' }}">Watchlist</a>
       <a href="/dashboard" class="{{ 'active' if nav == 'dashboard' }}">Dashboard</a>
       <details class="menu account">
@@ -241,6 +242,7 @@
         <hr>
         {% if user %}
           {% if settings.demo_mode or user %}<a href="/portfolio">Portfolio</a>{% endif %}
+          {% if user and settings.copy_tickets_enabled %}<a href="/copy">Copy tickets</a>{% endif %}
           <a href="/watch" class="{{ 'on' if nav == 'watch' }}">Watchlist</a>
           <a href="/dashboard">Dashboard</a>
           <a href="/dashboard/security">Security</a>

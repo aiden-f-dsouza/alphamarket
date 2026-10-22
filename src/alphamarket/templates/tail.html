@@ -74,6 +74,7 @@
       <span class="label">Start</span>
       {% if t.real %}
       <span style="font-size:16px;line-height:1.5">Koine will copy {{ s.display_name }}'s next trades into your paper allocation. <span class="text2">No order is placed in any account, Koine asks for no key that can trade, and no money moves.</span></span>
+      {{ m.tail_copy_optin(t, "var(--surface)") }}
       {{ m.tail_confirm(t, "var(--surface)") }}
       <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">{% if t.active or t.own %}<button class="btn light lg" type="submit" disabled>Start paper tail</button><span class="small text2">{{ "Already tailing this strategy." if t.active else "You cannot tail your own strategy." }}</span>{% else %}<button class="btn light lg" type="submit">Start paper tail</button><a class="small text2" href="{{ base }}" style="text-decoration:underline">Cancel</a>{% endif %}</div>
       {% else %}

@@ -82,6 +82,10 @@ deliberately out of scope).
   liquidation, splits, dividends), `execution.py` (Executor; paper only,
   live raises), `portfolio.py` (allocation valuation, drawdown stop,
   snapshots), `tails.py` (allocations API + `/api/portfolio`),
+  `copy_tickets.py` + `copy_pages.py` (copy tickets: a paper tail's fills
+  written as orders the user places by hand, matched to their own
+  read-only fills; `/copy`; behind `COPY_TICKETS_ENABLED`, sizing behind
+  `COPY_TICKETS_SIZED`; docs/copy_tickets_plan.md),
   `watchlist.py` + `watch_pages.py` (private watchlist: public Hyperliquid
   addresses, one shared system-owned `is_watch` account per address, its
   strategy of kind "watch" never public; `/watch`, `/api/watch`; plan in
@@ -136,7 +140,8 @@ deliberately out of scope).
   coverage, 0015 `users.is_demo`, 0016 paper book checkpoints (a cache,
   not append-only) and mirror ledger indexes; 0017 `users.is_house` /
   `is_system`, `strategies.kind`, `watches`, `watch_optouts`; 0018
-  `leaderboard_snapshots`, a mutable cache)
+  `leaderboard_snapshots`, a mutable cache; 0019 `copy_tickets` (mutable
+  status, not append-only) and the allocations copy columns)
 - `docs/methodology.md` — public methodology page source; every ledger/stats
   formula lands here alongside its unit test. `docs/security.md` (served at
   /security), `docs/launch.md` (M5 outreach), `docs/deploy.md` + `Dockerfile`
@@ -189,6 +194,9 @@ deliberately out of scope).
    write-scoped key is ever accepted: `execution.get_executor("live")`
    raises, the API returns 403 for live mode. Real mirroring needs a licensed
    party (regulatory_reference.md); do not add a flag that turns it on.
+   Copy tickets are the only real-money surface: a trade shown for the user
+   to place by hand. Never add one-click placement, an order submitted
+   through a venue API, or anything that places it for them (SignalPush).
 9. Koine never accepts a venue username or password: only API keys, OAuth
    grants, report tokens, aggregator connections or public addresses.
 10. A venue is connectable only with a `docs/venues/<venue>.md` terms
