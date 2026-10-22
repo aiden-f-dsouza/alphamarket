@@ -27,7 +27,7 @@ import signal
 from datetime import timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from alphamarket import (
@@ -480,17 +480,26 @@ def tick_watch_discover(
     """Step 7: queue one `watch_discover` refresh, only while
     watch_discover_enabled. The default dedupe key keeps ticks from piling
     up behind a slow run. `only_if_stale` (worker start) skips it when every
-    snapshot is younger than the refresh interval, so a deploy does not
-    re-download the leaderboards it fetched minutes ago."""
+    (venue, period) discover offers has a snapshot younger than the refresh
+    interval, so a deploy does not re-download the leaderboards it fetched
+    minutes ago; a venue just opened in WATCH_VENUES has none, so it runs."""
     settings = get_settings()
     if not settings.watch_discover_enabled:
         return
     now = utcnow()
     with session_factory() as db:
         if only_if_stale:
-            oldest = db.scalar(select(func.min(LeaderboardSnapshot.fetched_at)))
+            wanted = {(v, p) for v in discover.discover_venues() for p in discover.periods_for(v)}
+            rows = db.execute(
+                select(
+                    LeaderboardSnapshot.venue,
+                    LeaderboardSnapshot.period,
+                    LeaderboardSnapshot.fetched_at,
+                )
+            )
+            fetched = {(venue, period): aware(at) for venue, period, at in rows}
             interval = timedelta(minutes=settings.watch_discover_refresh_minutes)
-            if oldest is not None and now - aware(oldest) < interval:
+            if all(k in fetched and now - fetched[k] < interval for k in wanted):
                 return
         enqueue(db, JobKind.WATCH_DISCOVER, now=now)
         db.commit()
