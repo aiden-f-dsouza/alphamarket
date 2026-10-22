@@ -1,0 +1,34 @@
+{
+ "success": true,
+ "data": [
+  {
+   "history_id": 60840763,
+   "symbol": "ZEC",
+   "side": "ask",
+   "amount": "29.96",
+   "payout": "0.453054",
+   "rate": "0.0000125",
+   "created_at": 1792688418780
+  },
+  {
+   "history_id": 60840560,
+   "symbol": "XRP",
+   "side": "bid",
+   "amount": "22035.08",
+   "payout": "-0.362887",
+   "rate": "0.0000125",
+   "created_at": 1792688418580
+  },
+  {
+   "history_id": 60839549,
+   "symbol": "SOL",
+   "side": "ask",
+   "amount": "3137.31",
+   "payout": "4.070849",
+   "rate": "0.0000125",
+   "created_at": 1792688414079
+  }
+ ],
+ "next_cursor": "11116NpUk",
+ "has_more": true
+}

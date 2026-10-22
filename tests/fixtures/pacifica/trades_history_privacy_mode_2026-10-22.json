@@ -1,0 +1,58 @@
+{
+ "success": true,
+ "data": [
+  {
+   "history_id": 304806758,
+   "order_id": 13807034005,
+   "client_order_id": "b721782e-2679-5ed4-9ff2-84ceefb61565",
+   "parent_id": null,
+   "symbol": "SOL",
+   "amount": "95.26",
+   "price": "106.46",
+   "entry_price": "111.890062",
+   "fee": "3.448069",
+   "spot_fee": null,
+   "pnl": "-3.448069",
+   "event_type": "fulfill_taker",
+   "side": "open_long",
+   "created_at": 1792590173949,
+   "cause": "normal"
+  },
+  {
+   "history_id": 304806756,
+   "order_id": 13807034005,
+   "client_order_id": "b721782e-2679-5ed4-9ff2-84ceefb61565",
+   "parent_id": null,
+   "symbol": "SOL",
+   "amount": "4.74",
+   "price": "106.45",
+   "entry_price": "111.926329",
+   "fee": "0.171555",
+   "spot_fee": null,
+   "pnl": "-0.171555",
+   "event_type": "fulfill_taker",
+   "side": "open_long",
+   "created_at": 1792590173949,
+   "cause": "normal"
+  },
+  {
+   "history_id": 304806740,
+   "order_id": 13807032392,
+   "client_order_id": "be080452-9ab0-5e33-8b80-040560c1a605",
+   "parent_id": null,
+   "symbol": "SOL",
+   "amount": "12.08",
+   "price": "106.46",
+   "entry_price": "111.92815",
+   "fee": "0.437253",
+   "spot_fee": null,
+   "pnl": "-0.437253",
+   "event_type": "fulfill_taker",
+   "side": "open_long",
+   "created_at": 1792590172482,
+   "cause": "normal"
+  }
+ ],
+ "next_cursor": "1111TwDRd",
+ "has_more": true
+}

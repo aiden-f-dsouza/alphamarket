@@ -1,0 +1,7 @@
+{
+ "success": false,
+ "data": null,
+ "error": "Account not found",
+ "code": 404,
+ "error_id": "unspecified"
+}

@@ -1,0 +1,49 @@
+{
+ "success": true,
+ "data": [
+  {
+   "amount": "-63.064664",
+   "balance": "16.48426",
+   "pending_balance": "0",
+   "event_type": "trade",
+   "created_at": 1792031064015
+  },
+  {
+   "amount": "-77.095294",
+   "balance": "79.548924",
+   "pending_balance": "0",
+   "event_type": "trade",
+   "created_at": 1792031064015
+  },
+  {
+   "amount": "-43.988917",
+   "balance": "156.644218",
+   "pending_balance": "0",
+   "event_type": "trade",
+   "created_at": 1792031064015
+  },
+  {
+   "amount": "-68.17348",
+   "balance": "200.633136",
+   "pending_balance": "0",
+   "event_type": "trade",
+   "created_at": 1792031064015
+  },
+  {
+   "amount": "-125.72372",
+   "balance": "146.762287",
+   "pending_balance": "0",
+   "event_type": "backstop_liquidation",
+   "created_at": 1789497432271
+  },
+  {
+   "amount": "-146.762287",
+   "balance": "0",
+   "pending_balance": "0",
+   "event_type": "backstop_liquidation",
+   "created_at": 1789497432226
+  }
+ ],
+ "next_cursor": null,
+ "has_more": false
+}

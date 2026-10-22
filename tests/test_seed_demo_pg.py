@@ -31,6 +31,7 @@ from alphamarket.models import (
     Strategy,
     StrategyKind,
     User,
+    VenueAccount,
     Watch,
 )
 from alphamarket.portfolio import portfolio_summary
@@ -89,7 +90,13 @@ def test_small_seed_through_the_real_pipeline(demo_db, demo_on):
     with sf() as db:
         strategies = db.scalars(select(Strategy)).all()
         assert len(strategies) == len(seed_demo.CREATORS)
-        watched = [s for s in strategies if s.kind == StrategyKind.WATCH]
+        all_watched = [s for s in strategies if s.kind == StrategyKind.WATCH]
+        assert len(all_watched) == sum(c.watch for c in seed_demo.CREATORS)  # one per venue
+        hl = {
+            a.id
+            for a in db.scalars(select(VenueAccount).where(VenueAccount.venue == "hyperliquid"))
+        }
+        watched = [s for s in all_watched if s.venue_account_id in hl]
         venues = {s.slug: s for s in strategies if s.kind != StrategyKind.WATCH}
         # Seeded slugs are the clean names, without the id suffix of a real connect.
         creators = [c for c in seed_demo.CREATORS if not c.watch]

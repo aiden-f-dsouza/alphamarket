@@ -1,0 +1,53 @@
+{
+    "success": true,
+    "data": [
+        {
+            "id": "dc054b05-d45c-43a6-9b6e-cdcde21f5884",
+            "symbol": "BTC",
+            "side": "ask",
+            "amount": "0.0991",
+            "entry_price": "81702",
+            "margin": "810.171523",
+            "funding": "0.504703",
+            "isolated": true,
+            "liquidation_price": "88987.418676",
+            "realized_pnl": "-2.733965",
+            "created_at": 1792679659580,
+            "updated_at": 1792695605434,
+            "li": 14821695952
+        },
+        {
+            "id": "cfdda88f-3ee3-48a4-94e2-adea5522c048",
+            "symbol": "HYPE",
+            "side": "bid",
+            "amount": "54.92",
+            "entry_price": "83.587",
+            "margin": "0",
+            "funding": "-12.53841",
+            "isolated": false,
+            "liquidation_price": "67.960476",
+            "realized_pnl": "-14.374649",
+            "created_at": 1791873997714,
+            "updated_at": 1792695608249,
+            "li": 14821698738
+        },
+        {
+            "id": "967230b9-f3ac-4c4e-869b-ec5b939288c5",
+            "symbol": "SOL",
+            "side": "ask",
+            "amount": "116.73",
+            "entry_price": "105.97035",
+            "margin": "1242.873061",
+            "funding": "5.881161",
+            "isolated": true,
+            "liquidation_price": "113.773432",
+            "realized_pnl": "0.933194",
+            "created_at": 1792559636979,
+            "updated_at": 1792695614089,
+            "li": 14821702195
+        }
+    ],
+    "error": null,
+    "code": null,
+    "last_order_id": 14821702195
+}

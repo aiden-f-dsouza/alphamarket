@@ -94,6 +94,7 @@ from alphamarket.connectors.base import (
     ReadOnlyProof,
     VenueConnector,
 )
+from alphamarket.demo import synthetic_solana_address
 from alphamarket.jobs import JobKind, JobRunner, enqueue
 from alphamarket.models import (
     AnchorBalance,
@@ -377,6 +378,8 @@ class CreatorSpec:
 
 # A watched address is obviously synthetic: "de30" repeated, never a real person's.
 WATCH_ADDRESS = "0x" + "de30" * 10
+# Pacifica's: base58 starts "De3o" (no zero in base58), same idea, never anyone's.
+PACIFICA_WATCH_ADDRESS = synthetic_solana_address("pacifica-watch")
 SYSTEM_LOCAL = "system"  # system@demo.koine owns the watch accounts
 
 CREATORS = (
@@ -601,6 +604,25 @@ CREATORS = (
     # ---- venue-lighter ----
     # ---- end venue-lighter ----
     # ---- venue-pacifica ----
+    CreatorSpec(
+        handle="pacwhale",
+        display_name="Pacifica whale",
+        venue="pacifica",
+        strategy="Watched perp address",
+        description="",
+        tags="",
+        history_days=150,
+        cash=60_000,
+        kind="perp",
+        symbols=(("BTC", 0.5), ("ETH", 0.3), ("SOL", 0.2)),
+        skill=0.58,
+        trades_per_week=3.0,
+        hold_hours=(6, 96),
+        frac=(0.5, 1.2),
+        fee_bps=3.4,  # the fixture account's fee level 3 pays 3.4 bps
+        watch=True,
+        key_id=PACIFICA_WATCH_ADDRESS,
+    ),
     # ---- end venue-pacifica ----
     # ---- venue-gmx_arbitrum ----
     # ---- end venue-gmx_arbitrum ----
@@ -626,6 +648,7 @@ WATCHES = (
     # ---- venue-lighter ----
     # ---- end venue-lighter ----
     # ---- venue-pacifica ----
+    ("investor", "pacwhale", "Solana perp book to study"),
     # ---- end venue-pacifica ----
     # ---- venue-gmx_arbitrum ----
     # ---- end venue-gmx_arbitrum ----
@@ -651,6 +674,19 @@ CRYPTO_QTY_DP = {"kraken": 8, "coinbase": 8, "binanceus": 8}
 CRYPTO_LOT = {"BTC": Decimal("0.0001"), "ETH": Decimal("0.001"), "SOL": Decimal("0.01")}
 PERP_DP = {"BTC": 5, "ETH": 4, "SOL": 2}
 PERP_MAX_LEVERAGE = {"BTC": 40, "ETH": 25, "SOL": 20}
+
+
+def perp_sim(venue: str) -> bool:
+    """Venues the simulator trades as Hyperliquid-style USDC perps: Hyperliquid
+    and every on-chain perp venue (address-keyed, asset instruments), so a
+    venue branch adds a CreatorSpec and nothing in the machinery."""
+    profile = registry.PROFILES.get(venue)
+    return profile is not None and (
+        venue == "hyperliquid"
+        or (profile.credential.value == "address" and profile.instrument.value == "asset")
+    )
+
+
 EQUITY_DP = {"alpaca": 9, "ibkr": 6}
 FUNDING_BASE = {"BTC": 0.0000110, "ETH": 0.0000125, "SOL": 0.0000150}  # per hour
 
@@ -770,7 +806,7 @@ class World:
                 venue=c.venue,
                 key_id=key_id,
                 venue_env=env,
-                cash_asset="USDC" if c.venue == "hyperliquid" else "USD",
+                cash_asset="USDC" if perp_sim(c.venue) else "USD",
                 cash_dp=CASH_DP.get(c.venue, 6),
                 anchor_at=self.anchor_at[c.handle],
                 anchor_cash_atoms=c.cash * 10 ** CASH_DP.get(c.venue, 6),
@@ -1769,7 +1805,7 @@ class SimMarketData(AssetMarketData):
                 inst = spot_instrument(venue, sym)
                 self.listed.append(inst)
                 self.symbols[inst.symbol] = (sym, "spot")
-        elif venue == "hyperliquid":
+        elif perp_sim(venue):
             for coin in PERP_DP:
                 self.listed.append(perp_instrument(coin))
                 self.symbols[coin] = (coin, "perp")
@@ -1813,7 +1849,7 @@ class SimMarketData(AssetMarketData):
         return Quote(symbol=symbol, bid=str(bid), ask=str(ask), last=str(mid), as_of=now)
 
     def fetch_funding_history(self, symbol: str, start: datetime, end: datetime):
-        if self.venue != "hyperliquid" or symbol not in PERP_DP:
+        if not perp_sim(self.venue) or symbol not in PERP_DP:
             return []
         now = _now()
         return [
@@ -1835,7 +1871,7 @@ class SimMarketData(AssetMarketData):
         ]
 
     def fetch_margin_tiers(self, symbol: str) -> list[MarginTier]:
-        if self.venue != "hyperliquid" or symbol not in PERP_MAX_LEVERAGE:
+        if not perp_sim(self.venue) or symbol not in PERP_MAX_LEVERAGE:
             return []
         return [MarginTier(lower_bound="0", max_leverage=PERP_MAX_LEVERAGE[symbol])]
 
@@ -1898,7 +1934,7 @@ def sim_registry(world: World) -> Iterator[None]:
         def build(venue_env: str) -> MarketDataSource:
             if venue == "kalshi":
                 return SimKalshiMarketData(world)
-            if venue in SPOT_SYMBOLS or venue in ("hyperliquid", "alpaca"):
+            if venue in SPOT_SYMBOLS or perp_sim(venue) or venue == "alpaca":
                 return SimMarketData(world, venue)
             return NoMarketData(venue)
 
@@ -2086,9 +2122,15 @@ class Sim:
 
     def _system_user(self, db: Session) -> User:
         """The demo's system user (invariant 7: is_demo too). Made here, before
-        anything could call watchlist.system_user, so that is the one it finds."""
+        anything could call watchlist.system_user, so that is the one it finds.
+        Every watched creator shares it (one per venue), so the second call
+        returns the first call's user."""
+        email = f"{SYSTEM_LOCAL}@{EMAIL_DOMAIN}"
+        existing = db.scalar(select(User).where(User.email == email))
+        if existing is not None:
+            return existing
         user = User(
-            email=f"{SYSTEM_LOCAL}@{EMAIL_DOMAIN}",
+            email=email,
             password_hash=UNUSABLE_PASSWORD_HASH,
             display_name="Koine watchlist",
             is_demo=True,
@@ -2359,6 +2401,10 @@ LEADERBOARD_SEEDS = {
     # ---- venue-lighter ----
     # ---- end venue-lighter ----
     # ---- venue-pacifica ----
+    # Invented Solana addresses ("De3o..."), the seeded watched one at rank 3.
+    "pacifica": lambda i: (
+        PACIFICA_WATCH_ADDRESS if i == 2 else synthetic_solana_address(f"pacifica-board{i:02d}")
+    ),
     # ---- end venue-pacifica ----
     # ---- venue-gmx_arbitrum ----
     # ---- end venue-gmx_arbitrum ----

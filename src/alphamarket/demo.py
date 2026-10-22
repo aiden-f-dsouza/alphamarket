@@ -1504,6 +1504,7 @@ _DISCOVER_VENUES: dict[str, float] = {
     # ---- venue-lighter ----
     # ---- end venue-lighter ----
     # ---- venue-pacifica ----
+    "pacifica": 0.5,  # ~7k real rows against Hyperliquid's ~47k
     # ---- end venue-pacifica ----
     # ---- venue-gmx_arbitrum ----
     # ---- end venue-gmx_arbitrum ----
