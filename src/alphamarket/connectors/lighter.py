@@ -31,11 +31,17 @@ Facts pinned from captures of 2026-10-22 (tests/fixtures/lighter/README.md):
       explorer log. Fill ids are f"{index}:{tx_hash}" (a trade between two of
       the address's own indexes appears in both logs, one fill per side).
       Transfers between the address's own indexes move nothing.
-  Explorer status. Every Trade row is a real trade whatever its `status`
-      ("executed", "nothing_to_execute", "committed", null): all 100 rows of
-      a page matched a REST trade field for field, 43 of them
+  Explorer status. Every row with a status seen so far ("executed",
+      "nothing_to_execute", "committed", "verified", null) is real: all 100
+      Trade rows of a page matched a REST trade field for field, 43 of them
       "nothing_to_execute", and a "nothing_to_execute" deposit is in the
-      account's cash. Rows are never filtered on status.
+      account's cash. Those are booked whatever their status; any other
+      status (a future "failed") is flagged and not booked (KNOWN_STATUSES).
+  Trade shapes. Trade, TradeWithFunding, LiquidationTrade and
+      LiquidationTradeWithFunding carry `trade_pubdata(_with_funding)` and
+      are fills. Deleverage and market settlement are NOT captured [VERIFY]:
+      a row of a trade-like type in another shape is flagged by both streams
+      (the position replay would miss it; reconcile shows the gap).
   Fees. Rates are integers in millionths of notional (maker 28, taker 196,
       liquidation 10000). price x size is exact at 6 dp on every market
       (size_decimals + price_decimals = 6), so fee = notional_micros x rate
@@ -223,17 +229,33 @@ DEPOSIT_TYPES = frozenset({"L1DepositV2", "L1Deposit"})
 WITHDRAW_TYPES = frozenset({"WithdrawV2", "Withdraw"})
 TRANSFER_TYPES = frozenset({"L2TransferV2", "L2Transfer"})
 # Public-pool (LLP) shares and LIT staking: value leaves the trading account
-# into a pool and comes back. Booked as transfers out and in (the holding is
-# outside the reconciled vector) AND flagged, so the account says so.
+# into a pool and comes back. The captured moves out are booked as transfers
+# out (the holding is outside the reconciled vector) AND flagged, so the
+# account says so.
 POOL_OUT = {"L2MintShares": ("usdc_amount", USDC), "L2StakeAssets": ("lit_amount", "LIT")}
-POOL_IN = {
-    "BurnedShares": ("usdc_amount", USDC),
-    "L2BurnShares": ("usdc_amount", USDC),
-    "UnstakeAssets": ("lit_amount", "LIT"),
-    "L2UnstakeAssets": ("lit_amount", "LIT"),
-    "ExecutedPendingUnlock": ("lit_amount", "LIT"),
-}
+# The way back is not captured, and one unstake or burn may log both a
+# request row and an executed-unlock row: booking both would count the
+# money twice. So these are flagged only, with no legs, until a fixture pins
+# them [VERIFY]; reconcile shows the cash that came back.
+POOL_IN = frozenset(
+    {
+        "BurnedShares",
+        "L2BurnShares",
+        "UnstakeAssets",
+        "L2UnstakeAssets",
+        "ExecutedPendingUnlock",
+    }
+)
 TRADE_PUBDATA_KEYS = ("trade_pubdata", "trade_pubdata_with_funding")
+# Rows with any of these in their type move a position. Without trade
+# pubdata (Deleverage or a market settlement in another shape [VERIFY: none
+# captured]) the replay cannot book them, so both streams flag them.
+TRADE_LIKE_WORDS = ("Trade", "Deleverage", "Liquidat", "Settle")
+# Explorer statuses of rows that are in the account's state: every one was
+# matched against REST trades or the account's cash (tests/fixtures/lighter/
+# README.md). Anything else (a future "failed" or "rejected") is flagged and
+# not booked.
+KNOWN_STATUSES = frozenset({"executed", "nothing_to_execute", "committed", "verified", None})
 
 
 class LighterError(ValueError):
@@ -567,21 +589,37 @@ class _Walk:
 
     The explorer pages newest-first by offset, and new rows shift every
     offset, but the replays need oldest-first. So a first walk LOCATES the
-    oldest page (doubling, then bisecting, on page fullness: a short,
+    oldest page (galloping, then bisecting, on page fullness: a short,
     non-empty page holds the genesis row), then walks FORWARD toward offset
-    0 in steps of LOGS_STEP, finding its anchor (the newest row applied) in
-    each page: the rows above the anchor are exactly the next ones. Pages
-    overlap by LOGS_OVERLAP rows, so up to 9 rows arriving between two
-    requests cost nothing; more push the anchor out of the page, and the
-    walk steps back (older) until it finds it again. Never a gap; a
-    duplicate is impossible because only rows above the anchor are taken."""
+    0, finding its anchor (the newest row applied) in each page: the rows
+    above the anchor are exactly the next ones. Never a gap; a duplicate is
+    impossible because only rows above the anchor are taken.
+
+    Forward. `pos` is the anchor's position when last seen; rows only
+    arrive at the head, so it is a lower bound on where the anchor is now.
+    The next request is at pos - LOGS_STEP + drift, where `drift` is how far
+    the anchor moved between the last two requests (capped at LOGS_STEP), so
+    the anchor lands near the bottom of the page and about LOGS_STEP rows
+    are taken per request however busy the account is (while fewer than
+    LOGS_STEP rows arrive between two requests; more, and no walk of
+    100-row pages can keep up). The request offset is never above `pos`,
+    so a page without the anchor is newer than it: the anchor is then at
+    least LOGS_LIMIT rows further down, and the walk asks there next.
+
+    Locate. `lo` holds a full page, `hi` an empty one. Rows arriving
+    mid-search can fill `hi`: once hi - lo < LOGS_LIMIT it is known stale
+    (a full page at lo means at least lo + LOGS_LIMIT rows), so it is
+    dropped and the search gallops on from lo."""
 
     anchor: str | None = None  # hash of the newest row applied
     at: str | None = None  # its explorer time
-    offset: int = 0
+    offset: int = 0  # the next request
     mode: str = "head"  # head | locate | forward
     lo: int = 0  # locate: largest offset known to hold a full page
     hi: int | None = None  # locate: smallest offset known to be empty
+    step: int = LOGS_LIMIT  # locate: the next gallop past lo while hi is None
+    pos: int = 0  # forward: the anchor's position when last seen (a lower bound)
+    drift: int = 0  # forward: rows that arrived between the last two requests
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -591,20 +629,33 @@ class _Walk:
             "m": self.mode,
             "lo": self.lo,
             "hi": self.hi,
+            "g": self.step,
+            "p": self.pos,
+            "d": self.drift,
         }
 
     @classmethod
     def from_json(cls, data: dict[str, Any] | None) -> _Walk:
         data = data or {}
         hi = data.get("hi")
+        offset = int(data.get("o", 0))
         return cls(
             anchor=data.get("a"),
             at=data.get("t"),
-            offset=int(data.get("o", 0)),
+            offset=offset,
             mode=str(data.get("m", "head")),
             lo=int(data.get("lo", 0)),
             hi=int(hi) if hi is not None else None,
+            step=int(data.get("g", LOGS_LIMIT)),
+            pos=int(data.get("p", offset)),
+            drift=int(data.get("d", 0)),
         )
+
+    def start_forward(self, rows: list[dict[str, Any]], offset: int) -> None:
+        """The page at `offset` was applied whole: its newest row anchors."""
+        self.anchor, self.at, self.mode = rows[0]["hash"], rows[0]["time"], "forward"
+        self.pos, self.drift = offset, 0
+        self.offset = max(0, offset - LOGS_STEP)
 
 
 def _encode(state: dict[str, Any]) -> str:
@@ -619,17 +670,86 @@ def _decode(cursor: str) -> dict[str, Any]:
 
 
 def row_refs(index: int, rows: list[dict[str, Any]]) -> list[str]:
-    """f"{index}:{hash}" per row (oldest first). Every capture shows one row
-    per hash; should a hash repeat within a page, the later rows get
-    ":<n>" [VERIFY multi-row transactions]."""
-    seen: dict[str, int] = {}
-    out = []
-    for row in rows:
-        tx = str(row.get("hash") or "")
-        n = seen.get(tx, 0)
-        seen[tx] = n + 1
-        out.append(f"{index}:{tx}" if n == 0 else f"{index}:{tx}:{n}")
+    """f"{index}:{hash}" per row. Every capture shows one row per hash, and
+    the walk refuses a page where a hash repeats (_check_page), so the id is
+    unique and the same on every pass."""
+    return [f"{index}:{row.get('hash')}" for row in rows]
+
+
+def merge_segments(segments: list[list[int]]) -> list[list[int]]:
+    """Funding segments [index, market, position, first hour, last hour],
+    with back-to-back segments of one position joined (an hour that waited
+    for publication and the next pass's hours of the same position)."""
+    out: list[list[int]] = []
+    for seg in sorted(segments, key=lambda s: (s[0], s[1], s[3])):
+        prev = out[-1] if out else None
+        if prev is not None and prev[:3] == seg[:3] and prev[4] + HOUR == seg[3]:
+            prev[4] = max(prev[4], seg[4])
+        else:
+            out.append(list(seg))
     return out
+
+
+def _check_page(index: int, rows: list[dict[str, Any]]) -> None:
+    """One row per hash, every row with a hash. A repeat would break both
+    the fill id and the walk's anchor, so it stops the sync rather than
+    guessing [VERIFY multi-row transactions]. Two rows of one transaction
+    are adjacent in the log, and the walk sees every pair of adjacent rows
+    in one page (each forward page holds the anchor and everything above
+    it), so a check per page catches them."""
+    hashes = [row.get("hash") for row in rows]
+    if not all(hashes) or len(set(hashes)) != len(hashes):
+        raise LighterError(f"explorer: index {index} has a repeated or missing tx hash")
+
+
+def _locate(walk: _Walk, rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], bool]:
+    """One locate step (see _Walk)."""
+    if rows and len(rows) < LOGS_LIMIT:  # short page: its last row is the oldest
+        walk.start_forward(rows, walk.offset)
+        return list(reversed(rows)), False
+    if rows:
+        walk.lo = walk.offset
+        if walk.hi is not None and walk.hi - walk.lo < LOGS_LIMIT:
+            walk.hi, walk.step = None, LOGS_LIMIT  # stale: rows arrived since
+    else:
+        walk.hi = walk.offset
+    if walk.hi is None:
+        walk.offset, walk.step = walk.lo + walk.step, walk.step * 2
+    else:
+        walk.offset = (walk.lo + walk.hi) // 2
+    return [], False
+
+
+def _forward(
+    index: int, walk: _Walk, rows: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], bool]:
+    """One forward step (see _Walk)."""
+    offset = walk.offset
+    at = next((i for i, r in enumerate(rows) if r.get("hash") == walk.anchor), None)
+    if at is None:
+        # offset <= pos <= the anchor's position, so the page is newer than
+        # the anchor: an empty page, or one reaching past the anchor's time
+        # without it, means the history changed.
+        if not rows or (
+            walk.at is not None and _parse_time(rows[-1]["time"]) < _parse_time(walk.at)
+        ):
+            raise LighterError(f"explorer: index {index} lost row {walk.anchor}")
+        walk.pos, walk.drift = offset + LOGS_LIMIT, LOGS_STEP  # more than a page arrived
+        walk.offset = walk.pos
+        return [], False
+    # The estimate follows a rise at once and decays by LOGS_OVERLAP a step:
+    # an underestimate costs a whole request (the anchor falls off the
+    # page), an overestimate only LOGS_OVERLAP rows of it.
+    seen = max(0, offset + at - walk.pos)
+    walk.drift = min(LOGS_STEP, max(seen, walk.drift - LOGS_OVERLAP))
+    fresh = list(reversed(rows[:at]))
+    if at:
+        walk.anchor, walk.at = rows[0]["hash"], rows[0]["time"]
+    walk.pos = offset
+    if offset == 0:
+        return fresh, True
+    walk.offset = max(0, offset - LOGS_STEP + walk.drift)
+    return fresh, False
 
 
 def _pubdata(row: dict[str, Any]) -> dict[str, Any]:
@@ -646,6 +766,12 @@ def _pubdata(row: dict[str, Any]) -> dict[str, Any]:
 def is_trade(row: dict[str, Any]) -> bool:
     pub = row.get("pubdata") or {}
     return isinstance(pub, dict) and any(key in pub for key in TRADE_PUBDATA_KEYS)
+
+
+def trade_like(row: dict[str, Any]) -> bool:
+    """A type that moves a position, whatever its pubdata shape."""
+    kind = str(row.get("pubdata_type") or row.get("tx_type") or "")
+    return any(word in kind for word in TRADE_LIKE_WORDS)
 
 
 @dataclass(frozen=True)
@@ -755,6 +881,15 @@ class LighterConnector(_Http, AssetVenueConnector):
             )
         )
 
+    def _known_status(self, ref: str, row: dict[str, Any]) -> bool:
+        """True for the explorer statuses whose rows are in the account's
+        state (KNOWN_STATUSES); any other row is flagged and not booked."""
+        status = row.get("status")
+        if status in KNOWN_STATUSES:
+            return True
+        self._flag(ref, row, "unsupported_type", f"explorer status {status!r}")
+        return False
+
     # ---- explorer --------------------------------------------------------------
 
     def _logs(self, index: int, offset: int) -> list[dict[str, Any]]:
@@ -769,44 +904,20 @@ class LighterConnector(_Http, AssetVenueConnector):
 
     def _walk_page(self, index: int, walk: _Walk) -> tuple[list[dict[str, Any]], bool]:
         """ONE explorer request for `index`: (rows to apply, oldest first;
-        True when the index is caught up). Mutates `walk`."""
+        True when the index is caught up). Mutates `walk` (see _Walk)."""
         rows = self._logs(index, walk.offset)
+        _check_page(index, rows)
         if walk.anchor is None and walk.mode == "head":
             if len(rows) < LOGS_LIMIT:  # the whole history is this page
                 if rows:
-                    walk.anchor, walk.at, walk.mode = rows[0]["hash"], rows[0]["time"], "forward"
+                    walk.start_forward(rows, 0)
                 return list(reversed(rows)), True
-            walk.mode, walk.lo, walk.hi, walk.offset = "locate", 0, None, LOGS_LIMIT
+            walk.mode, walk.lo, walk.hi = "locate", 0, None
+            walk.offset, walk.step = LOGS_LIMIT, LOGS_LIMIT
             return [], False
         if walk.mode == "locate":
-            if len(rows) >= LOGS_LIMIT:
-                walk.lo = walk.offset
-            elif not rows:
-                walk.hi = walk.offset
-            else:  # short page: its last row is the oldest the index has
-                walk.anchor, walk.at, walk.mode = rows[0]["hash"], rows[0]["time"], "forward"
-                walk.offset = max(0, walk.offset - LOGS_STEP)
-                return list(reversed(rows)), False
-            walk.offset = walk.lo * 2 if walk.hi is None else (walk.lo + walk.hi) // 2
-            return [], False
-        at = next((i for i, r in enumerate(rows) if r.get("hash") == walk.anchor), None)
-        if at is None:
-            if not rows:
-                raise LighterError(f"explorer: index {index} lost row {walk.anchor}")
-            if walk.at is not None and _parse_time(rows[0]["time"]) < _parse_time(walk.at):
-                if walk.offset == 0:
-                    raise LighterError(f"explorer: index {index} lost row {walk.anchor}")
-                walk.offset = max(0, walk.offset - LOGS_STEP)  # the anchor is newer
-            else:
-                walk.offset += LOGS_STEP  # rows arrived: the anchor moved older
-            return [], False
-        fresh = list(reversed(rows[:at]))
-        if fresh:
-            walk.anchor, walk.at = rows[0]["hash"], rows[0]["time"]
-        if walk.offset == 0:
-            return fresh, True
-        walk.offset = max(0, walk.offset - LOGS_STEP)
-        return fresh, False
+            return _locate(walk, rows)
+        return _forward(index, walk, rows)
 
     def _side(self, index: int, ref: str, row: dict[str, Any]) -> _Side | None:
         """This index's side of a trade row, or None (flagged) when it cannot
@@ -832,7 +943,24 @@ class LighterConnector(_Http, AssetVenueConnector):
         qty = market.qty_atoms(pd["size"])
         if qty <= 0:
             return None
-        return _Side(market, sells, role, qty, _s(pd["price"]), rate)
+        price = _s(pd["price"])
+        # A market whose price x size can be finer than 6 dp is flagged as a
+        # whole (every trade of it, so its replay never half-applies), never
+        # rounded; Lighter keeps size_decimals + price_decimals = 6 today.
+        try:
+            if market.size_decimals + market.price_decimals > QUOTE_DECIMALS:
+                raise ValueError
+            market.quote_micros(price, qty)
+        except ValueError:
+            self._flag(
+                ref,
+                row,
+                "unsupported_type",
+                f"{market.symbol}: notional finer than {QUOTE_DECIMALS} dp "
+                f"(size_decimals {market.size_decimals}, price_decimals {market.price_decimals})",
+            )
+            return None
+        return _Side(market, sells, role, qty, price, rate)
 
     # ---- fills ------------------------------------------------------------------
 
@@ -857,16 +985,21 @@ class LighterConnector(_Http, AssetVenueConnector):
         book = {int(m): (int(v[0]), int(v[1])) for m, v in (books.get(str(index)) or {}).items()}
         items = []
         for ref, row in zip(row_refs(index, rows), rows, strict=True):
+            if not self._known_status(ref, row):
+                continue
             if is_trade(row):
                 fill = self._fill(index, ref, row, book)
                 if fill is not None:
                     items.append(fill)
+            elif trade_like(row):  # never silent: the replay would miss it
+                self._flag(ref, row, "unsupported_type", f"explorer {row.get('pubdata_type')}")
         walks[str(index)] = walk.to_json()
         books[str(index)] = {str(m): [p, e] for m, (p, e) in sorted(book.items()) if p or e}
         return self._advance(state, done, items)
 
     def _discover(self, state: dict[str, Any]) -> Page:
         indexes = self.account_indexes()
+        state.pop("rl", None)  # a new pass may re-list once (_relist)
         state.update(p="walk", ix=indexes, k=0)
         if not indexes:
             state["p"] = "discover"
@@ -1002,10 +1135,12 @@ class LighterConnector(_Http, AssetVenueConnector):
         through = {int(m): int(t) for m, t in (funded.get(str(index)) or {}).items()}
         items: list[NormalizedEvent] = []
         for ref, row in zip(row_refs(index, rows), rows, strict=True):
+            if not self._known_status(ref, row):
+                continue
             if is_trade(row):
                 self._track_position(index, ref, row, held, through, segments)
                 continue
-            event = self._flow(index, ref, row, own)
+            event = self._flow(index, ref, row, own, state)
             if event is not None:
                 items.append(event)
         if done:  # the open positions' hours up to now (minus the lag)
@@ -1020,7 +1155,10 @@ class LighterConnector(_Http, AssetVenueConnector):
         funded[str(index)] = {str(m): t for m, t in sorted(through.items())}
         if done:
             state["k"] = k + 1
-            if state["k"] >= len(indexes):
+            if state["k"] >= len(state["ix"]):  # _relist may have added indexes
+                # Hours that waited for Lighter to publish them get one more
+                # try per pass, here.
+                state["sg"] = merge_segments(segments + state.pop("fw", []))
                 state.update(p="fund", then="end")
                 return self._fund_or_finish(state, items)
         if len(segments) >= FUNDING_SEGMENT_CAP:
@@ -1072,7 +1210,9 @@ class LighterConnector(_Http, AssetVenueConnector):
     def _funding_page(self, state: dict[str, Any]) -> Page:
         """ONE fundings request: the market of the oldest pending segment,
         720 hours from that segment's first hour; every pending segment of
-        that market inside the window is booked and trimmed."""
+        that market inside the window is booked and trimmed. Hours past the
+        newest published value move to "fw", which rejoins "sg" when the
+        next pass's walk ends (fetch_events_page)."""
         segments: list[list[int]] = state.get("sg") or []
         if not segments:
             return self._finish(state, [])
@@ -1082,31 +1222,56 @@ class LighterConnector(_Http, AssetVenueConnector):
         market = self.market(market_id)
         if market is None:
             raise LighterError(f"funding for unknown market {market_id}")
-        values = self._fundings(market_id, start, end)
+        values, latest = self._fundings(market_id, start, end)
+        # Hours after the newest value Lighter has published are not missing,
+        # just not out yet: they wait for the next pass ("fw").
+        published = end if latest is not None and latest >= end else latest
+        if published is None:
+            published = start - HOUR
         items: list[NormalizedEvent] = []
         kept = []
+        waiting = state.setdefault("fw", [])
+        missing = 0
         for seg in segments:
             index, seg_market, position, first, last = seg
             if seg_market != market_id or first > end:
                 kept.append(seg)
                 continue
-            for hour in range(first, min(last, end) + 1, HOUR):
+            for hour in range(first, min(last, published) + 1, HOUR):
                 value = values.get(hour)
-                if value is not None:
-                    event = funding_event(index, market, position, hour, *value)
-                    if event is not None:
-                        items.append(event)
-            if last > end:
-                kept.append([index, seg_market, position, end + HOUR, last])
+                if value is None:  # a hole inside the published range
+                    missing += 1
+                    continue
+                event = funding_event(index, market, position, hour, *value)
+                if event is not None:
+                    items.append(event)
+            if last > published:
+                rest = [index, seg_market, position, max(first, published + HOUR), last]
+                (kept if published >= end else waiting).append(rest)
+        if missing:
+            # Decision: an hour with no published value is booked as no
+            # funding (Lighter's public record shows none) and logged;
+            # reconcile catches any charge it did make.
+            logger.warning(
+                "lighter fundings: market %s has %d unpublished hours between %s and %s",
+                market_id,
+                missing,
+                start,
+                published,
+            )
         state["sg"] = kept
         if kept:
             return Page(items, next_cursor=_encode(state))
         return self._finish(state, items)
 
-    def _fundings(self, market_id: int, start: int, end: int) -> dict[int, tuple[str, str]]:
-        """{hour: (value, direction)} for [start, end]. The endpoint returns the
-        `count_back` rows ending at end_timestamp (its start_timestamp is not
-        what bounds the answer), so count_back is the window's hour count."""
+    def _fundings(
+        self, market_id: int, start: int, end: int
+    ) -> tuple[dict[int, tuple[str, str]], int | None]:
+        """({hour: (value, direction)} for [start, end], the newest timestamp
+        in the answer or None). The endpoint returns the `count_back` rows
+        ending at end_timestamp, or at its newest value when end_timestamp is
+        later (its start_timestamp is not what bounds the answer), so
+        count_back is the window's hour count."""
         hours = (end - start) // HOUR + 1
         _, data = self._api(
             "fundings",
@@ -1119,18 +1284,28 @@ class LighterConnector(_Http, AssetVenueConnector):
             },
         )
         out = {}
+        latest = None
         for r in data.get("fundings") or []:
             hour = int(r["timestamp"])
+            latest = hour if latest is None else max(latest, hour)
             if start <= hour <= end:
                 out[hour] = (_s(r["value"]), str(r["direction"]))
-        return out
+        return out, latest
 
     def _flow(
-        self, index: int, ref: str, row: dict[str, Any], own: set[int]
+        self,
+        index: int,
+        ref: str,
+        row: dict[str, Any],
+        own: set[int],
+        state: dict[str, Any] | None = None,
     ) -> NormalizedEvent | None:
         kind_name = str(row.get("pubdata_type") or "")
         pd = _pubdata(row)
         when = _parse_time(row["time"])
+        if kind_name in POOL_IN:  # flagged only, no legs (see POOL_IN)
+            self._flag(ref, row, "pool_share", f"{kind_name} (pool or staking holding)")
+            return None
         if kind_name in NOOP_TYPES or not pd:
             return None
         if kind_name in DEPOSIT_TYPES:
@@ -1151,11 +1326,25 @@ class LighterConnector(_Http, AssetVenueConnector):
             legs = [_leg(asset, pd["amount"], LegKind.WITHDRAWAL, -1)]
             return _event(ref, LegKind.WITHDRAWAL, legs, when, kind_name)
         if kind_name in TRANSFER_TYPES:
-            return self._transfer(index, ref, pd, own, when, kind_name)
-        if kind_name in POOL_OUT or kind_name in POOL_IN:
+            return self._transfer(index, ref, pd, own, when, kind_name, state)
+        if kind_name in POOL_OUT:
             return self._pool(index, ref, row, pd, when, kind_name)
         self._flag(ref, row, "unsupported_type", f"explorer {kind_name}")
         return None
+
+    def _relist(self, own: set[int], state: dict[str, Any] | None) -> None:
+        """Re-read the address's indexes, at most once per pass (`state`
+        "rl"): a sub-account created after the pass listed them is the
+        address's own, and a transfer to it moves nothing. New indexes join
+        `own` and the pass's index list, so this pass walks them too."""
+        if state is None or state.get("rl"):
+            return
+        state["rl"] = True
+        listed = state.setdefault("ix", sorted(own))
+        for found in self.account_indexes():
+            if found not in own:
+                own.add(found)
+                listed.append(found)
 
     def _transfer(
         self,
@@ -1165,12 +1354,17 @@ class LighterConnector(_Http, AssetVenueConnector):
         own: set[int],
         when: datetime,
         kind_name: str,
+        state: dict[str, Any] | None = None,
     ) -> NormalizedEvent | None:
         """Moves between the address's own indexes (and between an index's
         spot and perps routes) change nothing; the sender's walk books the
-        fee once. Anything else enters or leaves the account."""
+        fee once. Anything else enters or leaves the account. An index not
+        in `own` is checked against a fresh index list first (_relist)."""
         sender = int(pd["from_account_index"])
         receiver = int(pd["to_account_index"])
+        other = receiver if sender == index else sender
+        if other not in own:
+            self._relist(own, state)
         asset = str(pd.get("asset_index") or USDC)
         fee = pd.get("usdc_fee")
         fee_legs = [_leg(USDC, fee, LegKind.FEE, -1)] if fee and _dec(fee) else []
@@ -1198,20 +1392,18 @@ class LighterConnector(_Http, AssetVenueConnector):
         when: datetime,
         kind_name: str,
     ) -> NormalizedEvent | None:
-        """Public-pool shares and LIT staking: value leaving for the pool is a
-        transfer out, value coming back a transfer in (the shares are outside
-        the reconciled vector), and the account is flagged either way."""
+        """Public-pool shares and LIT staking going out: value leaving for the
+        pool is a transfer out (the shares are outside the reconciled
+        vector), and the account is flagged."""
         self._flag(ref, row, "pool_share", f"{kind_name} (pool or staking holding)")
         if int(pd.get("account_index", index)) != index:
             return None
-        outgoing = kind_name in POOL_OUT
-        field_name, asset = (POOL_OUT if outgoing else POOL_IN)[kind_name]
+        field_name, asset = POOL_OUT[kind_name]
         amount = pd.get(field_name)
         if amount is None:
             return None
-        kind = LegKind.TRANSFER_OUT if outgoing else LegKind.TRANSFER_IN
-        legs = [_leg(asset, amount, kind, -1 if outgoing else 1)]
-        return _event(ref, kind, legs, when, f"{kind_name} {asset}")
+        legs = [_leg(asset, amount, LegKind.TRANSFER_OUT, -1)]
+        return _event(ref, LegKind.TRANSFER_OUT, legs, when, f"{kind_name} {asset}")
 
     # ---- balances -----------------------------------------------------------------
 
@@ -1620,7 +1812,7 @@ class LighterTradeStream(StreamingSource):
         if not isinstance(msg, dict):
             return []
         kind = str(msg.get("type") or "")
-        if kind == "error" or "error" in msg:
+        if kind == "error" or msg.get("error"):  # "error": null is no error
             error = msg.get("error") if isinstance(msg.get("error"), dict) else msg
             text = str(error.get("message") or error)[:200]
             if int(error.get("code") or 0) == 20558:  # restricted jurisdiction

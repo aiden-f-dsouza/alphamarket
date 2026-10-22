@@ -162,7 +162,8 @@ endpoints cost 0:
 
 Cost of one sync of one address with `n` indexes: fills `1 + n` requests
 when caught up (the index list, one explorer page per index; more pages
-when more than 90 rows arrived), the same again for events, plus one
+when more than 90 rows arrived), the same again for events (plus one
+`accountsByL1Address` when a transfer names an index not on the list), plus one
 `fundings` request per perp market with an open position (or with trades
 since the last sync). Balances (nightly reconcile): `1 + n`. A backfill of a
 very active account is about two explorer pages per 90 rows per stream: a
@@ -190,29 +191,60 @@ object with, per index, the walk position and the replay state; new indexes
 are picked up on the next pass.
 
 Explorer walk (`_Walk`). The log is newest first with offset paging and
-new rows shift every offset, while both replays need oldest first. A first
-pass locates the oldest page (doubling, then bisecting, on whether a page is
-full; a short non-empty page holds the genesis row), then walks forward
-toward offset 0 in steps of 90 with 10 rows of overlap, finding its anchor
-(the newest row applied) in each page and taking only the rows above it.
-Rows arriving mid-walk cost nothing up to 9 per step; more push the anchor
-out of the page and the walk steps back until it finds it. Never a gap, never
-a duplicate; tests shift offsets under a running walk. A walk that loses its
-anchor (an explorer history that changed) raises rather than guesses.
-`since` is ignored: a `None` cursor always replays from genesis, so a
-restarted backfill reproduces identical legs (tested).
+new rows shift every offset, while both replays need oldest first.
 
-Status. Rows are never filtered on `status`: `executed`,
-`nothing_to_execute`, `committed` and null all carry real activity (README).
+- Locate. A first pass finds the oldest page by galloping (offsets 100,
+  200, 400, ...) and then bisecting, on whether a page is full; a short
+  non-empty page holds the genesis row. Rows arriving mid-search can fill
+  the "empty" upper bound; once it is less than a page above the full lower
+  bound it is known stale, dropped, and the search gallops on from the
+  lower bound.
+- Forward. The walk then moves toward offset 0, finding its anchor (the
+  newest row applied) in each page and taking only the rows above it. It
+  remembers where it last saw the anchor and how far the anchor moved
+  between its last two requests (the drift: rows that arrived meanwhile),
+  and asks for the page that should put the anchor near its bottom, so it
+  takes about 90 rows a request however busy the account is. A page without
+  the anchor is newer than it (the request is never below where the anchor
+  was last seen), so the walk asks for the next page down. It keeps up while
+  fewer than 90 rows arrive between two requests of one index; no walk of
+  100-row pages can do better. Tests drive it with 10 to 60 rows arriving
+  before every request (`tests/test_lighter_walk.py`).
+- Never a gap, never a duplicate. A walk that loses its anchor (an explorer
+  history that changed) raises rather than guesses, as does a page where a
+  tx hash repeats (below).
+
+`since` is ignored: a `None` cursor always replays from genesis, so a
+restarted backfill reproduces identical legs (tested). One consequence:
+`reconcile.take_asset_anchor`'s "no fill near the anchor" check does not
+apply to Lighter. Its probe (`fetch_asset_fills_page(None, since)`) is the
+index list, which holds no fills, so the anchor is always taken at once.
+That is harmless here: the ledger replays from genesis, not from the
+anchor's balance, and the nightly reconcile compares the replayed vector
+with the venue's.
+
+Status. `executed`, `nothing_to_execute`, `committed`, `verified` and null
+all carry real activity (README): rows with those are booked whatever the
+status. Any other status (a future `failed` or `rejected`) is flagged as
+`UnsupportedActivity` and not booked.
 
 Fills (`fetch_asset_fills_page`), from explorer rows with `trade_pubdata` or
 `trade_pubdata_with_funding` (Trade, TradeWithFunding, LiquidationTrade,
 LiquidationTradeWithFunding, and any deleverage or settlement type of the
 same shape):
 
+- **Deleverage and market settlement are not captured** [VERIFY]. A row
+  whose type names a trade, liquidation, deleverage or settlement but
+  carries no trade pubdata is flagged by both streams (it would move the
+  position, so the replay of that market is off until it is mapped;
+  reconcile shows the gap).
 - id `f"{index}:{tx_hash}"`: one trade per hash in every capture; the index
   prefix keeps both sides of a trade between two of the address's own
-  indexes. A repeated hash within a page would get `:<n>` [VERIFY].
+  indexes. A page where a hash repeats stops the sync with an error rather
+  than numbering the rows by position, which would depend on page
+  boundaries [VERIFY multi-row transactions]. Rows of one transaction are
+  adjacent, and every pair of adjacent rows shares a page of the walk, so
+  the per-page check sees them.
 - side: the index is the taker or the maker; `is_taker_ask` gives the
   taker's side. Liquidity is the role. Liquidations and deleverages are
   ordinary fills (the liquidated taker pays `taker_fee` 10000 = 1%).
@@ -224,7 +256,9 @@ same shape):
 - fee: `notional x rate`, the rate an integer in millionths (maker 28,
   taker 196 on Premium; 0/0 on Standard). Exact at 12 dp, never rounded:
   notional is exact at 6 dp because size_decimals + price_decimals = 6 on
-  every market, and Lighter itself keeps balances at 12 dp.
+  every market, and Lighter itself keeps balances at 12 dp. A market listed
+  with a larger sum (notional finer than a micro) has every trade flagged,
+  never rounded, and the rest of the account syncs on.
 - instruments: `orderBookDetails` (one request, cached per instance): tick
   10^-price_decimals, step 1 atom at size_decimals, `min_base_amount`,
   `min_quote_amount`. Markets of any other type (binary up/down) and unknown
@@ -243,13 +277,27 @@ Events (`fetch_events_page`), from the same explorer walk:
 - `L2TransferV2` (legacy `L2Transfer`): to or from another index,
   TRANSFER_OUT/IN (plus `usdc_fee` as FEE on the sender); between the
   address's own indexes, or between one index's spot and perps routes,
-  nothing (the fee, if any, once, as CONVERT).
-- `L2MintShares` / `L2StakeAssets` (and burn/unstake/unlock): see "Known
-  gaps"; TRANSFER_OUT/IN plus a `pool_share` flag.
+  nothing (the fee, if any, once, as CONVERT). The first transfer of a pass
+  that names an index not on the pass's list re-reads `accountsByL1Address`
+  (once per pass): a sub-account created since the pass started is then
+  internal, and it is walked in the same pass.
+- `L2MintShares` / `L2StakeAssets` (captured): TRANSFER_OUT plus a
+  `pool_share` flag. The way back (`BurnedShares`, `L2BurnShares`,
+  `UnstakeAssets`, `L2UnstakeAssets`, `ExecutedPendingUnlock`) is not
+  captured, and one unstake or burn may log both a request row and an
+  executed-unlock row: booking both would count the money twice. So those
+  are flagged (`pool_share`) with no legs [VERIFY with a capture]; reconcile
+  shows the cash that came back.
 - no-op types (leverage, margin, account config, sub-account creation, key
   changes, order management): nothing. Any other type is flagged.
 - derived funding (below): one FUNDING event per (index, perp market, hour)
-  with `venue_ref = funding:{index}:{market_id}:{hour}`.
+  with `venue_ref = funding:{index}:{market_id}:{hour}`. Hours are booked
+  up to floor_hour(now - 5 min). An hour after the newest value in the
+  `fundings` answer is not out yet: it waits in the cursor and is tried
+  again at the end of the next pass, so the ledger does not depend on when
+  the sync ran (tested). An hour missing between published values is
+  booked as no funding and logged (a decision: Lighter's public record
+  shows none; reconcile catches any charge it made).
 
 Balances (`fetch_balances`), summed over the indexes from
 `account?by=index`: each asset's `balance` (spot) + `margin_balance` (cross
@@ -264,9 +312,9 @@ read.
 
 Decision (plan L1): public-pool and staking holdings are **not refused at
 watch time**; they are outside the reconciled vector (`shares[]` and
-`pending_unlocks` are ignored), the moves in and out are external flows, and
-the account carries the `pool_share` flag so its numbers say what they
-cover.
+`pending_unlocks` are ignored), the captured moves out are external flows,
+the uncaptured moves back are flagged only (see Events), and the account
+carries the `pool_share` flag so its numbers say what they cover.
 
 ## Streaming
 
@@ -356,11 +404,17 @@ with the rest.
   differed from the derived sum by 0.0000956 on one position, a little more
   than our rounding bound (0.0000747) [VERIFY Lighter's own rounding].
 - Spot fee asset (received asset assumed) [VERIFY].
-- Pool shares (LLP) and LIT staking: outside the vector, flows in and out,
-  flagged. The return on them is not Koine's to measure.
-- A sub-account created during a sync: a transfer to it is booked as
-  TRANSFER_OUT by the master's walk if the new index was not yet listed at
-  that pass's start [rare; the next passes do not undo it].
+- Pool shares (LLP) and LIT staking: outside the vector; flows out booked,
+  flows back flagged only (uncaptured shapes), so reconcile shows them. The
+  return on them is not Koine's to measure.
+- A sub-account created during a sync: the first unknown index of a pass
+  re-lists the address, so a transfer to it is internal. A second new
+  sub-account created later in the same pass (after that one re-list)
+  would still be booked as TRANSFER_OUT and not undone [rare].
+- Deleverage and market-settlement rows: not captured, flagged [VERIFY].
+- A delisted market that stops publishing funding while a position stays
+  open: its hours wait in the cursor and cost one `fundings` request per
+  pass [VERIFY what Lighter does with open positions at delisting].
 - REST `trades` (rich rows, trade ids) is not used until counsel Q1 clears;
   the explorer gives the same fills, so turning it on later would need the
   same ids (`index:tx_hash`) and identical legs.
@@ -399,7 +453,9 @@ before the hour, -position x the market's published funding for that hour
 (USD per unit, 8 dp; positive when longs pay). The position comes from the
 same trade replay. Error per hour: at most half a unit of the 8th decimal
 times the position; over a full sample history the reconstructed cash
-matched Lighter's to 0.0000025 USDC.
+matched Lighter's to 0.0000025 USDC. An hour is booked once Lighter has
+published its value; an hour with no published value between published
+ones is booked as no funding.
 
 **Lighter: fees.** Computed by Koine from Lighter's published fee rate on
 each trade (millionths of notional), exactly; Lighter states rates, not

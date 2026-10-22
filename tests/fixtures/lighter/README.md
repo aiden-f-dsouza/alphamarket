@@ -24,6 +24,14 @@ changed.
   from account objects (all empty or Lighter's own in the captures).
 - Account indexes are kept: they are what the plan and the tests refer to
   (714710, 760300). Order-book `owner_account_index` fields are dropped.
+  **This anonymises little, and that is accepted:** one public call
+  (`account?by=index&value=<index>`) maps any index back to its L1 address,
+  so the subject accounts (714710, 760300) and the counterparties in
+  transfer, pool and trade rows (762954, 742190, 731033, and every
+  maker/taker index) are as identifiable as the public explorer makes
+  them. Every row is public on-chain data, nothing here comes from a
+  private source, and no name or identity field is stored; replacing the
+  addresses keeps them out of the repo's text, not out of reach.
 
 ## Accounts
 
@@ -64,7 +72,9 @@ changed.
   field for field (price, size, side, both indexes, market, time to 1 ms;
   REST shows only the queried account's own fee). 760300's only deposit is
   `nothing_to_execute` and is in its cash. Other statuses seen: `null`,
-  `committed`.
+  `committed` (pool rows), `verified` (760300's two newest trades, both in
+  its positions). These five are the connector's `KNOWN_STATUSES`; any
+  other status is flagged and not booked.
 - One trade per tx hash in every capture (including a taker sweep across
   four makers: four hashes).
 - Entry quote and realized PnL rule: `trades_714710_perps`, 100 of 100

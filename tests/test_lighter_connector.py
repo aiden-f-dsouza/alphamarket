@@ -506,8 +506,10 @@ def test_full_history_walk_locates_genesis_then_walks_forward(frozen):
 def test_rows_arriving_during_a_walk_leave_no_gap_and_no_duplicate(frozen):
     """Three new rows land after the locate request and twelve more after
     the next one: offsets shift under the walk. The overlap absorbs the
-    first; the second pushes the anchor out of the page, so the walk steps
-    back and finds it. Every row is applied exactly once."""
+    first; the second pushes the anchor out of the page, so the walk asks
+    for the page past it and finds it there. Every row is applied exactly
+    once (tests/test_lighter_walk.py drives the walk with rows arriving
+    before every request)."""
     fake = fake_760300()
     base = fake.logs[760300]
     template = next(r for r in base if lighter.is_trade(r))
@@ -539,8 +541,9 @@ def test_rows_arriving_during_a_walk_leave_no_gap_and_no_duplicate(frozen):
 @respx.mock
 def test_next_sync_resumes_from_the_anchor_and_seeks_past_many_new_rows(frozen):
     """After a full pass, 150 new rows arrive (more than a page): the next
-    pass starts at offset 0, does not find its anchor, steps back by 90
-    until it does, then walks forward. Only the new rows come back."""
+    pass starts at offset 0, does not find its anchor (the page is newer),
+    asks for the next page down (offset 100) where it is, then walks
+    forward. Only the new rows come back."""
     fake = fake_760300()
     respx.route().mock(side_effect=fake)
     conn = connector()
@@ -968,3 +971,227 @@ def test_anchor_check_costs_one_page_and_sees_no_fills(frozen):
     anchor = take_asset_anchor(connector(), settle_seconds=0)
     assert anchor.balance_micros == 2_523_411_814  # USDC toward zero, micros
     assert sum(1 for p, _ in fake.calls if p.endswith("accountsByL1Address")) == 2
+
+
+# ---- funding hours Lighter has not published yet ---------------------------------------------
+
+LAST_HOUR = ts("2026-10-22T18:00:00Z")  # floor_hour(18:33:29 - 5 min)
+
+
+def _funding_refs(events) -> set[str]:
+    return {e.venue_ref for e in events if e.kind is LegKind.FUNDING}
+
+
+@respx.mock
+def test_an_hour_not_yet_published_waits_for_the_next_pass(frozen):
+    """The fundings answers end at 17:00, before the 18:00 cutoff: the pass
+    books up to 17:00 and keeps 18:00 pending ("fw") instead of dropping it
+    (`through` has already moved past it). Once Lighter publishes 18:00 the
+    next pass books exactly that hour for the three open positions, and a
+    third pass books nothing. The total equals one pass over the full
+    answers, so the ledger does not depend on when the sync ran."""
+    full = fake_760300()
+    respx.route().mock(side_effect=full)
+    whole, _, _ = run_pages(connector().fetch_events_page)
+
+    respx.reset()
+    fake = fake_760300()
+    late = dict(fake.fundings)
+    fake.fundings = {m: [r for r in rows if r["timestamp"] < LAST_HOUR] for m, rows in late.items()}
+    respx.route().mock(side_effect=fake)
+    conn = connector()
+    first, _, resume = run_pages(conn.fetch_events_page)
+    assert max(int(r.split(":")[3]) for r in _funding_refs(first)) == LAST_HOUR - 3600
+    assert {s[3] for s in json.loads(resume)["fw"]} == {LAST_HOUR}
+
+    fake.fundings = late  # 18:00 is out
+    second, _, resume = run_pages(conn.fetch_events_page, resume)
+    # BTC and RKLB were open just before 18:00 (XRP opened after it)
+    assert _funding_refs(second) == {f"funding:760300:{m}:{LAST_HOUR}" for m in (1, 186)}
+    third, _, _ = run_pages(conn.fetch_events_page, resume)
+    assert third == []
+    key = sorted  # the same events, whatever the order of the funding pages
+    assert key(e.venue_ref for e in first + second) == key(e.venue_ref for e in whole)
+    assert usdc_total([leg for e in first + second for leg in e.legs]) == usdc_total(
+        [leg for e in whole for leg in e.legs]
+    )
+
+
+@respx.mock
+def test_a_hole_inside_the_published_hours_is_skipped_and_logged(frozen, caplog):
+    """An hour missing between published values is an explicit decision: no
+    funding is booked for it (Lighter's public record shows none) and a
+    warning is logged; reconcile shows any charge Lighter did make."""
+    fake = fake_760300()
+    respx.route().mock(side_effect=fake)
+    whole = _funding_refs(run_pages(connector().fetch_events_page)[0])
+    hole = ts("2026-10-20T07:00:00Z")
+    assert f"funding:760300:1:{hole}" in whole  # BTC was open then
+    fake.fundings[1] = [r for r in fake.fundings[1] if r["timestamp"] != hole]
+    with caplog.at_level("WARNING", logger="alphamarket.connectors.lighter"):
+        events, _, resume = run_pages(connector().fetch_events_page)
+    assert _funding_refs(events) == whole - {f"funding:760300:1:{hole}"}
+    assert "unpublished hours" in caplog.text
+    assert not json.loads(resume).get("fw")  # nothing waits: the hour is skipped
+
+
+def test_back_to_back_segments_of_one_position_merge():
+    h = 3600
+    segments = [
+        [1, 7, 5, 3 * h, 3 * h],
+        [1, 7, 5, h, 2 * h],  # joins the one above: 1h..3h
+        [1, 7, 6, 4 * h, 4 * h],  # another position
+        [2, 7, 5, 4 * h, 5 * h],  # another index
+    ]
+    assert lighter.merge_segments(segments) == [
+        [1, 7, 5, h, 3 * h],
+        [1, 7, 6, 4 * h, 4 * h],
+        [2, 7, 5, 4 * h, 5 * h],
+    ]
+
+
+# ---- statuses, shapes and hashes the captures do not cover -----------------------------------
+
+
+def _trade_row(hash_: str, status, market: int = 1) -> dict:
+    return {
+        "hash": hash_,
+        "time": "2026-10-22T10:00:00Z",
+        "pubdata_type": "Trade",
+        "status": status,
+        "pubdata": {
+            "trade_pubdata": {
+                "market_index": market,
+                "is_taker_ask": 0,
+                "maker_fee": 0,
+                "taker_fee": 0,
+                "taker_account_index": "760300",
+                "maker_account_index": "1",
+                "price": "80000.0",
+                "size": "0.01000",
+            }
+        },
+    }
+
+
+@respx.mock
+def test_only_known_statuses_are_booked(frozen):
+    """executed, nothing_to_execute, committed, verified and null are in the
+    account's state (README); an unknown status ("failed") is flagged and
+    neither stream books it."""
+    fake = FakeLighter()
+    fake.fundings[1] = []  # nothing published: the open BTC hours wait
+    statuses = ["executed", "nothing_to_execute", "committed", "verified", None, "failed"]
+    fake.logs[760300] = [_trade_row(f"s{i}", s) for i, s in enumerate(statuses)]
+    respx.route().mock(side_effect=fake)
+    conn = connector()
+    fills, _, _ = run_pages(conn.fetch_asset_fills_page)
+    assert [f.venue_fill_id for f in fills] == [f"760300:s{i}" for i in reversed(range(5))]
+    flags = conn.drain_unsupported()
+    assert [(f.venue_ref, f.description) for f in flags] == [
+        ("760300:s5", "explorer status 'failed'")
+    ]
+    run_pages(conn.fetch_events_page)
+    assert [f.venue_ref for f in conn.drain_unsupported()] == ["760300:s5"]
+
+
+@respx.mock
+def test_a_trade_like_row_in_another_shape_is_flagged_by_the_fills_stream():
+    """A Deleverage (not captured) without trade pubdata would move the
+    position: the fills stream flags it instead of skipping it silently."""
+    fake = FakeLighter()
+    fake.logs[760300] = [
+        {
+            "hash": "d1",
+            "time": "2026-10-22T10:00:00Z",
+            "pubdata_type": "Deleverage",
+            "status": "executed",
+            "pubdata": {"deleverage_pubdata": {"market_index": 1, "size": "0.01000"}},
+        }
+    ]
+    respx.route().mock(side_effect=fake)
+    conn = connector()
+    fills, _, _ = run_pages(conn.fetch_asset_fills_page)
+    assert fills == []
+    assert [(f.venue_ref, f.activity_type) for f in conn.drain_unsupported()] == [
+        ("760300:d1", "Deleverage")
+    ]
+
+
+@respx.mock
+def test_a_market_finer_than_six_dp_is_flagged_not_raised():
+    """size_decimals + price_decimals > 6 would make price x size finer than
+    a micro: every trade of that market is flagged and the sync goes on."""
+    import dataclasses
+
+    respx.route().mock(side_effect=FakeLighter())
+    conn = connector()
+    btc = conn.markets()[1]
+    conn.markets()[1] = dataclasses.replace(btc, price_decimals=btc.price_decimals + 1)
+    assert conn._fill(760300, "760300:f", _trade_row("f", "executed"), {}) is None
+    (flag,) = conn.drain_unsupported()
+    assert flag.venue_ref == "760300:f" and "finer than 6 dp" in flag.description
+
+
+@respx.mock
+def test_unstake_and_burn_rows_are_flagged_with_no_legs():
+    """The way back from a pool or staking is not captured, and one unstake
+    may log a request row and an executed-unlock row: booking both would
+    count the money twice. So these are flagged only [VERIFY]."""
+    fake = FakeLighter()
+    kinds = ["L2UnstakeAssets", "ExecutedPendingUnlock", "BurnedShares", "L2BurnShares"]
+    fake.logs[760300] = [
+        {
+            "hash": f"p{i}",
+            "time": f"2026-10-22T1{i}:00:00Z",
+            "pubdata_type": kind,
+            "status": "executed",
+            "pubdata": {"x_pubdata": {"account_index": "760300", "lit_amount": "5.0"}},
+        }
+        for i, kind in enumerate(kinds)
+    ]
+    respx.route().mock(side_effect=fake)
+    conn = connector()
+    events, _, _ = run_pages(conn.fetch_events_page)
+    assert events == []
+    flags = conn.drain_unsupported()
+    assert sorted(f.activity_type for f in flags) == sorted(kinds)
+    assert {f.reason for f in flags} == {"pool_share"}
+
+
+@respx.mock
+def test_a_sub_account_created_during_the_pass_is_internal():
+    """The pass lists [714710]; by the time the walk meets the transfers to
+    731033, it is the address's new sub-account. The first unknown index
+    re-lists the address once: the transfers to 731033 move nothing, the
+    LIT from 742190 (someone else) still comes in, and 731033 is walked in
+    the same pass. One re-list per pass, not one per transfer."""
+    fake = FakeLighter()
+    fake.logs[714710] = raw_rows("explorer_logs_L2TransferV2")
+    fake.logs[731033] = []
+    master = json.loads(fx_text("accountsByL1Address_714710"))
+    grown = json.loads(json.dumps(master))
+    grown["sub_accounts"].append({"account_type": 1, "index": 731033})
+    route = respx.get(f"{API_URL}/accountsByL1Address").mock(
+        side_effect=[httpx.Response(200, json=master), httpx.Response(200, json=grown)]
+    )
+    respx.route().mock(side_effect=fake)
+    events, _, resume = run_pages(connector(ADDR_A).fetch_events_page)
+    assert [(e.kind, e.legs[0].asset) for e in events] == [(LegKind.TRANSFER_IN, "LIT")]
+    assert route.call_count == 2
+    assert [p for p, _ in fake.calls if p.startswith("/api/accounts/")] == [
+        "/api/accounts/714710/logs",
+        "/api/accounts/731033/logs",
+    ]
+    assert json.loads(resume)["ix"] == [714710, 731033]
+
+
+@respx.mock
+def test_a_frame_with_a_null_error_is_not_an_error():
+    respx.route().mock(side_effect=FakeLighter())
+    source = connector(ADDR_A).stream_source()
+    source.prepare()
+    snapshot = json.loads(fx_text("ws_frames"))["subscribed/account_all_trades"]
+    update = {**snapshot, "type": "update/account_all_trades", "error": None}
+    (event,) = source.parse(json.dumps(update))
+    assert event.nudge
