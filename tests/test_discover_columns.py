@@ -344,14 +344,47 @@ def test_hyperliquid_page_is_unchanged(client, session_factory, settings):
     assert "Polymarket" not in html.split('aria-label="Period"')[1].split("</nav>")[1]
 
 
-def test_rows_from_before_the_new_keys_still_render(client, session_factory, settings):
+def test_rows_from_before_the_new_keys_render_with_empty_columns_hidden(
+    client, session_factory, settings
+):
+    # A snapshot stored before enrichment (or one whose enrichment failed)
+    # has no values for the wallet-stat columns: they are hidden, not blank.
     _pm_snapshot(session_factory, with_details=False)
     signup(client, "a@example.com")
     resp = client.get("/watch/discover?venue=polymarket&period=week")
     assert resp.status_code == 200 and "$9,000" in resp.text
+    assert ">PnL</span>" in resp.text
+    for label in ("Volume (UTC days)", "Positions value", "Markets", "Biggest win", "Since"):
+        assert f">{label}</span>" not in resp.text
     api = client.get("/api/watch/discover?venue=polymarket&period=week").json()
-    assert api["rows"][0]["positions_value_micros"] is None
-    assert api["rows"][0]["markets_traded"] is None
+    assert api["columns"] == ["pnl"]
+    assert api["rows"][0] == {
+        "address": addr(1),
+        "rank": 1,
+        "pnl_micros": 9_000_000_000,
+        "state": "add",
+    }
+
+
+def test_a_column_shows_when_any_row_has_a_value():
+    def row(**kw):
+        base = dict(
+            venue="polymarket",
+            address=addr(1),
+            short="",
+            rank=1,
+            pnl_micros=1,
+            roi=None,
+            volume_micros=None,
+            account_value_micros=None,
+            state="add",
+        )
+        return discover.DiscoverRow(**{**base, **kw})
+
+    columns = get_profile("polymarket").leaderboard_columns
+    rows = [row(), row(markets_traded=0), row(volume_micros=5)]  # 0 is a value, None is not
+    assert discover.shown_columns(columns, rows) == ("pnl", "volume", "markets_traded")
+    assert discover.shown_columns(columns, []) == ("pnl",)
 
 
 def test_json_api_shape_per_venue(client, session_factory, settings):

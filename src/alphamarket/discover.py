@@ -67,6 +67,17 @@ COLUMN_LABELS = {
     "active_since": "Since",
 }
 VENUE_COLUMN_LABELS = {"polymarket": {"volume": "Volume (UTC days)"}}
+# Column -> DiscoverRow field (also its /api/watch/discover key). pnl is
+# always present, so it is not here.
+COLUMN_FIELDS = {
+    "roi": "roi",
+    "volume": "volume_micros",
+    "account_value": "account_value_micros",
+    "positions_value": "positions_value_micros",
+    "markets_traded": "markets_traded",
+    "biggest_win": "biggest_win_micros",
+    "active_since": "active_since",
+}
 
 
 class RowState:
@@ -139,21 +150,22 @@ def row_json(view: "DiscoverView", r: DiscoverRow) -> dict:
     """One row of /api/watch/discover: the venue's columns only (integer
     micros for money, epoch seconds for active_since)."""
     out: dict = {"address": r.address, "rank": r.rank, "pnl_micros": r.pnl_micros}
-    keys = {
-        "roi": ("roi", r.roi),
-        "volume": ("volume_micros", r.volume_micros),
-        "account_value": ("account_value_micros", r.account_value_micros),
-        "positions_value": ("positions_value_micros", r.positions_value_micros),
-        "markets_traded": ("markets_traded", r.markets_traded),
-        "biggest_win": ("biggest_win_micros", r.biggest_win_micros),
-        "active_since": ("active_since", r.active_since),
-    }
     for column in view.columns:
-        if column in keys:
-            key, value = keys[column]
-            out[key] = value
+        if column in COLUMN_FIELDS:
+            out[COLUMN_FIELDS[column]] = getattr(r, COLUMN_FIELDS[column])
     out["state"] = r.state
     return out
+
+
+def shown_columns(columns: tuple[str, ...], rows: list[DiscoverRow]) -> tuple[str, ...]:
+    """The venue's columns minus any that no row has a value for (a snapshot
+    from before a column existed, or enrichment that failed): an empty column
+    reads as broken. pnl always shows."""
+    return tuple(
+        c
+        for c in columns
+        if c not in COLUMN_FIELDS or any(getattr(r, COLUMN_FIELDS[c]) is not None for r in rows)
+    )
 
 
 def enabled() -> bool:
@@ -422,6 +434,10 @@ def discover_view(
                 active_since=r.get("active_since"),
             )
         )
+    columns = shown_columns(columns, rows)
+    if sort not in ("pnl", *columns):  # roi hidden: nothing to sort by
+        sort = "pnl"
+        rows.sort(key=lambda r: r.pnl_micros, reverse=True)
     return DiscoverView(
         venue=venue,
         period=period,
