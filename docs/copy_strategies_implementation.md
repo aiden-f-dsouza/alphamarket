@@ -342,7 +342,7 @@ every `watch_discover_refresh_minutes`, 60) streams Hyperliquid's
 undocumented `stats-data` leaderboard file (~39 MB, 47k rows; kept: top
 rows by pnl and by roi above `watch_discover_min_account_value`, $10k, with
 volume in the period) and Polymarket's Data API v2 `/v2/leaderboard`
-(only where `watch_venues` opens Polymarket; prod does not). Identity
+(prod opens Polymarket since 2026-10-22: fly.toml `WATCH_VENUES`). Identity
 fields are dropped in the connector. `/watch/discover` and
 `/api/watch/discover` read the snapshot only; Add posts to `POST /watch`
 and returns to discover. Static demo shows both venues; the seeded demo

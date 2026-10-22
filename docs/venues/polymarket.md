@@ -8,9 +8,11 @@ of the connect flow so far. Reading the current Terms of Use turned up one
 clause (the "Data" clause, section 4.2) that may reach Koine as a company
 whatever the use case, and a scraping clause whose reach over the public API
 is unclear. Both are listed under "Open questions for counsel". Until counsel
-has answered, treat the Terms position below as **unconfirmed**, and do not
-ship the private watchlist (docs/copy_strategies_plan.md section 2) for
-Polymarket.
+has answered, treat the Terms position below as **unconfirmed**. The private
+watchlist and the leaderboard discover page shipped for Polymarket ahead of
+counsel on 2026-10-22 (founder decision, as for Hyperliquid): fly.toml `[env]`
+sets `WATCH_VENUES = "hyperliquid,polymarket"`; drop `polymarket` there and
+redeploy to vault both.
 
 Checked: 2026-10-07 (the date every quote below was read). Written by an AI
 assistant for Aiden and counsel; not legal advice. Anything not confirmed is
@@ -302,8 +304,9 @@ terms position above.
 
 ## Watchlist (third-party addresses)
 
-New use, proposed in docs/copy_strategies_plan.md section 2. **Not live;
-blocked on this document.** A logged-in Koine user pastes a public Polymarket
+New use, proposed in docs/copy_strategies_plan.md section 2. **Live in
+production since 2026-10-22, ahead of counsel** (founder decision; vault by
+removing `polymarket` from `WATCH_VENUES` in fly.toml). A logged-in Koine user pastes a public Polymarket
 address that is not a Koine member; Koine ingests the address's public fills
 through the same connector and shows that user the usual statistics, and lets
 them paper-tail it.
@@ -339,17 +342,17 @@ Position, from Koine's side:
 Terms questions specific to the watchlist: the Data clause (`4.2`) applies in
 the same way as above, and the scraping bullets apply with more force
 (collecting data on accounts whose owners have not engaged with Koine at all).
-**Recommendation: do not build the Polymarket side of the watchlist until
-counsel and, ideally, Polymarket have answered.** The Hyperliquid side has a
+The original recommendation was to wait for counsel and, ideally, Polymarket;
+the founder chose to ship ahead of both (2026-10-22). The questions stay open. The Hyperliquid side has a
 cleaner terms position (docs/venues/hyperliquid.md).
 
 ## Leaderboard (watch discover)
 
-Copy strategies step 7 (`discover.py`, `/watch/discover`). The code exists
-and is tested, but **it does not run in production**: discover only covers
-venues open for watching, and `WATCH_VENUES` is `hyperliquid` there. It runs
-only where an operator adds `polymarket` to `WATCH_VENUES` (and
-`WATCH_DISCOVER_ENABLED` is on). Checked 2026-10-14.
+Copy strategies step 7 (`discover.py`, `/watch/discover`). **Live in
+production since 2026-10-22, ahead of counsel**: fly.toml `[env]` sets
+`WATCH_VENUES = "hyperliquid,polymarket"` and `WATCH_DISCOVER_ENABLED`. Remove
+`polymarket` from `WATCH_VENUES` to vault watches and discover together.
+Endpoint checked 2026-10-14.
 
 Endpoint. `GET https://data-api.polymarket.com/v2/leaderboard` (Data API v2;
 the v1 `/v1/leaderboard` retires with the rest of v1 on 2026-10-24), no
@@ -393,8 +396,7 @@ applies, with more force: the board lists thousands of wallets whose owners
 have no relationship with Koine, and Koine stores a ranked copy of it. The
 leaderboard is published by Polymarket for everyone, and Koine keeps only
 addresses and Polymarket's own pnl, never the names, handles or pictures that
-come with it. [VERIFY with counsel before `polymarket` is added to
-`WATCH_VENUES` anywhere public: open questions 1, 3 and 5 cover it, plus
+come with it. [VERIFY with counsel; shipped ahead of the answer on 2026-10-22: open questions 1, 3 and 5 cover it, plus
 whether storing a ranked copy of the board is "collecting" or "copying the
 material" under section 4.2.]
 

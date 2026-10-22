@@ -61,3 +61,4 @@ primary_region = "iad"
 # and running `fly deploy`.
 [env]
   WATCH_DISCOVER_ENABLED = "true"  # /watch/discover (copy strategies step 7)
+  WATCH_VENUES = "hyperliquid,polymarket"  # watchable + discoverable venues; drop one to vault it
