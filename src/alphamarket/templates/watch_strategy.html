@@ -11,6 +11,8 @@
   .side { font:11px var(--mono); letter-spacing:.08em; text-align:center; padding:4px 0; border-radius:var(--r); border:1px solid; }
   .wrow { display:grid; grid-template-columns:150px 80px 110px minmax(0,1fr); gap:16px; align-items:baseline; padding:12px 0; border-bottom:1px solid var(--line); }
   .months th, .months td { padding-left:4px; padding-right:4px; }
+  .tail-details > summary { cursor:pointer; font-size:14px; color:var(--text2); padding:6px 0; }
+  .tail-details .terms > div { display:grid; grid-template-columns:130px minmax(0, 1fr); gap:12px; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px; }
   .tailcard .kv > * > :first-child { white-space:nowrap; } .tailcard .kv > * > :last-child { text-align:right; font-size:13px; }
   .addr { font:13px var(--mono); color:var(--text2); overflow-wrap:anywhere; }
   .manage { display:flex; gap:10px; align-items:end; flex-wrap:wrap; }
@@ -61,6 +63,8 @@
     {% if page.tailing.state == "active" %}
     <span class="small text2">You are paper-tailing this address. Its positions and copy lag are on your portfolio.</span>
     <a class="btn lg secondary" href="/portfolio">View in your portfolio</a>
+    {% elif page.tailing.form_action %}
+    {{ m.tail_inline_form(page.tailing) }}
     {% else %}
     <a class="btn lg" href="{{ page.tailing.href }}">Start a paper tail</a>
     {% endif %}

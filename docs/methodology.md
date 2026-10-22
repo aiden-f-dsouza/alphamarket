@@ -241,6 +241,12 @@ Signals are append-only facts about fills that already happened; they are
 never recommendations. A follower who joins sees only signals from that moment
 on; nothing earlier is replayed.
 
+**Drawdown limit default.** The tail form preselects the smallest offered limit
+(5%, 10%, 15%, 20%, 25%, 30%, 40%, 50%) strictly larger than the strategy's own
+worst drawdown, so its record would not already have tripped the stop; with no
+statistics yet it preselects 15%, and a record worse than 50% preselects 50%.
+A limit at or inside the worst drawdown is flagged on the form.
+
 **Sizing.** Counts are floored to 0.01 contract, the venue's own granularity.
 
 ```

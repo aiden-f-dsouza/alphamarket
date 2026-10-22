@@ -83,7 +83,7 @@ def test_headers_present_demo_off(client):
         _assert_headers(resp)
         _assert_no_inline_script_or_handlers(resp.text, path)
     # DEMO_ONLY routes 404 with demo off, but still get the headers.
-    for path in DEMO_ONLY:
+    for path in [p for p in DEMO_ONLY if p != "/feed"]:  # /feed redirects to login now
         resp = client.get(path)
         assert resp.status_code == 404, path
         _assert_headers(resp)

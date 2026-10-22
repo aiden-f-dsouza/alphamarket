@@ -160,3 +160,45 @@
   {% endif %}
 </div>
 {%- endmacro %}
+
+{# ---- paper-tail form pieces, shared by the strategy page, the watch page and
+   tail.html so they cannot drift. `f` is pages.tail_form_fields (or the tail
+   page's t, which carries the same keys). #}
+{% macro tail_drawdown(f, id="drawdown") -%}
+<select id="{{ id }}" name="drawdown_limit_bps" class="mono" style="font-size:20px">
+  {% for bps, label in f.dd_choices %}<option value="{{ bps }}" {{ "selected" if bps == f.dd_bps }}>{{ label }}</option>{% endfor %}
+</select>
+{% if f.dd_note %}<span class="small" style="color:var(--bad)" role="note">{{ f.dd_note }}</span>{% endif %}
+<span class="small muted">Measured from the paper allocation's high. If it falls this far, no new trades are copied.{% if f.worst_dd is not none %} The strategy's worst drawdown so far is {{ "%.1f"|format(f.worst_dd * 100) }}%.{% endif %}</span>
+{%- endmacro %}
+
+{% macro tail_confirm(f, accent="") -%}
+<label style="display:flex;align-items:flex-start;gap:12px;font-size:14px;line-height:1.5" class="text2"><input type="checkbox" name="confirm" required {{ "checked" if f.confirmed }} style="width:18px;height:18px;margin:2px 0 0;padding:0;flex-shrink:0{% if accent %};accent-color:{{ accent }}{% endif %}">I understand this is a paper simulation of a strategy with a {% if f.track_days %}{{ f.track_days }}-day{% else %}new{% endif %} record. Paper results are modelled: they assume the quoted price was available in my size, and a real account could do worse.</label>
+{%- endmacro %}
+
+{% macro tail_terms_details(f, summary="How paper fills are priced") -%}
+<details class="tail-details">
+  <summary>{{ summary }}</summary>
+  <div class="terms">
+    {% for a, b in f.terms %}<div><span class="text2">{{ a }}</span><span>{{ b }}</span></div>{% endfor %}
+    <span class="small muted" style="padding-top:10px">The full model, with worked examples, is on the <a href="/verification" style="text-decoration:underline">Verification</a> page.</span>
+  </div>
+</details>
+<details class="tail-details">
+  <summary>Koine pricing</summary>
+  <div class="terms">{% for a, b in f.pricing_rows %}<div><span class="text2">{{ a }}</span><span>{{ b }}</span></div>{% endfor %}</div>
+</details>
+{%- endmacro %}
+
+{% macro tail_inline_form(f) -%}
+<form method="post" action="{{ f.form_action }}" class="stack" style="gap:14px">
+  <label class="field" for="tail-allocation"><span class="label">Paper allocation</span>
+    <span style="display:flex;align-items:center;gap:8px"><span class="mono muted" style="font-size:20px">$</span><input id="tail-allocation" name="allocation" type="number" inputmode="decimal" required min="{{ f.min_usd }}" max="{{ f.max_usd }}" step="0.01" value="{{ f.allocation_input }}" class="mono" style="font-size:20px"></span>
+    <span class="small muted">${{ "{:,}".format(f.min_usd) }} min, ${{ "{:,}".format(f.max_usd) }} max · paper money</span>
+  </label>
+  <label class="field" for="tail-drawdown"><span class="label">Maximum drawdown</span>{{ tail_drawdown(f, "tail-drawdown") }}</label>
+  {{ tail_terms_details(f) }}
+  {{ tail_confirm(f) }}
+  <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap"><button class="btn lg" type="submit">Start paper tail</button><a class="small text2" href="{{ f.form_action }}" style="text-decoration:underline">Full details</a></div>
+</form>
+{%- endmacro %}
