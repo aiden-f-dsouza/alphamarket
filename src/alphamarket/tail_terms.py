@@ -30,6 +30,29 @@ DRAWDOWN_CHOICES_BPS = (500, 1000, 1500, 2000, 2500, 3000, 4000, 5000)
 DEFAULT_DRAWDOWN_BPS = 1500
 
 
+def default_drawdown_bps(max_drawdown: float | None) -> int:
+    """The drawdown limit a tail form preselects for a strategy: the smallest
+    choice strictly looser than the strategy's own worst drawdown (a fraction,
+    0.183 -> 2000), so its record would not already have tripped the stop. No
+    stats -> DEFAULT_DRAWDOWN_BPS; worse than every choice -> the loosest."""
+    if max_drawdown is None:
+        return DEFAULT_DRAWDOWN_BPS
+    for bps in DRAWDOWN_CHOICES_BPS:
+        if bps / 10_000 > max_drawdown:
+            return bps
+    return DRAWDOWN_CHOICES_BPS[-1]
+
+
+def drawdown_note(max_drawdown: float | None, bps: int) -> str | None:
+    """A warning for a limit at or inside the strategy's worst drawdown."""
+    if max_drawdown is None or bps / 10_000 > max_drawdown:
+        return None
+    return (
+        f"This strategy has already fallen {max_drawdown * 100:.1f}% from a high. "
+        "A tighter limit is likely to stop the tail."
+    )
+
+
 def venue_label(venue: str) -> str:
     """Short venue name for page chrome ("Interactive Brokers", without the
     profile's "(Flex)" report-type suffix)."""

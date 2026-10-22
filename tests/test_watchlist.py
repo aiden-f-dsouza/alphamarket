@@ -221,6 +221,10 @@ def test_a_listed_creator_address_links_to_its_public_page(client, session_facto
 def test_paper_tail_of_a_watch_then_remove(client, session_factory, info):
     signup(client, "a@example.com")
     sid = watched_id(add(client, label="Perp whale"))
+    inline = client.get(f"/watch/{sid}").text  # the page's own tail card posts the form
+    assert f'<form method="post" action="/watch/{sid}/tail"' in inline
+    assert 'name="allocation"' in inline and 'name="confirm"' in inline
+    assert "selected>" in inline and 'href="#"' not in inline
     page = client.get(f"/watch/{sid}/tail")
     assert page.status_code == 200 and BANNER in page.text
     assert f'action="/watch/{sid}/tail"' in page.text

@@ -78,7 +78,8 @@ def _start(client, slug="eth-swing", allocation="2500", bps="2000", confirm=True
 def test_logged_out_card_sends_the_visitor_to_login_and_back(client, eth):
     html = client.get(f"/s/{eth}").text
     assert "Paper-tail this strategy" in html
-    assert 'href="/login?next=/s/eth-swing/tail"' in html  # the tail button
+    assert 'href="/signup?next=/s/eth-swing"' in html  # the tail button: most visitors are new
+    assert 'href="/login?next=/s/eth-swing"' in html
     assert 'href="/login?next=/s/eth-swing"' in html  # the follow button
     assert "0 following" in html and "0 followers" in html
     # fill and cost text from the venue profile, the same words as the sample pages
@@ -294,6 +295,75 @@ def test_static_demo_strategy_card_keeps_its_sample_wording(client, demo_mode):
     assert 'href="/s/weather-cpi-mean-reversion/tail"' in html
 
 
+# ---- inline form on the strategy page -------------------------------------------------------
+
+
+@pytest.fixture()
+def deep(session_factory) -> str:
+    """A strategy whose worst drawdown is 18.3%."""
+    with session_factory() as db:
+        s = _strategy(db, "kraken", "deep-dd", "Deep DD")
+        _stats(db, s, v2_extras(), max_drawdown=0.183)
+        db.commit()
+        return s.slug
+
+
+def test_strategy_page_has_the_inline_tail_form(client, eth, viewer):
+    html = client.get(f"/s/{eth}").text
+    assert '<form method="post" action="/s/eth-swing/tail"' in html
+    assert 'name="allocation"' in html and 'value="2000"' in html
+    assert 'min="100"' in html and 'max="1000000"' in html
+    assert '<option value="1500" selected>' in html  # worst drawdown 10% -> -15%
+    assert 'name="confirm"' in html and "paper simulation" in html
+    assert "How paper fills are priced" in html and "Full details" in html
+    assert 'href="#"' not in html
+
+
+def test_inline_form_default_follows_the_strategys_drawdown(client, deep, viewer):
+    html = client.get(f"/s/{deep}").text
+    assert '<option value="2000" selected>' in html
+    assert "already fallen" not in html
+
+
+def test_tighter_limit_note_renders_on_a_rerender(client, deep, viewer):
+    resp = _start(client, slug=deep, bps="1500", confirm=False)  # error path keeps the choice
+    assert resp.status_code == 422
+    assert '<option value="1500" selected>' in resp.text
+    assert "already fallen 18.3% from a high" in resp.text
+    assert "A tighter limit is likely to stop the tail" in resp.text
+
+
+def test_posting_from_the_strategy_page_form_starts_the_tail(client, session_factory, deep, viewer):
+    html = client.get(f"/s/{deep}").text
+    assert 'action="/s/deep-dd/tail"' in html
+    resp = _start(client, slug=deep, allocation="2000", bps="2000")
+    assert resp.status_code == 303 and resp.headers["location"] == "/portfolio?notice=started"
+    (row,) = _allocations(session_factory, viewer)
+    assert row.drawdown_limit_bps == 2000
+
+
+def test_anon_card_links_to_signup_and_login(client, eth):
+    html = client.get(f"/s/{eth}").text
+    assert 'href="/signup?next=/s/eth-swing"' in html
+    assert '<form method="post" action="/s/eth-swing/tail"' not in html
+    assert 'name="next" value="/s/eth-swing"' in client.get("/signup?next=/s/eth-swing").text
+
+
+def test_own_strategy_has_no_inline_form(client, session_factory, viewer):
+    with session_factory() as db:
+        s = _strategy(db, "kraken", "mine", "Mine", user=db.get(User, viewer))
+        _stats(db, s, v2_extras())
+        db.commit()
+    html = client.get("/s/mine").text
+    assert 'action="/s/mine/tail"' not in html and "Creators cannot paper-tail" in html
+
+
+def test_sample_strategy_page_has_no_submitting_tail_form(client, demo_mode):
+    html = client.get("/s/weather-cpi-mean-reversion").text
+    assert 'action="/s/weather-cpi-mean-reversion/tail"' not in html
+    assert 'name="confirm"' not in html
+
+
 # ---- stopping a tail -------------------------------------------------------------------------
 
 
@@ -307,7 +377,7 @@ def test_stop_a_tail_from_the_portfolio(client, session_factory, eth, viewer):
     html = client.get("/portfolio?notice=stopped").text
     assert "Paper tail stopped" in html and "Stop paper tail" not in html
     # a stopped tail frees the strategy for a new one
-    assert "Start a paper tail" in client.get(f"/s/{eth}").text
+    assert "Start paper tail" in client.get(f"/s/{eth}").text
     assert _start(client).status_code == 303
 
 

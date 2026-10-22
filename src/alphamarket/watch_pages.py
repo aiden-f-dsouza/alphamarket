@@ -31,6 +31,7 @@ from alphamarket.pages import (
     _worst_periods,
     login_url,
     start_tail_form,
+    tail_form_fields,
 )
 from alphamarket.public import INCUBATION_DAYS, SPARKLINE_DAYS, is_v2, page_data
 from alphamarket.tail_terms import tailing_card
@@ -351,10 +352,13 @@ def _watch_page(db: Session, user: User, w: Watched) -> dict:
     card = tailing_card(w.account.venue, 0)
     card.pop("paper_tails")
     active = active_allocation(db, user.id, w.strategy.id) is not None
+    tail_path = f"/watch/{w.strategy.id}/tail"
     card.update(
         state="active" if active else "ready",
-        href="/portfolio" if active else f"/watch/{w.strategy.id}/tail",
+        href="/portfolio" if active else tail_path,
     )
+    if not active:
+        card.update(tail_form_fields(page, w.account.venue, tail_path))
     page["tailing"] = card
     return page
 

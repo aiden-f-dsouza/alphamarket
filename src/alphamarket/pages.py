@@ -83,6 +83,8 @@ from alphamarket.tail_terms import (
     DEFAULT_DRAWDOWN_BPS,
     DRAWDOWN_CHOICES_BPS,
     PRICING_ROWS,
+    default_drawdown_bps,
+    drawdown_note,
     paper_terms,
     tailing_card,
 )
@@ -708,14 +710,42 @@ def _tailing(db: Session, strategy: Strategy, page: dict, user: User | None) -> 
     card = tailing_card(venue, active_tail_count(db, strategy.id))
     tail_path = f"/s/{strategy.slug}/tail"
     if user is None:
-        card.update(state="anon", href=login_url(tail_path))
+        card.update(
+            state="anon",
+            href=f"/signup?next={tail_path.removesuffix('/tail')}",
+            login_href=login_url(f"/s/{strategy.slug}"),
+        )
     elif strategy.user_id == user.id:
         card.update(state="own", href=None)
     elif active_allocation(db, user.id, strategy.id) is not None:
         card.update(state="active", href="/portfolio")
     else:
-        card.update(state="ready", href=tail_path)
+        card.update(state="ready", href=tail_path, **tail_form_fields(page, venue, tail_path))
     return card
+
+
+def tail_form_fields(
+    page: dict, venue: str, action: str, drawdown_bps: int | None = None, allocation: str = "2000"
+) -> dict:
+    """What the inline tail form (strategy and watch pages) and tail.html need:
+    the allocation bounds, the drawdown choices with the strategy-aware default
+    and its note, and the pricing rows for the collapsed disclosures."""
+    st = page.get("stats")
+    worst = st["max_drawdown"] if st else None
+    bps = default_drawdown_bps(worst) if drawdown_bps is None else drawdown_bps
+    return {
+        "form_action": action,
+        "min_usd": MIN_ALLOCATION_MICROS // 1_000_000,
+        "max_usd": MAX_ALLOCATION_MICROS // 1_000_000,
+        "allocation_input": allocation,
+        "dd_choices": DRAWDOWN_LABELS,
+        "dd_bps": bps,
+        "dd_note": drawdown_note(worst, bps),
+        "worst_dd": worst,
+        "track_days": st["track_days"] if st else None,
+        "terms": paper_terms(venue)["rows"] if venue in PROFILES else [],
+        "pricing_rows": PRICING_ROWS,
+    }
 
 
 DRAWDOWN_LABELS = [(bps, f"−{bps // 100}%") for bps in DRAWDOWN_CHOICES_BPS]
@@ -726,7 +756,7 @@ def _tail_ctx(
     strategy: Strategy,
     user: User,
     allocation: str = "2000",
-    drawdown_bps: int = DEFAULT_DRAWDOWN_BPS,
+    drawdown_bps: int | None = None,
     confirmed: bool = False,
     error: str | None = None,
 ) -> dict:
@@ -736,13 +766,7 @@ def _tail_ctx(
     return {
         "real": True,
         "strategy": page,
-        "terms": paper_terms(venue)["rows"] if venue in PROFILES else [],
-        "pricing_rows": PRICING_ROWS,
-        "min_usd": MIN_ALLOCATION_MICROS // 1_000_000,
-        "max_usd": MAX_ALLOCATION_MICROS // 1_000_000,
-        "allocation_input": allocation,
-        "dd_choices": DRAWDOWN_LABELS,
-        "dd_bps": drawdown_bps,
+        **tail_form_fields(page, venue, f"/s/{strategy.slug}/tail", drawdown_bps, allocation),
         "confirmed": confirmed,
         "error": error,
         "own": strategy.user_id == user.id,
