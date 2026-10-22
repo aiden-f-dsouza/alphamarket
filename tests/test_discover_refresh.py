@@ -414,15 +414,31 @@ def test_tick_enqueues_only_when_enabled(session_factory, settings, monkeypatch)
 
 def test_startup_tick_skips_fresh_snapshots(session_factory, settings, monkeypatch):
     monkeypatch.setattr(worker, "utcnow", lambda: NOW)
+    monkeypatch.setattr(settings, "watch_venues", "hyperliquid")
     with session_factory() as db:
-        discover.store_snapshot(db, "hyperliquid", "week", [], NOW - timedelta(minutes=10))
+        for period in discover.periods_for("hyperliquid"):
+            discover.store_snapshot(db, "hyperliquid", period, [], NOW - timedelta(minutes=10))
         db.commit()
     worker.tick_watch_discover(session_factory, only_if_stale=True)
     with session_factory() as db:
         assert _discover_jobs(db) == []  # 10 minutes old, interval 60
 
-        snap = db.scalar(select(LeaderboardSnapshot))
+        snap = db.scalar(select(LeaderboardSnapshot).where(LeaderboardSnapshot.period == "week"))
         snap.fetched_at = NOW - timedelta(minutes=61)
+        db.commit()
+    worker.tick_watch_discover(session_factory, only_if_stale=True)
+    with session_factory() as db:
+        assert len(_discover_jobs(db)) == 1
+
+
+def test_startup_tick_runs_for_a_newly_opened_venue(session_factory, settings, monkeypatch):
+    """Opening a venue in WATCH_VENUES: its snapshots are missing, so the
+    worker-start tick refreshes even though the other venue's are fresh."""
+    monkeypatch.setattr(worker, "utcnow", lambda: NOW)
+    monkeypatch.setattr(settings, "watch_venues", "hyperliquid,polymarket")
+    with session_factory() as db:
+        for period in discover.periods_for("hyperliquid"):
+            discover.store_snapshot(db, "hyperliquid", period, [], NOW - timedelta(minutes=10))
         db.commit()
     worker.tick_watch_discover(session_factory, only_if_stale=True)
     with session_factory() as db:
