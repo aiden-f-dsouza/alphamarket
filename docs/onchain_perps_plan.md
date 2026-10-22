@@ -8,8 +8,8 @@ per-venue discover columns, #42/#43). Lighter and Pacifica are in
 COUNSEL`, so preflight keeps them out of prod `WATCH_VENUES`. Integration
 added `VenueProfile.perps` (tail terms name funding and liquidation for every
 perp venue) and merged both venues' methodology notes into
-`docs/methodology.md`. Open: founder decisions 4-5 (GMX account model, read
-the G0 note), the S4 prod check that stored EVM addresses are lowercase,
+`docs/methodology.md`. Founder decisions 4-5 resolved (GMX: model B, numeric policy
+accepted). Open: the S4 prod check that stored EVM addresses are lowercase,
 counsel Q1-Q4, smoke runs from Fly iad, GMX G1 and Nado (wave 2).
 
 Scope: add on-chain perp DEXs as **watch + discover** venues (a public address
@@ -1171,6 +1171,11 @@ the markers. Lighter's data arrangement approach is the founder's to send.
 (3) Lighter REST accelerator **off** (explorer only) until Q1 clears.
 (6) and (7) accepted as written. (4) and (5) wait for the G0 note. (8)
 counsel questions are held with the founder's other counsel items.
+(4) and (5) resolved 2026-10-22 after the G0 note: **model B** (payout-as-
+withdrawal with a capital floor) and the numeric policy **accepted** as the
+note states it (USD legs half-even at 6 dp per leg; quantities truncated at
+12 dp on the running position, position tolerance 0; `positions_verified`).
+GMX G1 can start.
 
 1. **Reverse the "no on-chain" scope line** in `BUILD_PLAN.md` for watching
    public addresses on Lighter, Pacifica and GMX (wave 1) and Nado (wave 2).

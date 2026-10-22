@@ -31,6 +31,10 @@ use or scraping). Until then, preflight (S9) keeps `gmx_arbitrum` out of prod
 
 ## Decisions requested (summary)
 
+**Decided 2026-10-22 by the founder: decision 4 = B (capital floor),
+decision 5 = accepted as recommended below** (quantities truncated on the
+running position, tolerance 0). G1 builds to these.
+
 **Decision 4, account model. Recommendation: B, payout-as-withdrawal with a
 capital floor, on balance**, over the plan's A (retained payout). The margin
 is narrow: A is the better pick if records on every venue must be measured
