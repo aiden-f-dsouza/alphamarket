@@ -1,0 +1,32 @@
+[
+ {
+  "tx_type": "L2Withdraw",
+  "hash": "e576563e3e3ea60bf7ddeffb225899a90d1b2a54acf14a9373e4cd85230a8bad28af29b219e1b1b7",
+  "time": "2026-10-17T07:03:00.661Z",
+  "pubdata": {
+   "withdraw_pubdata_v2": {
+    "from_account_index": "714710",
+    "asset_index": "USDC",
+    "route_type": "PERPS",
+    "amount": "10000000.000000"
+   }
+  },
+  "pubdata_type": "WithdrawV2",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2Withdraw",
+  "hash": "78e3b13a8f4c72bae6dbc9451ccd4ad59697e310359806fb44bc67f733bf152f618a34b4bcf37386",
+  "time": "2026-10-17T06:36:50.097Z",
+  "pubdata": {
+   "withdraw_pubdata_v2": {
+    "from_account_index": "714710",
+    "asset_index": "USDC",
+    "route_type": "PERPS",
+    "amount": "1000.000000"
+   }
+  },
+  "pubdata_type": "WithdrawV2",
+  "status": "executed"
+ }
+]

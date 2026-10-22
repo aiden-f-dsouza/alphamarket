@@ -43,7 +43,9 @@ def test_watch_address_is_well_formed_and_synthetic():
     assert re.fullmatch(r"0x[0-9a-f]{40}", seed_demo.WATCH_ADDRESS)
     assert seed_demo.WATCH_ADDRESS == "0x" + "de30" * 10  # not a generated or real address
     watch = [c for c in seed_demo.CREATORS if c.watch]
-    assert [c.venue for c in watch] == ["hyperliquid"]
+    # The Hyperliquid whale first; on-chain venue blocks add one watch each.
+    assert watch[0].venue == "hyperliquid" and watch[0].key_id == seed_demo.WATCH_ADDRESS
+    assert len({c.key_id for c in watch}) == len(watch)
     assert [c.handle for c in seed_demo.CREATORS if c.house] == ["koinelab"]
     # Every watch and tail names a seeded handle.
     handles = {c.handle for c in seed_demo.CREATORS}
@@ -91,8 +93,10 @@ def test_small_seed_has_a_house_strategy_and_a_private_watch(seeded):
         assert {r["operator"] for slug, r in rows.items() if slug != lab["slug"]} == {"creator"}
 
         watched = db.scalars(select(Strategy).where(Strategy.kind == StrategyKind.WATCH)).all()
-        assert len(watched) == 1
-        strategy = watched[0]
+        assert len(watched) == sum(c.watch for c in seed_demo.CREATORS)
+        strategy = next(
+            s for s in watched if db.get(VenueAccount, s.venue_account_id).venue == "hyperliquid"
+        )
         assert strategy.user_id == system[0].id and strategy.public is False
         assert strategy.slug == f"watch-{strategy.id}"
         assert strategy.name == "Hyperliquid 0xde30…de30"
@@ -140,12 +144,13 @@ def test_seed_stores_leaderboard_snapshots_with_the_watched_address(seeded):
     with sf() as db:
         snaps = db.scalars(select(LeaderboardSnapshot)).all()
         assert {(s.venue, s.period) for s in snaps} == {
-            ("hyperliquid", p) for p in seed_demo.LEADERBOARD_PERIODS
+            (v, p) for v in seed_demo.LEADERBOARD_SEEDS for p in seed_demo.LEADERBOARD_PERIODS
         }
         for s in snaps:
             assert len(s.rows) == 24
             assert all(re.fullmatch(r"0x[0-9a-f]{40}", r["address"]) for r in s.rows)
-            assert seed_demo.WATCH_ADDRESS in {r["address"] for r in s.rows}
+            if s.venue == "hyperliquid":
+                assert seed_demo.WATCH_ADDRESS in {r["address"] for r in s.rows}
         investor = db.scalar(select(User).where(User.email == f"investor@{seed_demo.EMAIL_DOMAIN}"))
         settings = get_settings()
         settings.watch_discover_enabled = True

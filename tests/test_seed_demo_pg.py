@@ -31,6 +31,7 @@ from alphamarket.models import (
     Strategy,
     StrategyKind,
     User,
+    VenueAccount,
     Watch,
 )
 from alphamarket.portfolio import portfolio_summary
@@ -94,7 +95,12 @@ def test_small_seed_through_the_real_pipeline(demo_db, demo_on):
         # Seeded slugs are the clean names, without the id suffix of a real connect.
         creators = [c for c in seed_demo.CREATORS if not c.watch]
         assert {seed_demo.slugify(c.strategy) for c in creators} == set(venues)
-        assert len(watched) == 1 and watched[0].slug == f"watch-{watched[0].id}"
+        assert len(watched) == sum(c.watch for c in seed_demo.CREATORS)
+        assert all(w.slug == f"watch-{w.id}" for w in watched)
+        # The Hyperliquid whale (on-chain venue blocks add one watch each).
+        watched = [
+            w for w in watched if db.get(VenueAccount, w.venue_account_id).venue == "hyperliquid"
+        ]
         assert "perp-momentum-btc-eth-sol" in venues
         listed = {r["slug"]: r for r in list_visible(db, include_incubating=True)}
         assert set(listed) == set(venues)  # every seeded creator strategy is public in DEMO_MODE

@@ -44,6 +44,9 @@ from alphamarket.connectors.kraken import (
     KrakenMarketData,
     underlying_asset,
 )
+from alphamarket.connectors.lighter import RATE_BUDGETS as LIGHTER_RATE_BUDGETS
+from alphamarket.connectors.lighter import WS_USERS_PER_IP as LIGHTER_WS_USERS_PER_IP
+from alphamarket.connectors.lighter import LighterConnector, LighterMarketData
 from alphamarket.connectors.polymarket import PolymarketConnector, PolymarketMarketData
 from alphamarket.connectors.snaptrade import SnapTradeConnector, SnapTradeMarketData
 
@@ -505,6 +508,53 @@ PROFILES: dict[str, VenueProfile] = {
     # Every profile there is watch only: credential=ADDRESS with its
     # address_kind, requires_partner_approval=True (no connect), tos_doc set.
     # ---- venue-lighter ----
+    # Watch only (docs/venues/lighter.md; onchain_perps_plan W-L). Its terms
+    # doc carries "Position: PENDING COUNSEL", so preflight keeps it out of
+    # prod WATCH_VENUES until counsel Q1 (or a written Lighter answer).
+    "lighter": VenueProfile(
+        venue="lighter",
+        display_name="Lighter",
+        envs=("prod",),
+        credential=CredentialKind.ADDRESS,
+        key_label="Wallet address",
+        secret_label=None,
+        key_help=(
+            "The 0x address of your Lighter account (the Ethereum address that owns "
+            "it; Koine reads its sub-accounts too). Nothing secret is involved: "
+            "Lighter history is public. You prove the address is yours by signing a "
+            "Koine message with the wallet; signing is not a transaction and cannot "
+            "move funds."
+        ),
+        balance_observable=True,
+        instrument=InstrumentKind.ASSET,
+        # Binary-era fields: prices and sizes are per instrument (price and
+        # size decimals add up to 6 on every market), so the finest global
+        # tick and step is 1 micro.
+        tick_micros=1,
+        contract_step_micros=1,
+        # Premium taker 2.8 bps at 0 LIT staked (docs "Account types",
+        # 2026-10-22), rounded UP to whole bps; Standard accounts pay 0.
+        fee_rate_bps=3,
+        fee_rounding_micros=1,  # fees are exact at 12 dp; paper rounds to the micro
+        # SIGNED_MESSAGE routes ownership through an EIP-191 signature by the
+        # address itself (claim_message; no master or vault indirection).
+        ownership=OwnershipProof.SIGNED_MESSAGE,
+        readonly_proof=ReadOnlyProof.NONE,
+        transfers_observable=True,
+        history_depth="all",  # the explorer log reaches back to genesis
+        quote_asset="USDC",
+        tos_doc="docs/venues/lighter.md",
+        requires_partner_approval=True,  # watch only: no connect
+        daily_resolution=False,
+        rate_budgets=LIGHTER_RATE_BUDGETS,  # API 60/min + explorer 90 weight/min, per IP
+        paper_fee_model=PaperFeeModel.BPS_OF_NOTIONAL,
+        asset_classes=("crypto",),  # synthetic equities, FX, commodities: copyable=False
+        leaderboard_periods=("day", "week", "month", "all"),  # 24h, 7d, 30d, all
+        # NUDGE: frames are REST-shaped trades, but the legs come from replay
+        # state (derived PnL and funding) only the poller holds.
+        stream_mode=StreamMode.NUDGE,
+        stream_users_per_ip=LIGHTER_WS_USERS_PER_IP,
+    ),
     # ---- end venue-lighter ----
     # ---- venue-pacifica ----
     # ---- end venue-pacifica ----
@@ -618,6 +668,7 @@ _BUILDERS: dict[str, Callable[[str, str, str | None], VenueConnector]] = {
     "snaptrade": _build_snaptrade,  # venue-snaptrade
     # ---- on-chain perps (onchain_perps_plan S8): one block per venue ----
     # ---- venue-lighter ----
+    "lighter": lambda venue_env, key_id, secret: LighterConnector(address=key_id),
     # ---- end venue-lighter ----
     # ---- venue-pacifica ----
     # ---- end venue-pacifica ----
@@ -692,6 +743,11 @@ _MARKET_DATA_BUILDERS: dict[str, Callable[[str], MarketDataSource]] = {
     "snaptrade": lambda venue_env: SnapTradeMarketData(),  # ---- venue-snaptrade ----
     # ---- on-chain perps (onchain_perps_plan S8): one block per venue ----
     # ---- venue-lighter ----
+    # pnlLeaderboard pages stop once twice the snapshot's rows clear the floor.
+    "lighter": lambda venue_env: LighterMarketData(
+        leaderboard_keep=2 * get_settings().watch_discover_rows,
+        leaderboard_min_account_value=str(get_settings().watch_discover_min_account_value),
+    ),
     # ---- end venue-lighter ----
     # ---- venue-pacifica ----
     # ---- end venue-pacifica ----
@@ -727,6 +783,7 @@ CASH_AT_PAR: frozenset[str] = (
     # ---- on-chain perps (onchain_perps_plan S8): one block per venue, each
     # adding `| <Venue>MarketData.STABLECOINS_AT_PAR` if it has codes of its own ----
     # ---- venue-lighter ----
+    # (none: Lighter's only cash asset is USDC, already at par)
     # ---- end venue-lighter ----
     # ---- venue-pacifica ----
     # ---- end venue-pacifica ----

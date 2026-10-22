@@ -1,0 +1,97 @@
+[
+ {
+  "tx_type": "L2Transfer",
+  "hash": "c506e36c8563eff1aef1efb95ebfcead18d2cfc71594b2f0ba6d88998a9b1e12a2be78d0ce87c64b",
+  "time": "2026-10-20T12:41:31.279Z",
+  "pubdata": {
+   "l2_transfer_pubdata_v2": {
+    "from_account_index": "742190",
+    "to_account_index": "714710",
+    "fee_account_index": "675395",
+    "asset_index": "LIT",
+    "from_route_type": "SPOT",
+    "to_route_type": "SPOT",
+    "amount": "3.25670000",
+    "usdc_fee": "0.000000"
+   }
+  },
+  "pubdata_type": "L2TransferV2",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2Transfer",
+  "hash": "0ed6e6e693bc9ae6b380e73a53492af72b089add87a1bcb70deb921f945b576da0b17340e79efb33",
+  "time": "2026-10-17T06:41:42.562Z",
+  "pubdata": {
+   "l2_transfer_pubdata_v2": {
+    "from_account_index": "714710",
+    "to_account_index": "731033",
+    "fee_account_index": "675395",
+    "asset_index": "USDC",
+    "from_route_type": "PERPS",
+    "to_route_type": "PERPS",
+    "amount": "3000000.000000",
+    "usdc_fee": "0.000000"
+   }
+  },
+  "pubdata_type": "L2TransferV2",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2Transfer",
+  "hash": "c2da6f62ab99bf9faaac161db9a84e84f02763783bfbce0b527d0506b220f1376d250c097bba6dde",
+  "time": "2026-10-17T06:38:10.379Z",
+  "pubdata": {
+   "l2_transfer_pubdata_v2": {
+    "from_account_index": "714710",
+    "to_account_index": "731033",
+    "fee_account_index": "675395",
+    "asset_index": "USDC",
+    "from_route_type": "PERPS",
+    "to_route_type": "PERPS",
+    "amount": "1200.000000",
+    "usdc_fee": "0.000000"
+   }
+  },
+  "pubdata_type": "L2TransferV2",
+  "status": "executed"
+ },
+ {
+  "tx_type": "L2Transfer",
+  "hash": "5d07b24e9e85209c220ad9521c76fd347d9ddb64d8318b64d68f08d98330c4eacce7fc861594bed0",
+  "time": "2026-10-17T06:17:52.607Z",
+  "pubdata": {
+   "l2_transfer_pubdata_v2": {
+    "from_account_index": "714710",
+    "to_account_index": "714710",
+    "fee_account_index": "675395",
+    "asset_index": "USDC",
+    "from_route_type": "SPOT",
+    "to_route_type": "PERPS",
+    "amount": "1000000.000000",
+    "usdc_fee": "0.000000"
+   }
+  },
+  "pubdata_type": "L2TransferV2",
+  "status": "nothing_to_execute"
+ },
+ {
+  "tx_type": "L2Transfer",
+  "hash": "ea55d995f0410ca85d69cdcd4714df571dd4caa18ac007652b21ad43dba3d239661f69e2a9f4bce5",
+  "time": "2026-10-10T06:43:13.09Z",
+  "pubdata": {
+   "l2_transfer_pubdata_v2": {
+    "from_account_index": "714710",
+    "to_account_index": "714710",
+    "fee_account_index": "675395",
+    "asset_index": "USDC",
+    "from_route_type": "PERPS",
+    "to_route_type": "SPOT",
+    "amount": "500000.000000",
+    "usdc_fee": "0.000000"
+   }
+  },
+  "pubdata_type": "L2TransferV2",
+  "status": "nothing_to_execute"
+ }
+]

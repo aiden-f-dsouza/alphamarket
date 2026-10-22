@@ -27,7 +27,7 @@ def closed(client):
 
 def test_the_gated_venues_are_the_ones_awaiting_approval():
     gated = sorted(v for v, p in PROFILES.items() if p.requires_partner_approval)
-    assert gated == ["alpaca", "coinbase", "ibkr", "kraken", "snaptrade"]
+    assert gated == ["alpaca", "coinbase", "ibkr", "kraken", "lighter", "snaptrade"]
 
 
 def test_api_connect_is_refused_before_anything_is_checked(closed):

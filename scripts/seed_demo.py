@@ -599,6 +599,27 @@ CREATORS = (
     # adds its one watched synthetic address inside its own marked block, a
     # CreatorSpec with watch=True like "whale" above.
     # ---- venue-lighter ----
+    # A public Lighter address watched privately: perps, same pipeline as the
+    # Hyperliquid whale ("11de" repeated: obviously synthetic, never anyone's).
+    CreatorSpec(
+        handle="lighterdesk",
+        display_name="Lighter perp desk",
+        venue="lighter",
+        strategy="Watched Lighter address",
+        description="",
+        tags="",
+        history_days=150,
+        cash=60_000,
+        kind="perp",
+        symbols=(("BTC", 0.6), ("ETH", 0.4)),
+        skill=0.58,
+        trades_per_week=3.5,
+        hold_hours=(6, 72),
+        frac=(0.5, 1.2),
+        fee_bps=2.8,
+        watch=True,
+        key_id="0x" + "11de" * 10,
+    ),
     # ---- end venue-lighter ----
     # ---- venue-pacifica ----
     # ---- end venue-pacifica ----
@@ -607,6 +628,11 @@ CREATORS = (
     # ---- venue-nado ----
     # ---- end venue-nado ----
 )
+
+# Venues whose seeded accounts trade perps (simulated market data lists the
+# PERP_DP coins and serves funding and margin tiers for them). Derived from
+# CREATORS, so a venue block that adds a perp CreatorSpec needs nothing else.
+PERP_VENUES = frozenset(c.venue for c in CREATORS if c.kind == "perp")
 
 # (investor email local part, strategy handle, dollars, drawdown limit bps, days before the end)
 ALLOCATIONS = (
@@ -624,6 +650,7 @@ WATCHES = (
     ("investor", "whale", "Funding-aware perp whale"),
     ("analyst", "whale", "BTC momentum book to study"),
     # ---- venue-lighter ----
+    ("investor", "lighterdesk", "Lighter BTC/ETH desk"),
     # ---- end venue-lighter ----
     # ---- venue-pacifica ----
     # ---- end venue-pacifica ----
@@ -770,7 +797,7 @@ class World:
                 venue=c.venue,
                 key_id=key_id,
                 venue_env=env,
-                cash_asset="USDC" if c.venue == "hyperliquid" else "USD",
+                cash_asset=registry.get_profile(c.venue).quote_asset,
                 cash_dp=CASH_DP.get(c.venue, 6),
                 anchor_at=self.anchor_at[c.handle],
                 anchor_cash_atoms=c.cash * 10 ** CASH_DP.get(c.venue, 6),
@@ -1769,7 +1796,7 @@ class SimMarketData(AssetMarketData):
                 inst = spot_instrument(venue, sym)
                 self.listed.append(inst)
                 self.symbols[inst.symbol] = (sym, "spot")
-        elif venue == "hyperliquid":
+        elif venue in PERP_VENUES:
             for coin in PERP_DP:
                 self.listed.append(perp_instrument(coin))
                 self.symbols[coin] = (coin, "perp")
@@ -1813,7 +1840,7 @@ class SimMarketData(AssetMarketData):
         return Quote(symbol=symbol, bid=str(bid), ask=str(ask), last=str(mid), as_of=now)
 
     def fetch_funding_history(self, symbol: str, start: datetime, end: datetime):
-        if self.venue != "hyperliquid" or symbol not in PERP_DP:
+        if self.venue not in PERP_VENUES or symbol not in PERP_DP:
             return []
         now = _now()
         return [
@@ -1835,7 +1862,7 @@ class SimMarketData(AssetMarketData):
         ]
 
     def fetch_margin_tiers(self, symbol: str) -> list[MarginTier]:
-        if self.venue != "hyperliquid" or symbol not in PERP_MAX_LEVERAGE:
+        if self.venue not in PERP_VENUES or symbol not in PERP_MAX_LEVERAGE:
             return []
         return [MarginTier(lower_bound="0", max_leverage=PERP_MAX_LEVERAGE[symbol])]
 
@@ -1898,7 +1925,7 @@ def sim_registry(world: World) -> Iterator[None]:
         def build(venue_env: str) -> MarketDataSource:
             if venue == "kalshi":
                 return SimKalshiMarketData(world)
-            if venue in SPOT_SYMBOLS or venue in ("hyperliquid", "alpaca"):
+            if venue in SPOT_SYMBOLS or venue in PERP_VENUES or venue == "alpaca":
                 return SimMarketData(world, venue)
             return NoMarketData(venue)
 
@@ -2086,9 +2113,14 @@ class Sim:
 
     def _system_user(self, db: Session) -> User:
         """The demo's system user (invariant 7: is_demo too). Made here, before
-        anything could call watchlist.system_user, so that is the one it finds."""
+        anything could call watchlist.system_user, so that is the one it finds;
+        every later watch (one per on-chain venue block) reuses it."""
+        email = f"{SYSTEM_LOCAL}@{EMAIL_DOMAIN}"
+        existing = db.scalar(select(User).where(User.email == email))
+        if existing is not None:
+            return existing
         user = User(
-            email=f"{SYSTEM_LOCAL}@{EMAIL_DOMAIN}",
+            email=email,
             password_hash=UNUSABLE_PASSWORD_HASH,
             display_name="Koine watchlist",
             is_demo=True,
@@ -2357,6 +2389,8 @@ def _hyperliquid_board_address(i: int) -> str:
 LEADERBOARD_SEEDS = {
     "hyperliquid": _hyperliquid_board_address,
     # ---- venue-lighter ----
+    # "11c0" repeated (synthetic), with the seeded Lighter watch at rank 3.
+    "lighter": lambda i: "0x" + "11de" * 10 if i == 2 else "0x" + f"11c0{i:04x}" + "11c0" * 8,
     # ---- end venue-lighter ----
     # ---- venue-pacifica ----
     # ---- end venue-pacifica ----

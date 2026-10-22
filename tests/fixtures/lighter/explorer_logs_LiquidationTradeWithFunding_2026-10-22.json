@@ -1,0 +1,112 @@
+[
+ {
+  "tx_type": "InternalLiquidatePosition",
+  "hash": "0000001efc0599e5000001a120e1a11a000000000000000000000000000000000000000000000000",
+  "time": "2026-10-09T13:37:00.186Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 1,
+    "market_index": 0,
+    "is_taker_ask": 1,
+    "maker_fee": 28,
+    "taker_fee": 10000,
+    "taker_account_index": "281474976508464",
+    "maker_account_index": "714710",
+    "fee_account_index": "281474976710654",
+    "price": "2477.12",
+    "size": "0.0152",
+    "funding_rate_prefix_sum": 35035083192
+   }
+  },
+  "pubdata_type": "LiquidationTradeWithFunding",
+  "status": "executed"
+ },
+ {
+  "tx_type": "InternalLiquidatePosition",
+  "hash": "0000001efc042592000001a120e1898a000000000000000000000000000000000000000000000000",
+  "time": "2026-10-09T13:36:54.154Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 1,
+    "market_index": 0,
+    "is_taker_ask": 1,
+    "maker_fee": 28,
+    "taker_fee": 10000,
+    "taker_account_index": "281474976544632",
+    "maker_account_index": "714710",
+    "fee_account_index": "281474976710654",
+    "price": "2477.96",
+    "size": "0.8072",
+    "funding_rate_prefix_sum": 35035083192
+   }
+  },
+  "pubdata_type": "LiquidationTradeWithFunding",
+  "status": "executed"
+ },
+ {
+  "tx_type": "InternalLiquidatePosition",
+  "hash": "0000001e507e5c4c000001a0f6987cca000000000000000000000000000000000000000000000000",
+  "time": "2026-10-01T08:33:03.69Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 1,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 28,
+    "taker_fee": 10000,
+    "taker_account_index": "281474976513555",
+    "maker_account_index": "714710",
+    "fee_account_index": "281474976710654",
+    "price": "83133.5",
+    "size": "0.01001",
+    "funding_rate_prefix_sum": 114968098359
+   }
+  },
+  "pubdata_type": "LiquidationTradeWithFunding",
+  "status": "executed"
+ },
+ {
+  "tx_type": "InternalLiquidatePosition",
+  "hash": "0000001e04bbb0d3000001a0e74624d4000000000000000000000000000000000000000000000000",
+  "time": "2026-09-28T09:08:48.98Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 1,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 28,
+    "taker_fee": 10000,
+    "taker_account_index": "281474976570013",
+    "maker_account_index": "714710",
+    "fee_account_index": "281474976710654",
+    "price": "82602.7",
+    "size": "0.00645",
+    "funding_rate_prefix_sum": 114766364528
+   }
+  },
+  "pubdata_type": "LiquidationTradeWithFunding",
+  "status": "executed"
+ },
+ {
+  "tx_type": "InternalLiquidatePosition",
+  "hash": "0000001e04bbaf0e000001a0e74624b5000000000000000000000000000000000000000000000000",
+  "time": "2026-09-28T09:08:48.949Z",
+  "pubdata": {
+   "trade_pubdata_with_funding": {
+    "trade_type": 1,
+    "market_index": 1,
+    "is_taker_ask": 1,
+    "maker_fee": 28,
+    "taker_fee": 10000,
+    "taker_account_index": "281474976602843",
+    "maker_account_index": "714710",
+    "fee_account_index": "281474976710654",
+    "price": "82602.7",
+    "size": "0.00227",
+    "funding_rate_prefix_sum": 114766364528
+   }
+  },
+  "pubdata_type": "LiquidationTradeWithFunding",
+  "status": "executed"
+ }
+]

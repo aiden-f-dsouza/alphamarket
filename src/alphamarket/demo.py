@@ -1502,6 +1502,7 @@ _DISCOVER_VENUES: dict[str, float] = {
     "hyperliquid": 1.0,
     "polymarket": 0.4,
     # ---- venue-lighter ----
+    "lighter": 0.55,
     # ---- end venue-lighter ----
     # ---- venue-pacifica ----
     # ---- end venue-pacifica ----
