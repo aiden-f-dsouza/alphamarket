@@ -1233,9 +1233,14 @@ def creator_profile(request: Request, handle: str, db: Session = Depends(get_db)
 
 @router.get("/feed", response_class=HTMLResponse)
 def feed(request: Request, db: Session = Depends(get_db)):
-    _demo_or_404()
-    f = demo.feed()
     user = _user(request, db)
+    if not _demo():
+        if user is None:
+            return RedirectResponse(login_url("/feed"), status_code=303)
+        resp = _render(request, "feed_real.html", user=user, noindex=True, **_real_feed(db, user))
+        resp.headers["Cache-Control"] = "private, no-store"
+        return resp
+    f = demo.feed()
     if user is not None and _seeded(db):
         # w3-seed: a logged-in visitor of a seeded demo sees the real signals
         # of the strategies they follow or tail (follows.feed_items) as posts;
@@ -1293,6 +1298,45 @@ def _post_body(item: dict, strategy_name: str) -> str:
         f"{strategy_name}: {item['action']} {item['count']:g} {item['side'].upper()} "
         f"on {item['ticker']} at {cents}¢{size}."
     )
+
+
+def _real_feed(db: Session, user: User, limit: int = 30) -> dict:
+    """Context for the real /feed: platform-computed lines from the strategies
+    the user follows or paper-tails; private watches never appear."""
+    followed_ids = set(
+        db.scalars(select(Follow.strategy_id).where(Follow.user_id == user.id)).all()
+    )
+    tailed_ids = set(
+        db.scalars(select(Allocation.strategy_id).where(Allocation.user_id == user.id)).all()
+    )
+    ids = followed_ids | tailed_ids
+    strategies = db.scalars(select(Strategy).where(Strategy.id.in_(ids))).all() if ids else []
+    visible = sorted(
+        (s for s in strategies if publicly_visible(db, s)), key=lambda s: s.name.lower()
+    )
+    tailed_slugs = {s.slug for s in visible if s.id in tailed_ids}
+    now = datetime.now(UTC)
+    items = [
+        {
+            "slug": item["strategy_slug"],
+            "name": item["strategy_name"],
+            "body": _post_body(item, item["strategy_name"]),
+            "when": _ago(item["at"], now),
+            "tailing": item["strategy_slug"] in tailed_slugs,
+        }
+        for item in feed_items(db, visible, limit=limit)
+    ]
+    following = [
+        {"slug": s.slug, "name": s.name, "tailing": s.slug in tailed_slugs}
+        for s in visible
+        if s.id in followed_ids
+    ]
+    tail_only = [
+        {"slug": s.slug, "name": s.name}
+        for s in visible
+        if s.id in tailed_ids and s.id not in followed_ids
+    ]
+    return {"items": items, "following": following, "tail_only": tail_only}
 
 
 def _feed_posts(db: Session, user: User, limit: int = 12) -> list[dict]:

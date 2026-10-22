@@ -198,7 +198,7 @@
     <a class="brand" href="/">{{ m.logo(30) }}Koine</a>
     <div class="nav-links">
       <a href="/marketplace" class="{{ 'active' if nav == 'marketplace' }}">Marketplace</a>
-      {% if settings.demo_mode %}<a href="/feed" class="{{ 'active' if nav == 'feed' }}">Feed</a>{% endif %}
+      {% if settings.demo_mode or user %}<a href="/feed" class="{{ 'active' if nav == 'feed' }}">Feed</a>{% endif %}
       {% if settings.demo_mode and not user %}<a href="/watch" class="{{ 'active' if nav == 'watch' }}">Watchlist</a>{% endif %}
       <details class="menu {{ 'active' if in_learn }}">
         <summary>Learn {{ m.icon("chevd", 12, "currentColor", 2) }}</summary>
@@ -233,7 +233,7 @@
       <summary class="btn secondary sm" aria-label="Menu">Menu {{ m.icon("chevd", 12, "currentColor", 2) }}</summary>
       <div class="drop">
         <a href="/marketplace" class="{{ 'on' if nav == 'marketplace' }}">Marketplace</a>
-        {% if settings.demo_mode %}<a href="/feed" class="{{ 'on' if nav == 'feed' }}">Feed</a>{% endif %}
+        {% if settings.demo_mode or user %}<a href="/feed" class="{{ 'on' if nav == 'feed' }}">Feed</a>{% endif %}
         {% if settings.demo_mode and not user %}<a href="/watch" class="{{ 'on' if nav == 'watch' }}">Watchlist</a>{% endif %}
         <a href="/creators" class="{{ 'on' if nav == 'creators' }}">For creators</a>
         <hr>
@@ -261,7 +261,7 @@
     <p class="small text2" style="max-width:300px">Invest together. A verified marketplace for trading strategies: records are computed from venue data, never typed in.</p>
     <span class="mono muted" style="font-size:12px">Koine never holds or moves anyone's money. Tails are paper only.</span>
   </div>
-  <div class="col"><span class="label">Product</span><a href="/marketplace">Marketplace</a>{% if settings.demo_mode %}<a href="/feed">Feed</a><a href="/portfolio">Portfolio</a>{% endif %}<a href="/creators">For creators</a></div>
+  <div class="col"><span class="label">Product</span><a href="/marketplace">Marketplace</a>{% if settings.demo_mode or user %}<a href="/feed">Feed</a><a href="/portfolio">Portfolio</a>{% endif %}<a href="/creators">For creators</a></div>
   <div class="col"><span class="label">Trust</span><a href="/verification">Verification</a><a href="/transparency">Transparency</a><a href="/security">Security &amp; privacy</a><a href="/watch/optout">Opt out of watchlists</a></div>
   <div class="col"><span class="label">Learn</span><a href="/research">Research</a><a href="/verification">Verification</a><a href="/transparency">Transparency</a></div>
   <div class="col"><span class="label">Account</span>{% if user %}<a href="/dashboard">Dashboard</a>{% else %}<a href="/login">Log in</a><a href="/signup">Create account</a>{% endif %}<a href="/invite">Invite</a></div>
