@@ -390,4 +390,3 @@ offers its addresses as watch candidates. See counsel Q2 and Q4.
 ## Methodology notes
 
 Merged into docs/methodology.md (served at /methodology) on 2026-10-22; edit them there.
-

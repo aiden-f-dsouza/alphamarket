@@ -430,4 +430,3 @@ with the rest.
 ## Methodology notes
 
 Merged into docs/methodology.md (served at /methodology) on 2026-10-22; edit them there.
-
